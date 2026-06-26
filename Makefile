@@ -4,7 +4,7 @@ FNL_DIR = fnl
 FNL_SOURCES = $(shell find $(FNL_DIR) -name "*.fnl")
 LUA_TARGETS = $(FNL_SOURCES:$(FNL_DIR)/%.fnl=%.lua)
 
-.PHONY: build clean deps
+.PHONY: build clean deps install
 
 deps:
 	luarocks install lunajson
@@ -16,6 +16,9 @@ build: $(LUA_TARGETS)
 $(LUA_TARGETS): %.lua: $(FNL_DIR)/%.fnl
 	@mkdir -p $(dir $@)
 	$(FENNEL) --compile $< > $@
+
+install: build
+	install -m 755 bin/anis /usr/local/bin/anis
 
 clean:
 	rm -f $(LUA_TARGETS)

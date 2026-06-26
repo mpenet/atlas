@@ -28,5 +28,10 @@ build = {
     ["anis.negotiate"] = "anis/negotiate.lua",
     ["anis.doc"]      = "anis/doc.lua",
     ["anis.http"]     = "anis/http.lua",
+    ["anis.pretty"]   = "anis/pretty.lua",
+    ["anis.cli"]      = "anis/cli.lua",
+  },
+  install = {
+    bin = { "bin/anis" },
   },
 }

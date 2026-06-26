@@ -109,7 +109,7 @@ local function make_operation(client, path, method, op_spec)
   local function _19_(_, ...)
     return f(...)
   end
-  return setmetatable({["fnl/docstring"] = doc.build(path, method, op_spec)}, {__call = _19_})
+  return setmetatable({["fnl/docstring"] = doc.build(path, method, op_spec), ["has-body?"] = has_body_3f, ["n-path"] = n_path}, {__call = _19_})
 end
 local function client(schema, _3fopts)
   local source_url
