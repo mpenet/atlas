@@ -20,15 +20,12 @@ make build   # requires fennel on PATH
 
 ```fennel
 (local anis (require :anis))
-(local http  (require :anis.http))
-(local json  (require :lunajson))
 
-(local schema (anis.load-schema "petstore.json" json.decode))
+; from a local file
+(local api (anis.build-client (anis.load-schema "petstore.json")))
 
-(local api (anis.build-client schema
-                               "https://petstore3.swagger.io/api/v3"
-                               (http.make json.encode json.decode)
-                               {:headers {:authorization "Bearer <token>"}}))
+; or directly from a URL
+(local api (anis.build-client (anis.load-schema "https://petstore3.swagger.io/api/v3/openapi.json")))
 
 (api.get-pet-by-id api 1)
 (api.add-pet api {:name "Buddy" :status "available"})
@@ -36,25 +33,40 @@ make build   # requires fennel on PATH
 (api.find-pets-by-status api {:status "available"})
 ```
 
+The base URL is read from `servers[1].url` in the schema. Override it via opts:
+
+```fennel
+(local api (anis.build-client (anis.load-schema "petstore.json")
+                               {:base-url "https://staging.example.com/api/v3"
+                                :headers {:authorization "Bearer <token>"}}))
+```
+
 ## API
 
 ### `anis.load-schema`
 
 ```fennel
-(anis.load-schema path json-decode)
+(anis.load-schema path)
 ```
 
-Reads an OpenAPI 3.x JSON file and returns a parsed schema table.
+Reads an OpenAPI 3.x JSON schema from a local file or remote URL and returns a parsed schema table.
 
 | Arg | Type | Description |
 |-----|------|-------------|
-| `path` | string | Path to the JSON schema file |
-| `json-decode` | fn | `(fn [string]) → table` — any JSON decoder |
+| `path` | string | Local file path or `http(s)://` URL |
+
+```fennel
+; local file
+(anis.load-schema "petstore.json")
+
+; remote URL
+(anis.load-schema "https://petstore3.swagger.io/api/v3/openapi.json")
+```
 
 ### `anis.build-client`
 
 ```fennel
-(anis.build-client schema base-url http-fn ?opts)
+(anis.build-client schema ?opts)
 ```
 
 Builds a client table from a parsed schema. Each `operationId` in the schema becomes a function on the returned table, named in kebab-case.
@@ -62,9 +74,13 @@ Builds a client table from a parsed schema. Each `operationId` in the schema bec
 | Arg | Type | Description |
 |-----|------|-------------|
 | `schema` | table | Parsed OpenAPI schema |
-| `base-url` | string | Base URL, e.g. `"https://api.example.com"` |
-| `http-fn` | fn | See [HTTP adapter](#http-adapter) |
-| `?opts` | table | Optional. `{:headers {}}` for default headers sent with every request |
+| `?opts` | table | Optional — see below |
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `:base-url` | string | Overrides `schema.servers[1].url` |
+| `:headers` | table | Default headers sent with every request |
+| `:http-fn` | fn | Custom HTTP backend — see [HTTP adapter](#http-adapter) |
 
 ### Calling operations
 
@@ -94,29 +110,22 @@ Signature pattern: `(op-name client ...path-params ?body ?query)`
 
 ### HTTP adapter
 
-`anis.http/make` returns an `http-fn` backed by luasocket + luasec.
+The default adapter uses luasocket + luasec with lunajson. It:
 
-```fennel
-(local http (require :anis.http))
-(local http-fn (http.make json-encode json-decode))
-```
-
-| Arg | Type | Description |
-|-----|------|-------------|
-| `json-encode` | fn | `(fn [table]) → string` |
-| `json-decode` | fn | `(fn [string]) → table` |
-
-The adapter:
 - Routes `https://` through luasec, `http://` through luasocket
 - URL-encodes query params and appends to URL
 - Sets `content-type` and `accept` headers from the schema
 - Sets `content-length` automatically when a body is present
 - Returns `{:status code :headers {} :body table-or-nil}`
 
-To use a different HTTP backend, pass any function with the signature:
+To use a custom HTTP backend, pass `:http-fn` in opts:
 
 ```fennel
-(fn http-fn [{:method :url :headers :query :body}]) → response
+(fn my-http [{:method :url :headers :query :body}]
+  ; ... return {:status code :headers {} :body table-or-nil}
+  )
+
+(local api (anis.build-client schema {:http-fn my-http}))
 ```
 
 ### Content negotiation

@@ -1,6 +1,7 @@
 (local socket-http (require :socket.http))
 (local https (require :ssl.https))
 (local ltn12 (require :ltn12))
+(local json (require :lunajson))
 
 (fn url-encode [s]
   ((tostring s):gsub "[^%w%-%.%_%~]"
@@ -18,29 +19,25 @@
   (let [qs (encode-query query)]
     (if qs (.. url "?" qs) url)))
 
-(fn make [json-encode json-decode]
-  "Returns an http-fn for anis.build-client using luasocket + luasec.
-  json-encode — (fn [table]) → string
-  json-decode — (fn [string]) → table"
-  (fn [req]
-    (let [url (build-url req.url req.query)
-          requester (if (url:match "^https://") https socket-http)
-          payload (when req.body (json-encode req.body))
-          headers (collect [k v (pairs (or req.headers {}))] k v)
-          body-out []]
-      (when payload
-        (tset headers :content-length (tostring (length payload))))
-      (let [(ok code resp-headers) (requester.request
-                                     {:url url
-                                      :method req.method
-                                      :headers headers
-                                      :source (when payload
-                                                (ltn12.source.string payload))
-                                      :sink (ltn12.sink.table body-out)})]
-        (assert ok (tostring code))
-        (let [raw (table.concat body-out)]
-          {:status code
-           :headers resp-headers
-           :body (when (> (length raw) 0) (json-decode raw))})))))
+(fn request [req]
+  (let [url (build-url req.url req.query)
+        requester (if (url:match "^https://") https socket-http)
+        payload (when req.body (json.encode req.body))
+        headers (collect [k v (pairs (or req.headers {}))] k v)
+        body-out []]
+    (when payload
+      (tset headers :content-length (tostring (length payload))))
+    (let [(ok code resp-headers) (requester.request
+                                   {:url url
+                                    :method req.method
+                                    :headers headers
+                                    :source (when payload
+                                              (ltn12.source.string payload))
+                                    :sink (ltn12.sink.table body-out)})]
+      (assert ok (tostring code))
+      (let [raw (table.concat body-out)]
+        {:status code
+         :headers resp-headers
+         :body (when (> (length raw) 0) (json.decode raw))}))))
 
-{: make}
+{: request}

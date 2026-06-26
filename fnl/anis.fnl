@@ -1,6 +1,11 @@
 (local util (require :anis.util))
 (local negotiate (require :anis.negotiate))
 (local doc (require :anis.doc))
+(local json (require :lunajson))
+(local http (require :anis.http))
+(local ltn12 (require :ltn12))
+(local socket-http (require :socket.http))
+(local https (require :ssl.https))
 
 (fn make-operation [path method op-spec]
   (let [param-names (util.extract-path-params path)
@@ -23,15 +28,17 @@
                                :headers headers})))]
     (setmetatable f {:fnl/docstring (doc.build path method op-spec)})))
 
-(fn build-client [schema base-url http-fn ?opts]
+(fn build-client [schema ?opts]
   "Build an API client from an OpenAPI 3.x schema.
 
-  schema   — parsed schema table
-  base-url — e.g. \"https://api.example.com\"
-  http-fn  — (fn [{:method :url :headers :query :body}]) → response
-  ?opts    — {:headers {}} for default request headers (auth etc.)"
-  (let [client {:base-url base-url
-                :http-fn http-fn
+  schema — parsed schema table
+  ?opts  — {:base-url \"https://...\" :headers {} :http-fn custom-fn}
+           base-url defaults to schema.servers[1].url"
+  (let [base-url (or (?. ?opts :base-url)
+                     (?. schema :servers 1 :url)
+                     (error "no base-url: pass via ?opts or add servers to schema"))
+        client {:base-url base-url
+                :http-fn (or (?. ?opts :http-fn) http.request)
                 :headers (or (?. ?opts :headers) {})}]
     (each [path methods (pairs schema.paths)]
       (each [method op-spec (pairs methods)]
@@ -41,12 +48,20 @@
                 (make-operation path method op-spec)))))
     client))
 
-(fn load-schema [path json-decode]
-  "Load an OpenAPI schema from a JSON file.
-  json-decode — (fn [string]) → table"
-  (let [f (assert (io.open path :r))
-        content (f:read :*a)]
-    (f:close)
-    (json-decode content)))
+(fn load-schema [path]
+  "Load an OpenAPI schema from a local file path or http(s):// URL."
+  (let [content (if (path:match "^https?://")
+                    (let [requester (if (path:match "^https://") https socket-http)
+                          body-out []
+                          (ok code) (requester.request {:url path
+                                                        :method :GET
+                                                        :sink (ltn12.sink.table body-out)})]
+                      (assert ok (tostring code))
+                      (table.concat body-out))
+                    (let [f (assert (io.open path :r))
+                          c (f:read :*a)]
+                      (f:close)
+                      c))]
+    (json.decode content)))
 
 {: build-client : load-schema}
