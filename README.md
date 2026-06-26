@@ -145,7 +145,7 @@ GET /pet/{petId}
 
 Find pet by ID.
 
-Usage: (get-pet-by-id client petId)
+Usage: (get-pet-by-id petId)
 
 Path params:
   petId          integer [required] — ID of pet to return
@@ -153,6 +153,97 @@ Path params:
 Responses:
   200    successful operation
   404    Pet not found
+```
+
+## CLI
+
+`anis` ships with a command-line client.
+
+### Install
+
+```sh
+make install   # installs bin/anis to /usr/local/bin
+```
+
+Or via luarocks (includes the binary):
+
+```sh
+luarocks install anis
+```
+
+### Usage
+
+```
+anis <schema-or-profile> [operation] [path-params...] [options]
+```
+
+```sh
+# list all operations
+anis https://petstore3.swagger.io/api/v3/openapi.json --list
+
+# show operation documentation
+anis https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id --help
+
+# call an operation
+anis https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
+
+# with query params
+anis https://petstore3.swagger.io/api/v3/openapi.json find-pets-by-status --query.status=available
+
+# with request body
+anis https://petstore3.swagger.io/api/v3/openapi.json add-pet --body '{"name":"Rex","status":"available"}'
+anis https://petstore3.swagger.io/api/v3/openapi.json add-pet -d '{"name":"Rex","status":"available"}'
+
+# with per-request headers and timeout
+anis https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 --header.x-request-id=abc --timeout=5
+```
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--list` | List all operations with summaries |
+| `--help` | Show full documentation for an operation |
+| `--body=JSON` | Request body as a JSON string |
+| `-d JSON` | Request body (alternative form) |
+| `--query.KEY=VAL` | Query parameter |
+| `--header.KEY=VAL` | Per-request header |
+| `--timeout=N` | Timeout in seconds |
+| `--base-url=URL` | Override the base URL from the schema |
+| `--output=FORMAT` | Output format: `json` (default), `raw`, `status`, `headers` |
+| `--no-color` | Disable colored output |
+
+### Profiles
+
+Save named API configurations in `~/.config/anis/config.json` to avoid repeating schema URLs and credentials:
+
+```json
+{
+  "profiles": {
+    "petstore": {
+      "schema": "https://petstore3.swagger.io/api/v3/openapi.json",
+      "timeout": 30
+    },
+    "myapi": {
+      "schema": "https://api.example.com/openapi.json",
+      "base-url": "https://staging.example.com",
+      "headers": {
+        "authorization": "Bearer <token>"
+      },
+      "ssl": {
+        "cafile": "/etc/ssl/ca.pem"
+      }
+    }
+  }
+}
+```
+
+Then use the profile name instead of the URL:
+
+```sh
+anis petstore --list
+anis petstore get-pet-by-id 42
+anis myapi --list
 ```
 
 ## License
