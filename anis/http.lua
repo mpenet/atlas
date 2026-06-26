@@ -39,12 +39,13 @@ local function request(req)
   else
     requester = socket_http
   end
-  local payload
+  local ok_enc, payload = nil, nil
   if req.body then
-    payload = json.encode(req.body)
+    ok_enc, payload = pcall(json.encode, req.body)
   else
-    payload = nil
+    ok_enc, payload = true, nil
   end
+  assert(ok_enc, string.format("failed to encode request body: %s", tostring(payload)))
   local headers
   do
     local tbl_16_ = {}
@@ -77,14 +78,19 @@ local function request(req)
   else
   end
   local ok, code, resp_headers = requester.request(req_table)
-  assert(ok, tostring(code))
+  assert(ok, string.format("%s %s failed: %s", req.method, url, tostring(code)))
   local raw = table.concat(body_out)
-  local _12_
+  local body
   if (#raw > 0) then
-    _12_ = json.decode(raw)
+    local ok0, val = pcall(json.decode, raw)
+    if ok0 then
+      body = val
+    else
+      body = raw
+    end
   else
-    _12_ = nil
+    body = nil
   end
-  return {status = code, headers = resp_headers, body = _12_}
+  return {status = code, headers = resp_headers, body = body}
 end
 return {request = request}

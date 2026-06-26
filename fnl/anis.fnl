@@ -15,15 +15,18 @@
                           (ok code) (requester.request {:url path
                                                         :method :GET
                                                         :sink (ltn12.sink.table body-out)})]
-                      (assert ok (tostring code))
+                      (assert ok (string.format "failed to fetch schema from %s: %s" path (tostring code)))
                       (assert (and (>= code 200) (< code 300))
                               (string.format "HTTP %s fetching schema from %s" code path))
                       (table.concat body-out))
-                    (let [f (assert (io.open path :r))
-                          c (f:read :*a)]
-                      (f:close)
-                      c))]
-    (json.decode content)))
+                    (let [(f err) (io.open path :r)]
+                      (assert f (string.format "failed to open schema file '%s': %s" path (tostring err)))
+                      (let [c (f:read :*a)]
+                        (f:close)
+                        c)))
+        (ok parsed err) (pcall json.decode content)]
+    (assert ok (string.format "failed to parse schema JSON from '%s': %s" path (tostring err)))
+    parsed))
 
 (fn make-operation [client path method op-spec]
   (let [param-names (util.extract-path-params path)

@@ -28,10 +28,14 @@ local function parse_args(args)
         r.headers[k] = v
       elseif a:match("^%-%-body=(.*)") then
         local v = a:match("^%-%-body=(.*)")
-        r["body"] = json.decode(v)
+        local ok, parsed, err = pcall(json.decode, v)
+        assert(ok, ("invalid JSON in --body: " .. tostring(err)))
+        r["body"] = parsed
       elseif (a == "-d") then
         i = (i + 1)
-        r["body"] = json.decode(args[i])
+        local ok, parsed, err = pcall(json.decode, args[i])
+        assert(ok, ("invalid JSON in -d: " .. tostring(err)))
+        r["body"] = parsed
       elseif a:match("^%-%-timeout=(.+)") then
         local v = a:match("^%-%-timeout=(.+)")
         r["timeout"] = tonumber(v)
@@ -47,6 +51,8 @@ local function parse_args(args)
         r["help"] = true
       elseif (a == "--no-color") then
         r["no-color"] = true
+      elseif ((a == "-v") or (a == "--verbose")) then
+        r["verbose"] = true
       elseif not a:match("^%-") then
         if not r.schema then
           r["schema"] = a
@@ -98,23 +104,35 @@ local function list_ops(c)
   end
   return nil
 end
-local function print_resp(resp, output, no_color)
-  local _9_ = (output or "json")
-  if (_9_ == "raw") then
+local function print_resp(resp, output, no_color, verbose)
+  if verbose then
+    print(("HTTP " .. resp.status))
+    for k, v in pairs((resp.headers or {})) do
+      print((k .. ": " .. v))
+    end
+    print("")
+  else
+  end
+  local _10_ = (output or "json")
+  if (_10_ == "raw") then
     return print(tostring(resp.body))
-  elseif (_9_ == "status") then
+  elseif (_10_ == "status") then
     return print(resp.status)
-  elseif (_9_ == "headers") then
+  elseif (_10_ == "headers") then
     for k, v in pairs((resp.headers or {})) do
       print((k .. ": " .. v))
     end
     return nil
   else
-    local _ = _9_
+    local _ = _10_
     if resp.body then
       return print(pretty_mod.pretty(resp.body, 0, not no_color))
     else
-      return io.stderr:write(("HTTP " .. resp.status .. "\n"))
+      if not verbose then
+        return io.stderr:write(("HTTP " .. resp.status .. "\n"))
+      else
+        return nil
+      end
     end
   end
 end
@@ -136,11 +154,12 @@ local function usage()
   print("  --base-url=URL        Override base URL")
   print("  --output=json|raw|status|headers  Output format (default: json)")
   print("  --no-color            Disable colored output")
+  print("  -v, --verbose         Show status and response headers")
   print("")
   print("Config: ~/.config/anis/config.json")
   return print("  { \"profiles\": { \"myapi\": { \"schema\": \"https://...\", \"headers\": {} } } }")
 end
-local function main(args)
+local function run(args)
   local p = parse_args(args)
   if not p.schema then
     usage()
@@ -150,80 +169,84 @@ local function main(args)
   local config = load_config()
   local profile
   do
-    local t_13_ = config
-    if (nil ~= t_13_) then
-      t_13_ = t_13_.profiles
+    local t_15_ = config
+    if (nil ~= t_15_) then
+      t_15_ = t_15_.profiles
     else
     end
-    if (nil ~= t_13_) then
-      t_13_ = t_13_[p.schema]
+    if (nil ~= t_15_) then
+      t_15_ = t_15_[p.schema]
     else
     end
-    profile = t_13_
+    profile = t_15_
   end
   local schema
-  local _17_
+  local _19_
   do
-    local t_16_ = profile
-    if (nil ~= t_16_) then
-      t_16_ = t_16_.schema
+    local t_18_ = profile
+    if (nil ~= t_18_) then
+      t_18_ = t_18_.schema
     else
     end
-    _17_ = t_16_
+    _19_ = t_18_
   end
-  schema = (_17_ or p.schema)
+  schema = (_19_ or p.schema)
   local opts
-  local _20_
+  local _22_
   do
-    local t_19_ = profile
-    if (nil ~= t_19_) then
-      t_19_ = t_19_.headers
+    local t_21_ = profile
+    if (nil ~= t_21_) then
+      t_21_ = t_21_.headers
     else
     end
-    _20_ = t_19_
+    _22_ = t_21_
   end
-  local or_22_ = p.timeout
-  if not or_22_ then
-    local t_23_ = profile
-    if (nil ~= t_23_) then
-      t_23_ = t_23_.timeout
-    else
-    end
-    or_22_ = t_23_
-  end
-  local _26_
-  do
+  local or_24_ = p.timeout
+  if not or_24_ then
     local t_25_ = profile
     if (nil ~= t_25_) then
-      t_25_ = t_25_.ssl
+      t_25_ = t_25_.timeout
     else
     end
-    _26_ = t_25_
+    or_24_ = t_25_
   end
-  opts = {headers = (_20_ or {}), timeout = or_22_, ssl = _26_}
-  local or_28_ = p["base-url"]
-  if not or_28_ then
-    local t_29_ = profile
-    if (nil ~= t_29_) then
-      t_29_ = t_29_["base-url"]
+  local _28_
+  do
+    local t_27_ = profile
+    if (nil ~= t_27_) then
+      t_27_ = t_27_.ssl
     else
     end
-    or_28_ = t_29_
+    _28_ = t_27_
   end
-  if or_28_ then
-    local or_31_ = p["base-url"]
-    if not or_31_ then
-      local t_32_ = profile
-      if (nil ~= t_32_) then
-        t_32_ = t_32_["base-url"]
+  opts = {headers = (_22_ or {}), timeout = or_24_, ssl = _28_}
+  local or_30_ = p["base-url"]
+  if not or_30_ then
+    local t_31_ = profile
+    if (nil ~= t_31_) then
+      t_31_ = t_31_["base-url"]
+    else
+    end
+    or_30_ = t_31_
+  end
+  if or_30_ then
+    local or_33_ = p["base-url"]
+    if not or_33_ then
+      local t_34_ = profile
+      if (nil ~= t_34_) then
+        t_34_ = t_34_["base-url"]
       else
       end
-      or_31_ = t_32_
+      or_33_ = t_34_
     end
-    opts["base-url"] = or_31_
+    opts["base-url"] = or_33_
   else
   end
-  local c = anis.client(schema, opts)
+  local ok_c, c = pcall(anis.client, schema, opts)
+  if not ok_c then
+    die(("failed to build client: " .. tostring(c)))
+  else
+  end
   if p.list then
     return list_ops(c)
   elseif (p.help and not p.operation) then
@@ -298,10 +321,22 @@ local function main(args)
       table.insert(call_args, req_opts)
     else
     end
-    local resp = op(table.unpack(call_args))
-    return print_resp(resp, p.output, p["no-color"])
+    local ok_r, resp = pcall(op, table.unpack(call_args))
+    if ok_r then
+      return print_resp(resp, p.output, p["no-color"], p.verbose)
+    else
+      return die(("request failed: " .. tostring(resp)))
+    end
   else
     return die("No operation specified. Use --list to see available operations.")
+  end
+end
+local function main(args)
+  local ok, err = pcall(run, args)
+  if not ok then
+    return die(tostring(err))
+  else
+    return nil
   end
 end
 return {main = main}

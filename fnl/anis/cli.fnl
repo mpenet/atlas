@@ -28,12 +28,16 @@
             (tset r.headers k v))
 
           (a:match "^%-%-body=(.*)")
-          (let [(v) (a:match "^%-%-body=(.*)")]
-            (tset r :body (json.decode v)))
+          (let [(v) (a:match "^%-%-body=(.*)")
+                (ok parsed err) (pcall json.decode v)]
+            (assert ok (.. "invalid JSON in --body: " (tostring err)))
+            (tset r :body parsed))
 
           (= a :-d)
           (do (set i (+ i 1))
-              (tset r :body (json.decode (. args i))))
+              (let [(ok parsed err) (pcall json.decode (. args i))]
+                (assert ok (.. "invalid JSON in -d: " (tostring err)))
+                (tset r :body parsed)))
 
           (a:match "^%-%-timeout=(.+)")
           (let [(v) (a:match "^%-%-timeout=(.+)")]
@@ -50,6 +54,7 @@
           (= a :--list)     (tset r :list true)
           (= a :--help)     (tset r :help true)
           (= a :--no-color) (tset r :no-color true)
+          (or (= a :-v) (= a :--verbose)) (tset r :verbose true)
 
           (not (a:match "^%-"))
           (if (not r.schema)    (tset r :schema a)
@@ -75,15 +80,21 @@
     (each [_ op (ipairs ops)]
       (print (.. op.k (if op.summary (.. "\t" op.summary) ""))))))
 
-(fn print-resp [resp output no-color]
+(fn print-resp [resp output no-color verbose]
+  (when verbose
+    (print (.. "HTTP " resp.status))
+    (each [k v (pairs (or resp.headers {}))]
+      (print (.. k ": " v)))
+    (print ""))
   (match (or output :json)
-    :raw  (print (tostring resp.body))
+    :raw    (print (tostring resp.body))
     :status (print resp.status)
     :headers (each [k v (pairs (or resp.headers {}))]
                (print (.. k ": " v)))
     _ (if resp.body
           (print (pretty-mod.pretty resp.body 0 (not no-color)))
-          (io.stderr:write (.. "HTTP " resp.status "\n")))))
+          (when (not verbose)
+            (io.stderr:write (.. "HTTP " resp.status "\n"))))))
 
 (fn die [msg]
   (io.stderr:write (.. msg "\n"))
@@ -103,11 +114,12 @@
   (print "  --base-url=URL        Override base URL")
   (print "  --output=json|raw|status|headers  Output format (default: json)")
   (print "  --no-color            Disable colored output")
+  (print "  -v, --verbose         Show status and response headers")
   (print "")
   (print "Config: ~/.config/anis/config.json")
   (print "  { \"profiles\": { \"myapi\": { \"schema\": \"https://...\", \"headers\": {} } } }"))
 
-(fn main [args]
+(fn run [args]
   (let [p (parse-args args)]
     (when (not p.schema)
       (usage)
@@ -120,7 +132,8 @@
                    :ssl     (?. profile :ssl)}]
       (when (or p.base-url (?. profile :base-url))
         (tset opts :base-url (or p.base-url (?. profile :base-url))))
-      (let [c (anis.client schema opts)]
+      (let [(ok-c c) (pcall anis.client schema opts)]
+        (when (not ok-c) (die (.. "failed to build client: " (tostring c))))
         (if
           p.list
           (list-ops c)
@@ -146,9 +159,15 @@
                               (when (next o) o))]
               (when op.has-body? (table.insert call-args p.body))
               (when req-opts     (table.insert call-args req-opts))
-              (let [resp (op (table.unpack call-args))]
-                (print-resp resp p.output p.no-color))))
+              (let [(ok-r resp) (pcall op (table.unpack call-args))]
+                (if ok-r
+                    (print-resp resp p.output p.no-color p.verbose)
+                    (die (.. "request failed: " (tostring resp)))))))
 
           (die "No operation specified. Use --list to see available operations."))))))
+
+(fn main [args]
+  (let [(ok err) (pcall run args)]
+    (when (not ok) (die (tostring err)))))
 
 {: main}

@@ -17,16 +17,19 @@ local function load_schema(path)
     end
     local body_out = {}
     local ok, code = requester.request({url = path, method = "GET", sink = ltn12.sink.table(body_out)})
-    assert(ok, tostring(code))
+    assert(ok, string.format("failed to fetch schema from %s: %s", path, tostring(code)))
     assert(((code >= 200) and (code < 300)), string.format("HTTP %s fetching schema from %s", code, path))
     content = table.concat(body_out)
   else
-    local f = assert(io.open(path, "r"))
+    local f, err = io.open(path, "r")
+    assert(f, string.format("failed to open schema file '%s': %s", path, tostring(err)))
     local c = f:read("*a")
     f:close()
     content = c
   end
-  return json.decode(content)
+  local ok, parsed, err = pcall(json.decode, content)
+  assert(ok, string.format("failed to parse schema JSON from '%s': %s", path, tostring(err)))
+  return parsed
 end
 local function make_operation(client, path, method, op_spec)
   local param_names = util["extract-path-params"](path)

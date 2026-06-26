@@ -22,25 +22,31 @@
 (fn request [req]
   (let [url (build-url req.url req.query)
         requester (if (url:match "^https://") https socket-http)
-        payload (when req.body (json.encode req.body))
-        headers (collect [k v (pairs (or req.headers {}))] k v)
-        body-out []]
-    (when payload
-      (tset headers :content-length (tostring (length payload))))
-    (let [req-table {:url url
-                     :method req.method
-                     :headers headers
-                     :timeout req.timeout
-                     :source (when payload (ltn12.source.string payload))
-                     :sink (ltn12.sink.table body-out)}]
-      (when (and req.ssl (url:match "^https://"))
-        (each [k v (pairs req.ssl)]
-          (tset req-table k v)))
-    (let [(ok code resp-headers) (requester.request req-table)]
-      (assert ok (tostring code))
-      (let [raw (table.concat body-out)]
-        {:status code
-         :headers resp-headers
-         :body (when (> (length raw) 0) (json.decode raw))})))))
+        (ok-enc payload) (if req.body
+                             (pcall json.encode req.body)
+                             (values true nil))]
+    (assert ok-enc (string.format "failed to encode request body: %s" (tostring payload)))
+    (let [headers (collect [k v (pairs (or req.headers {}))] k v)
+          body-out []]
+      (when payload
+        (tset headers :content-length (tostring (length payload))))
+      (let [req-table {:url url
+                       :method req.method
+                       :headers headers
+                       :timeout req.timeout
+                       :source (when payload (ltn12.source.string payload))
+                       :sink (ltn12.sink.table body-out)}]
+        (when (and req.ssl (url:match "^https://"))
+          (each [k v (pairs req.ssl)]
+            (tset req-table k v)))
+        (let [(ok code resp-headers) (requester.request req-table)]
+          (assert ok (string.format "%s %s failed: %s" req.method url (tostring code)))
+          (let [raw (table.concat body-out)
+                body (when (> (length raw) 0)
+                       (let [(ok val) (pcall json.decode raw)]
+                         (if ok val raw)))]
+            {:status code
+             :headers resp-headers
+             :body body}))))))
 
 {: request}
