@@ -63,6 +63,7 @@ Builds a client table from an OpenAPI 3.x schema. Each `operationId` becomes a f
 |--------|------|-------------|
 | `:base-url` | string | Overrides `schema.servers[1].url` |
 | `:headers` | table | Default headers sent with every request |
+| `:timeout` | number | Default timeout in seconds for all requests |
 | `:http-fn` | fn | Custom HTTP backend — see [HTTP adapter](#http-adapter) |
 
 ### Calling operations

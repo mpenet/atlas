@@ -62,22 +62,29 @@ local function request(req)
     headers["content-length"] = tostring(#payload)
   else
   end
-  local ok, code, resp_headers = nil, nil, nil
+  local req_table
   local _9_
   if payload then
     _9_ = ltn12.source.string(payload)
   else
     _9_ = nil
   end
-  ok, code, resp_headers = requester.request({url = url, method = req.method, headers = headers, timeout = req.timeout, source = _9_, sink = ltn12.sink.table(body_out)})
+  req_table = {url = url, method = req.method, headers = headers, timeout = req.timeout, source = _9_, sink = ltn12.sink.table(body_out)}
+  if (req.ssl and url:match("^https://")) then
+    for k, v in pairs(req.ssl) do
+      req_table[k] = v
+    end
+  else
+  end
+  local ok, code, resp_headers = requester.request(req_table)
   assert(ok, tostring(code))
   local raw = table.concat(body_out)
-  local _11_
+  local _12_
   if (#raw > 0) then
-    _11_ = json.decode(raw)
+    _12_ = json.decode(raw)
   else
-    _11_ = nil
+    _12_ = nil
   end
-  return {status = code, headers = resp_headers, body = _11_}
+  return {status = code, headers = resp_headers, body = _12_}
 end
 return {request = request}

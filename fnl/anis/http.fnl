@@ -27,18 +27,20 @@
         body-out []]
     (when payload
       (tset headers :content-length (tostring (length payload))))
-    (let [(ok code resp-headers) (requester.request
-                                   {:url url
-                                    :method req.method
-                                    :headers headers
-                                    :timeout req.timeout
-                                    :source (when payload
-                                              (ltn12.source.string payload))
-                                    :sink (ltn12.sink.table body-out)})]
+    (let [req-table {:url url
+                     :method req.method
+                     :headers headers
+                     :timeout req.timeout
+                     :source (when payload (ltn12.source.string payload))
+                     :sink (ltn12.sink.table body-out)}]
+      (when (and req.ssl (url:match "^https://"))
+        (each [k v (pairs req.ssl)]
+          (tset req-table k v)))
+    (let [(ok code resp-headers) (requester.request req-table)]
       (assert ok (tostring code))
       (let [raw (table.concat body-out)]
         {:status code
          :headers resp-headers
-         :body (when (> (length raw) 0) (json.decode raw))}))))
+         :body (when (> (length raw) 0) (json.decode raw))})))))
 
 {: request}

@@ -47,7 +47,8 @@
                                :query (?. opts :query)
                                :body body
                                :headers headers
-                               :timeout (?. opts :timeout)})))]
+                               :timeout (or (?. opts :timeout) client.timeout)
+                               :ssl client.ssl})))]
     (setmetatable {:fnl/docstring (doc.build path method op-spec)}
                   {:__call (fn [_ ...] (f ...))})))
 
@@ -74,7 +75,9 @@
                      (error "no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts"))
         client {:base-url base-url
                 :http-fn (or (?. ?opts :http-fn) http.request)
-                :headers (or (?. ?opts :headers) {})}]
+                :headers (or (?. ?opts :headers) {})
+                :timeout (?. ?opts :timeout)
+                :ssl (?. ?opts :ssl)}]
     (each [path methods (pairs schema.paths)]
       (each [method op-spec (pairs methods)]
         (when (and (= (type op-spec) :table) op-spec.operationId)

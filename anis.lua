@@ -103,7 +103,7 @@ local function make_operation(client, path, method, op_spec)
       end
       _17_ = t_16_
     end
-    return client["http-fn"]({method = method:upper(), url = url, query = _14_, body = body, headers = headers, timeout = _17_})
+    return client["http-fn"]({method = method:upper(), url = url, query = _14_, body = body, headers = headers, timeout = (_17_ or client.timeout), ssl = client.ssl})
   end
   f = _5_
   local function _19_(_, ...)
@@ -181,7 +181,25 @@ local function client(schema, _3fopts)
     end
     _34_ = t_33_
   end
-  client0 = {["base-url"] = base_url, ["http-fn"] = (_31_ or http.request), headers = (_34_ or {})}
+  local _37_
+  do
+    local t_36_ = _3fopts
+    if (nil ~= t_36_) then
+      t_36_ = t_36_.timeout
+    else
+    end
+    _37_ = t_36_
+  end
+  local _40_
+  do
+    local t_39_ = _3fopts
+    if (nil ~= t_39_) then
+      t_39_ = t_39_.ssl
+    else
+    end
+    _40_ = t_39_
+  end
+  client0 = {["base-url"] = base_url, ["http-fn"] = (_31_ or http.request), headers = (_34_ or {}), timeout = _37_, ssl = _40_}
   for path, methods in pairs(schema0.paths) do
     for method, op_spec in pairs(methods) do
       if ((type(op_spec) == "table") and op_spec.operationId) then
