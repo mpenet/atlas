@@ -19,10 +19,10 @@
     (when (and op-spec.description
                (not= op-spec.description op-spec.summary))
       (add op-spec.description))
-    (let [sig [:client]]
+    (let [sig []]
       (each [_ p (ipairs path-params)] (table.insert sig p.name))
       (when has-body? (table.insert sig :body))
-      (when (> (length query-params) 0) (table.insert sig :?query))
+      (when (> (length query-params) 0) (table.insert sig :?opts))
       (add (string.format "\nUsage: (%s %s)"
                           (util.camel->kebab op-spec.operationId)
                           (table.concat sig " "))))

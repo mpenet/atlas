@@ -13,6 +13,7 @@ Dependencies: `lunajson`, `luasocket`, `luasec`.
 Build from source:
 
 ```sh
+make deps    # install luarocks dependencies
 make build   # requires fennel on PATH
 ```
 
@@ -27,10 +28,10 @@ make build   # requires fennel on PATH
 ; from a URL
 (local client (anis.client "https://petstore3.swagger.io/api/v3/openapi.json"))
 
-(client.get-pet-by-id client 1)
-(client.add-pet client {:name "Buddy" :status "available"})
-(client.update-pet client 1 {:name "Buddy" :status "sold"})
-(client.find-pets-by-status client {:status "available"})
+(client.get-pet-by-id 1)
+(client.add-pet {:name "Buddy" :status "available"})
+(client.update-pet 1 {:name "Buddy" :status "sold"})
+(client.find-pets-by-status {:status "available"})
 ```
 
 The base URL is read from `servers[1].url` in the schema. Override it via opts:
@@ -70,25 +71,36 @@ Operation names are derived from `operationId` converted to kebab-case (`getPetB
 
 ```fennel
 ; no path params, no body
-(client.list-pets client)
+(client.list-pets)
 
 ; path params — positional, in template order
-(client.get-pet-by-id client 42)
+(client.get-pet-by-id 42)
 
 ; body — follows path params for operations with requestBody
-(client.add-pet client {:name "Rex" :status "available"})
+(client.add-pet {:name "Rex" :status "available"})
 
 ; path params + body
-(client.update-pet client 42 {:name "Rex" :status "sold"})
+(client.update-pet 42 {:name "Rex" :status "sold"})
 
-; query params — trailing map, any operation
-(client.find-pets-by-status client {:status "available"})
+; query params — nested under :query in trailing opts
+(client.find-pets-by-status {:query {:status "available"}})
 
-; path params + query
-(client.get-pet-by-id client 42 {:fields "name,status"})
+; path params + query + per-request options
+(client.get-pet-by-id 42 {:query {:fields "name,status"} :timeout 10})
+
+; per-request headers
+(client.list-pets {:headers {:x-request-id "abc"} :timeout 5})
 ```
 
-Signature pattern: `(op-name client ...path-params ?body ?query)`
+Signature pattern: `(op-name ...path-params ?body ?opts)`
+
+`?opts` keys:
+
+| Key | Description |
+|-----|-------------|
+| `:query` | Query params map |
+| `:headers` | Per-request headers, merged over client defaults |
+| `:timeout` | Request timeout in seconds |
 
 ### HTTP adapter
 

@@ -1,8 +1,7 @@
 (fn camel->kebab [s]
-  (-> s
-      (: gsub "(%u+)(%u%l)" "%1-%2")
-      (: gsub "(%l)(%u)" "%1-%2")
-      (: lower)))
+  (let [(s) (s:gsub "(%u+)(%u%l)" "%1-%2")
+        (s) (s:gsub "(%l)(%u)" "%1-%2")]
+    (s:lower)))
 
 (fn extract-path-params [template]
   (icollect [p (template:gmatch "{([^}]+)}")] p))

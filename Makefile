@@ -1,14 +1,19 @@
-FENNEL ?= fennel
+FENNEL ?= fnl
 FNL_DIR = fnl
 
 FNL_SOURCES = $(shell find $(FNL_DIR) -name "*.fnl")
 LUA_TARGETS = $(FNL_SOURCES:$(FNL_DIR)/%.fnl=%.lua)
 
-.PHONY: build clean
+.PHONY: build clean deps
+
+deps:
+	luarocks install lunajson
+	luarocks install luasocket
+	luarocks install luasec
 
 build: $(LUA_TARGETS)
 
-%.lua: $(FNL_DIR)/%.fnl
+$(LUA_TARGETS): %.lua: $(FNL_DIR)/%.fnl
 	@mkdir -p $(dir $@)
 	$(FENNEL) --compile $< > $@
 

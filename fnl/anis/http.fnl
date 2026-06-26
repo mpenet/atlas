@@ -31,6 +31,7 @@
                                    {:url url
                                     :method req.method
                                     :headers headers
+                                    :timeout req.timeout
                                     :source (when payload
                                               (ltn12.source.string payload))
                                     :sink (ltn12.sink.table body-out)})]
