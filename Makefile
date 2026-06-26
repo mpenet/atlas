@@ -4,21 +4,38 @@ FNL_DIR = fnl
 FNL_SOURCES = $(shell find $(FNL_DIR) -name "*.fnl" ! -name "anis-bin.fnl")
 LUA_TARGETS = $(FNL_SOURCES:$(FNL_DIR)/%.fnl=%.lua)
 
+# ---- OS detection ----
+UNAME_S := $(shell uname -s)
+
 # ---- binary build paths ----
 NATIVE_BUILD     = build/native
-LUAROCKS_CACHE  ?= $(HOME)/.cache/luarocks/https___luarocks.org
+LUAROCKS_CACHE  ?= $(or $(wildcard $(HOME)/.cache/luarocks/https___luarocks.org),\
+                        $(HOME)/.luarocks/cache/https___luarocks.org,\
+                        $(HOME)/.cache/luarocks/https___luarocks.org)
 SOCKET_SRC       = $(NATIVE_BUILD)/luasocket/src
 LUASEC_SRC       = $(NATIVE_BUILD)/luasec/src
 
 # ---- auto-detected tool paths (override if needed) ----
 LUA_INC         ?= $(shell pkg-config --variable=includedir lua5.4 2>/dev/null)
-LUA_LIB         ?= $(shell pkg-config --variable=libdir lua5.4 2>/dev/null)/liblua.a
+_LUA_LIBDIR     := $(shell pkg-config --variable=libdir lua5.4 2>/dev/null)
+LUA_LIB         ?= $(or $(wildcard $(_LUA_LIBDIR)/liblua5.4.a),\
+                         $(wildcard $(_LUA_LIBDIR)/liblua.a),\
+                         $(_LUA_LIBDIR)/liblua.a)
 OPENSSL_INC     ?= $(shell pkg-config --variable=includedir openssl 2>/dev/null)
 OPENSSL_LDFLAGS ?= $(shell pkg-config --static --libs openssl 2>/dev/null)
 
-SOCKET_CFLAGS = -O2 -fno-common -DLUASOCKET_NODEBUG -DUNIX_HAS_SUN_LEN \
+# macOS requires -DUNIX_HAS_SUN_LEN and -fno-common; Linux needs neither
+ifeq ($(UNAME_S),Darwin)
+  SOCKET_CFLAGS_EXTRA = -fno-common -DUNIX_HAS_SUN_LEN
+  LUASEC_CFLAGS_EXTRA = -fno-common
+else
+  SOCKET_CFLAGS_EXTRA =
+  LUASEC_CFLAGS_EXTRA =
+endif
+
+SOCKET_CFLAGS = -O2 $(SOCKET_CFLAGS_EXTRA) -DLUASOCKET_NODEBUG \
                 -I$(LUA_INC) -I$(SOCKET_SRC)
-LUASEC_CFLAGS = -O2 -fno-common -Wno-deprecated-declarations \
+LUASEC_CFLAGS = -O2 $(LUASEC_CFLAGS_EXTRA) -Wno-deprecated-declarations \
                 -I$(LUA_INC) -I$(OPENSSL_INC) -I$(LUASEC_SRC)
 
 SOCKET_CORE_SRCS = luasocket.c timeout.c buffer.c io.c auxiliar.c compat.c \

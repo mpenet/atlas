@@ -161,14 +161,33 @@ Responses:
 
 ### Install
 
+**Standalone binary (no dependencies):**
+
+Download the pre-built binary for your platform from the [releases page](https://github.com/mpenet/anis/releases), then:
+
 ```sh
-make install   # installs bin/anis to /usr/local/bin
+install -m 755 anis-bin /usr/local/bin/anis
 ```
 
-Or via luarocks (includes the binary):
+**Build binary from source** (requires `fennel`, `lua`, `openssl`, `pkg-config`):
+
+```sh
+make binary                        # produces bin/anis-bin
+install -m 755 bin/anis-bin /usr/local/bin/anis
+```
+
+The binary statically links Lua, luasocket, and luasec — only OpenSSL is a runtime dependency.
+
+**Via luarocks** (requires Lua + luarocks installed):
 
 ```sh
 luarocks install anis
+```
+
+**Via make** (requires Lua + luarocks + fennel):
+
+```sh
+make deps && make install          # installs bin/anis to /usr/local/bin
 ```
 
 ### Usage
