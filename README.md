@@ -190,9 +190,17 @@ anis https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
 # with query params
 anis https://petstore3.swagger.io/api/v3/openapi.json find-pets-by-status --query.status=available
 
-# with request body
-anis https://petstore3.swagger.io/api/v3/openapi.json add-pet --body '{"name":"Rex","status":"available"}'
+# with request body (inline JSON)
+anis https://petstore3.swagger.io/api/v3/openapi.json add-pet --body='{"name":"Rex","status":"available"}'
 anis https://petstore3.swagger.io/api/v3/openapi.json add-pet -d '{"name":"Rex","status":"available"}'
+
+# with request body from a file
+anis https://petstore3.swagger.io/api/v3/openapi.json add-pet --body=@pet.json
+anis https://petstore3.swagger.io/api/v3/openapi.json add-pet -d @pet.json
+
+# with request body from stdin
+cat pet.json | anis https://petstore3.swagger.io/api/v3/openapi.json add-pet -d @-
+echo '{"name":"Rex"}' | anis https://petstore3.swagger.io/api/v3/openapi.json add-pet --body=@-
 
 # with per-request headers and timeout
 anis https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 --header.x-request-id=abc --timeout=5
@@ -204,14 +212,15 @@ anis https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 --header.
 |------|-------------|
 | `--list` | List all operations with summaries |
 | `--help` | Show full documentation for an operation |
-| `--body=JSON` | Request body as a JSON string |
-| `-d JSON` | Request body (alternative form) |
+| `--body=JSON` | Request body as inline JSON, `@file`, or `@-` for stdin |
+| `-d JSON\|@file\|@-` | Request body (alternative form) |
 | `--query.KEY=VAL` | Query parameter |
 | `--header.KEY=VAL` | Per-request header |
 | `--timeout=N` | Timeout in seconds |
 | `--base-url=URL` | Override the base URL from the schema |
 | `--output=FORMAT` | Output format: `json` (default), `raw`, `status`, `headers` |
 | `--no-color` | Disable colored output |
+| `-v`, `--verbose` | Show HTTP status and response headers |
 
 ### Profiles
 
@@ -245,6 +254,52 @@ anis petstore --list
 anis petstore get-pet-by-id 42
 anis myapi --list
 ```
+
+Profile management commands:
+
+```sh
+# list all profiles
+anis profile list
+
+# show a profile's configuration
+anis profile show myapi
+
+# add or update a profile
+anis profile add myapi --schema=https://api.example.com/openapi.json \
+  --base-url=https://staging.example.com \
+  --header.authorization="Bearer <token>" \
+  --timeout=30
+
+# remove a profile
+anis profile remove myapi
+anis profile rm myapi
+```
+
+### Shell completion
+
+Generate and install tab-completion for your shell:
+
+**Fish:**
+
+```sh
+anis completion fish > ~/.config/fish/completions/anis.fish
+```
+
+**Bash:**
+
+```sh
+# add to ~/.bashrc
+source <(anis completion bash)
+```
+
+**Zsh:**
+
+```sh
+# add to ~/.zshrc (ensure a fpath dir is set up first)
+anis completion zsh > "${fpath[1]}/_anis"
+```
+
+Completion covers profile names as the first argument, operation names as the second (fetched dynamically from the schema), and profile subcommands.
 
 ## License
 

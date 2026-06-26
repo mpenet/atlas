@@ -1,2 +1,4 @@
 *.rock
 luarocks.lock
+/build/
+/bin/anis-bin
