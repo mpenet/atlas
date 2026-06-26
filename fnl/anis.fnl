@@ -28,7 +28,7 @@
                                :headers headers})))]
     (setmetatable f {:fnl/docstring (doc.build path method op-spec)})))
 
-(fn build-client [schema ?opts]
+(fn client [schema ?opts]
   "Build an API client from an OpenAPI 3.x schema.
 
   schema — parsed schema table, local file path, or http(s):// URL
@@ -65,4 +65,4 @@
                       c))]
     (json.decode content)))
 
-{: build-client}
+{: client}

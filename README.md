@@ -22,31 +22,31 @@ make build   # requires fennel on PATH
 (local anis (require :anis))
 
 ; from a local file
-(local api (anis.build-client "petstore.json"))
+(local client (anis.client "petstore.json"))
 
 ; from a URL
-(local api (anis.build-client "https://petstore3.swagger.io/api/v3/openapi.json"))
+(local client (anis.client "https://petstore3.swagger.io/api/v3/openapi.json"))
 
-(api.get-pet-by-id api 1)
-(api.add-pet api {:name "Buddy" :status "available"})
-(api.update-pet api 1 {:name "Buddy" :status "sold"})
-(api.find-pets-by-status api {:status "available"})
+(client.get-pet-by-id client 1)
+(client.add-pet client {:name "Buddy" :status "available"})
+(client.update-pet client 1 {:name "Buddy" :status "sold"})
+(client.find-pets-by-status client {:status "available"})
 ```
 
 The base URL is read from `servers[1].url` in the schema. Override it via opts:
 
 ```fennel
-(local api (anis.build-client "petstore.json"
+(local client (anis.client "petstore.json"
                                {:base-url "https://staging.example.com/api/v3"
                                 :headers {:authorization "Bearer <token>"}}))
 ```
 
 ## API
 
-### `anis.build-client`
+### `anis.client`
 
 ```fennel
-(anis.build-client schema ?opts)
+(anis.client schema ?opts)
 ```
 
 Builds a client table from an OpenAPI 3.x schema. Each `operationId` becomes a function on the returned table, named in kebab-case.
@@ -70,22 +70,22 @@ Operation names are derived from `operationId` converted to kebab-case (`getPetB
 
 ```fennel
 ; no path params, no body
-(api.list-pets api)
+(client.list-pets client)
 
 ; path params — positional, in template order
-(api.get-pet-by-id api 42)
+(client.get-pet-by-id client 42)
 
 ; body — follows path params for operations with requestBody
-(api.add-pet api {:name "Rex" :status "available"})
+(client.add-pet client {:name "Rex" :status "available"})
 
 ; path params + body
-(api.update-pet api 42 {:name "Rex" :status "sold"})
+(client.update-pet client 42 {:name "Rex" :status "sold"})
 
 ; query params — trailing map, any operation
-(api.find-pets-by-status api {:status "available"})
+(client.find-pets-by-status client {:status "available"})
 
 ; path params + query
-(api.get-pet-by-id api 42 {:fields "name,status"})
+(client.get-pet-by-id client 42 {:fields "name,status"})
 ```
 
 Signature pattern: `(op-name client ...path-params ?body ?query)`
@@ -107,7 +107,7 @@ To use a custom HTTP backend, pass `:http-fn` in opts:
   ; ... return {:status code :headers {} :body table-or-nil}
   )
 
-(local api (anis.build-client schema {:http-fn my-http}))
+(local client (anis.client schema {:http-fn my-http}))
 ```
 
 ### Content negotiation
@@ -126,7 +126,7 @@ To use a custom HTTP backend, pass `:http-fn` in opts:
 Every operation carries a docstring readable via `(doc)`:
 
 ```
->> (doc api.get-pet-by-id)
+>> (doc client.get-pet-by-id)
 
 GET /pet/{petId}
 
