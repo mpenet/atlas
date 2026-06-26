@@ -31,10 +31,11 @@
 (fn build-client [schema ?opts]
   "Build an API client from an OpenAPI 3.x schema.
 
-  schema — parsed schema table
+  schema — parsed schema table, local file path, or http(s):// URL
   ?opts  — {:base-url \"https://...\" :headers {} :http-fn custom-fn}
            base-url defaults to schema.servers[1].url"
-  (let [base-url (or (?. ?opts :base-url)
+  (let [schema (if (= (type schema) :string) (load-schema schema) schema)
+        base-url (or (?. ?opts :base-url)
                      (?. schema :servers 1 :url)
                      (error "no base-url: pass via ?opts or add servers to schema"))
         client {:base-url base-url
@@ -64,4 +65,4 @@
                       c))]
     (json.decode content)))
 
-{: build-client : load-schema}
+{: build-client}

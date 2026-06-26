@@ -22,10 +22,10 @@ make build   # requires fennel on PATH
 (local anis (require :anis))
 
 ; from a local file
-(local api (anis.build-client (anis.load-schema "petstore.json")))
+(local api (anis.build-client "petstore.json"))
 
-; or directly from a URL
-(local api (anis.build-client (anis.load-schema "https://petstore3.swagger.io/api/v3/openapi.json")))
+; from a URL
+(local api (anis.build-client "https://petstore3.swagger.io/api/v3/openapi.json"))
 
 (api.get-pet-by-id api 1)
 (api.add-pet api {:name "Buddy" :status "available"})
@@ -36,32 +36,12 @@ make build   # requires fennel on PATH
 The base URL is read from `servers[1].url` in the schema. Override it via opts:
 
 ```fennel
-(local api (anis.build-client (anis.load-schema "petstore.json")
+(local api (anis.build-client "petstore.json"
                                {:base-url "https://staging.example.com/api/v3"
                                 :headers {:authorization "Bearer <token>"}}))
 ```
 
 ## API
-
-### `anis.load-schema`
-
-```fennel
-(anis.load-schema path)
-```
-
-Reads an OpenAPI 3.x JSON schema from a local file or remote URL and returns a parsed schema table.
-
-| Arg | Type | Description |
-|-----|------|-------------|
-| `path` | string | Local file path or `http(s)://` URL |
-
-```fennel
-; local file
-(anis.load-schema "petstore.json")
-
-; remote URL
-(anis.load-schema "https://petstore3.swagger.io/api/v3/openapi.json")
-```
 
 ### `anis.build-client`
 
@@ -69,11 +49,13 @@ Reads an OpenAPI 3.x JSON schema from a local file or remote URL and returns a p
 (anis.build-client schema ?opts)
 ```
 
-Builds a client table from a parsed schema. Each `operationId` in the schema becomes a function on the returned table, named in kebab-case.
+Builds a client table from an OpenAPI 3.x schema. Each `operationId` becomes a function on the returned table, named in kebab-case.
+
+`schema` can be a local file path, an `http(s)://` URL, or an already-parsed table.
 
 | Arg | Type | Description |
 |-----|------|-------------|
-| `schema` | table | Parsed OpenAPI schema |
+| `schema` | string or table | File path, URL, or parsed schema table |
 | `?opts` | table | Optional — see below |
 
 | Option | Type | Description |
