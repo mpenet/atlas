@@ -10,13 +10,14 @@ UNAME_S := $(shell uname -s)
 # ---- binary build paths ----
 NATIVE_BUILD     = build/native
 LUAROCKS_CACHE  ?= $(or $(wildcard $(HOME)/.cache/luarocks/https___luarocks.org),\
+                        $(wildcard /var/cache/luarocks/https___luarocks.org),\
                         $(HOME)/.luarocks/cache/https___luarocks.org,\
                         $(HOME)/.cache/luarocks/https___luarocks.org)
 SOCKET_SRC       = $(NATIVE_BUILD)/luasocket/src
 LUASEC_SRC       = $(NATIVE_BUILD)/luasec/src
 
 # ---- auto-detected tool paths (override if needed) ----
-LUA_INC         ?= $(shell pkg-config --variable=includedir lua5.4 2>/dev/null)
+LUA_INC         ?= $(shell pkg-config --cflags lua5.4 2>/dev/null | tr ' ' '\n' | grep '^-I' | head -1 | cut -c3-)
 _LUA_LIBDIR     := $(shell pkg-config --variable=libdir lua5.4 2>/dev/null)
 LUA_LIB         ?= $(or $(wildcard $(_LUA_LIBDIR)/liblua5.4.a),\
                          $(wildcard $(_LUA_LIBDIR)/liblua.a),\
