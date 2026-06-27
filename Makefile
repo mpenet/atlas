@@ -9,10 +9,6 @@ UNAME_S := $(shell uname -s)
 
 # ---- binary build paths ----
 NATIVE_BUILD     = build/native
-LUAROCKS_CACHE  ?= $(or $(wildcard $(HOME)/.cache/luarocks/https___luarocks.org),\
-                        $(wildcard /var/cache/luarocks/https___luarocks.org),\
-                        $(HOME)/.luarocks/cache/https___luarocks.org,\
-                        $(HOME)/.cache/luarocks/https___luarocks.org)
 SOCKET_SRC       = $(NATIVE_BUILD)/luasocket/src
 LUASEC_SRC       = $(NATIVE_BUILD)/luasec/src
 
@@ -72,17 +68,17 @@ $(NATIVE_BUILD)/.stamp:
 	@mkdir -p $(NATIVE_BUILD)
 	@# extract luasocket
 	@if [ ! -d $(SOCKET_SRC) ]; then \
-	  cp $(LUAROCKS_CACHE)/luasocket-3.1.0-1.src.rock /tmp/_lsock.zip; \
-	  unzip -o /tmp/_lsock.zip -d $(NATIVE_BUILD)/luasocket_tmp >/dev/null 2>&1; \
+	  (cd $(NATIVE_BUILD) && luarocks download --source luasocket 3.1.0-1 >/dev/null 2>&1); \
+	  unzip -o $(NATIVE_BUILD)/luasocket-3.1.0-1.src.rock -d $(NATIVE_BUILD)/luasocket_tmp >/dev/null 2>&1; \
 	  mv $(NATIVE_BUILD)/luasocket_tmp/luasocket $(NATIVE_BUILD)/luasocket; \
-	  rm -rf $(NATIVE_BUILD)/luasocket_tmp /tmp/_lsock.zip; \
+	  rm -rf $(NATIVE_BUILD)/luasocket_tmp $(NATIVE_BUILD)/luasocket-3.1.0-1.src.rock; \
 	fi
 	@# extract luasec
 	@if [ ! -d $(LUASEC_SRC) ]; then \
-	  cp $(LUAROCKS_CACHE)/luasec-1.3.2-1.src.rock /tmp/_lsec.zip; \
-	  unzip -o /tmp/_lsec.zip -d $(NATIVE_BUILD)/luasec_tmp >/dev/null 2>&1; \
+	  (cd $(NATIVE_BUILD) && luarocks download --source luasec 1.3.2-1 >/dev/null 2>&1); \
+	  unzip -o $(NATIVE_BUILD)/luasec-1.3.2-1.src.rock -d $(NATIVE_BUILD)/luasec_tmp >/dev/null 2>&1; \
 	  mv $(NATIVE_BUILD)/luasec_tmp/luasec $(NATIVE_BUILD)/luasec; \
-	  rm -rf $(NATIVE_BUILD)/luasec_tmp /tmp/_lsec.zip; \
+	  rm -rf $(NATIVE_BUILD)/luasec_tmp $(NATIVE_BUILD)/luasec-1.3.2-1.src.rock; \
 	fi
 	@# build socket_core.a
 	@echo "Building libsocket_core.a..."
