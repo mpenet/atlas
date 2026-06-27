@@ -1,4 +1,4 @@
-local util = require("anis.util")
+local util = require("atlas.util")
 local function params_of_kind(op_spec, kind)
   local tbl_21_ = {}
   local i_22_ = 0

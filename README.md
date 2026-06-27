@@ -1,142 +1,123 @@
-# anis
+# atlas
 
-Runtime OpenAPI 3.x client for Fennel. Points at any schema, builds a callable client. No code generation.
+Runtime OpenAPI 3.x client for Fennel and Lua. Point it at any schema — local file, URL, or parsed table — and get back a callable client. No code generation, no build step.
+
+Also ships as a standalone CLI for exploring and calling any HTTP API that has an OpenAPI schema.
 
 ## Install
 
-```sh
-luarocks install anis
-```
-
-Dependencies: `lunajson`, `luasocket`, `luasec`.
-
-Build from source:
+**Lua library:**
 
 ```sh
-make deps    # install luarocks dependencies
-make build   # requires fennel on PATH
+luarocks install atlas
 ```
 
-## Quick start
+**CLI — standalone binary** (no Lua required at runtime):
+
+```sh
+# download from https://github.com/mpenet/atlas/releases, then:
+install -m 755 atlas-bin /usr/local/bin/atlas
+```
+
+**CLI — from source:**
+
+```sh
+make deps     # installs luarocks dependencies
+make install  # builds and installs bin/atlas to /usr/local/bin
+```
+
+## Library
+
+### Creating a client
 
 ```fennel
-(local anis (require :anis))
+(local atlas (require :atlas))
 
-; from a local file
-(local client (anis.client "petstore.json"))
-
-; from a URL
-(local client (anis.client "https://petstore3.swagger.io/api/v3/openapi.json"))
-
-(client.get-pet-by-id 1)
-(client.add-pet {:name "Buddy" :status "available"})
-(client.update-pet 1 {:name "Buddy" :status "sold"})
-(client.find-pets-by-status {:status "available"})
+(local client (atlas.client "https://petstore3.swagger.io/api/v3/openapi.json"))
 ```
 
-The base URL is read from `servers[1].url` in the schema. Override it via opts:
+`atlas.client` accepts a schema as a file path, an `http(s)://` URL, or an already-parsed table. The base URL is read from `servers[1].url` in the schema.
 
 ```fennel
-(local client (anis.client "petstore.json"
-                               {:base-url "https://staging.example.com/api/v3"
-                                :headers {:authorization "Bearer <token>"}}))
+(atlas.client schema ?opts)
 ```
-
-## API
-
-### `anis.client`
-
-```fennel
-(anis.client schema ?opts)
-```
-
-Builds a client table from an OpenAPI 3.x schema. Each `operationId` becomes a function on the returned table, named in kebab-case.
-
-`schema` can be a local file path, an `http(s)://` URL, or an already-parsed table.
-
-| Arg | Type | Description |
-|-----|------|-------------|
-| `schema` | string or table | File path, URL, or parsed schema table |
-| `?opts` | table | Optional — see below |
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `:base-url` | string | Overrides `schema.servers[1].url` |
+| `:base-url` | string | Override `servers[1].url` |
 | `:headers` | table | Default headers sent with every request |
-| `:timeout` | number | Default timeout in seconds for all requests |
+| `:timeout` | number | Default request timeout in seconds |
+| `:ssl` | table | SSL options passed to luasec (`cafile`, `verify`, …) |
 | `:http-fn` | fn | Custom HTTP backend — see [HTTP adapter](#http-adapter) |
 
 ### Calling operations
 
-Operation names are derived from `operationId` converted to kebab-case (`getPetById` → `get-pet-by-id`).
+Each `operationId` in the schema becomes a function on the client, converted to kebab-case (`getPetById` → `get-pet-by-id`).
+
+Signature: `(op-name ...path-params ?body ?opts)`
 
 ```fennel
-; no path params, no body
+; no params
 (client.list-pets)
 
-; path params — positional, in template order
+; path param
 (client.get-pet-by-id 42)
 
-; body — follows path params for operations with requestBody
+; body (follows path params when requestBody is declared)
 (client.add-pet {:name "Rex" :status "available"})
 
 ; path params + body
 (client.update-pet 42 {:name "Rex" :status "sold"})
 
-; query params — nested under :query in trailing opts
+; query params via trailing opts map
 (client.find-pets-by-status {:query {:status "available"}})
 
-; path params + query + per-request options
-(client.get-pet-by-id 42 {:query {:fields "name,status"} :timeout 10})
-
-; per-request headers
-(client.list-pets {:headers {:x-request-id "abc"} :timeout 5})
+; per-request headers and timeout
+(client.get-pet-by-id 42 {:headers {:x-request-id "abc"} :timeout 10})
 ```
 
-Signature pattern: `(op-name ...path-params ?body ?opts)`
-
-`?opts` keys:
+Per-request opts:
 
 | Key | Description |
 |-----|-------------|
-| `:query` | Query params map |
-| `:headers` | Per-request headers, merged over client defaults |
-| `:timeout` | Request timeout in seconds |
+| `:query` | Query parameters |
+| `:headers` | Merged over client-level defaults |
+| `:timeout` | Overrides client-level timeout |
 
 ### HTTP adapter
 
-The default adapter uses luasocket + luasec with lunajson. It:
+The built-in adapter uses luasocket, luasec, and lunajson:
 
 - Routes `https://` through luasec, `http://` through luasocket
-- URL-encodes query params and appends to URL
-- Sets `content-type` and `accept` headers from the schema
-- Sets `content-length` automatically when a body is present
-- Returns `{:status code :headers {} :body table-or-nil}`
+- URL-encodes query params
+- Sets `Content-Type` and `Accept` from the schema's content declarations
+- Sets `Content-Length` automatically when a body is present
+- Returns `{:status N :headers {} :body table-or-string-or-nil}`
 
-To use a custom HTTP backend, pass `:http-fn` in opts:
+Swap it out by passing `:http-fn`:
 
 ```fennel
-(fn my-http [{:method :url :headers :query :body}]
-  ; ... return {:status code :headers {} :body table-or-nil}
+(fn my-http [{: method : url : headers : query : body}]
+  ; must return {:status N :headers {} :body ...}
   )
 
-(local client (anis.client schema {:http-fn my-http}))
+(local client (atlas.client schema {:http-fn my-http}))
 ```
 
 ### Content negotiation
 
-`Content-Type` is picked from `requestBody.content` keys in preference order:
+`Content-Type` is selected from `requestBody.content` in this order:
 
 1. `application/json`
 2. `application/x-www-form-urlencoded`
 3. `multipart/form-data`
-4. First available
+4. First key present
 
-`Accept` is built from the union of all `responses.*.content` keys.
+`Accept` is the union of all `responses.*.content` keys.
 
-### REPL docstrings
+### Docstrings
 
-Every operation carries a docstring readable via `(doc)`:
+Every operation carries a docstring inspectable in the REPL:
 
 ```
 >> (doc client.get-pet-by-id)
@@ -148,7 +129,7 @@ Find pet by ID.
 Usage: (get-pet-by-id petId)
 
 Path params:
-  petId          integer [required] — ID of pet to return
+  petId            integer [required] — ID of pet to return
 
 Responses:
   200    successful operation
@@ -157,72 +138,33 @@ Responses:
 
 ## CLI
 
-`anis` ships with a command-line client.
-
-### Install
-
-**Standalone binary (no dependencies):**
-
-Download the pre-built binary for your platform from the [releases page](https://github.com/mpenet/anis/releases), then:
-
-```sh
-install -m 755 anis-bin /usr/local/bin/anis
+```
+atlas <schema-or-profile> [operation] [path-params...] [options]
 ```
 
-**Build binary from source** (requires `fennel`, `lua`, `openssl`, `pkg-config`):
-
-```sh
-make binary                        # produces bin/anis-bin
-install -m 755 bin/anis-bin /usr/local/bin/anis
-```
-
-The binary statically links Lua, luasocket, and luasec — only OpenSSL is a runtime dependency.
-
-**Via luarocks** (requires Lua + luarocks installed):
-
-```sh
-luarocks install anis
-```
-
-**Via make** (requires Lua + luarocks + fennel):
-
-```sh
-make deps && make install          # installs bin/anis to /usr/local/bin
-```
-
-### Usage
-
-```
-anis <schema-or-profile> [operation] [path-params...] [options]
-```
+### Basic usage
 
 ```sh
 # list all operations
-anis https://petstore3.swagger.io/api/v3/openapi.json --list
+atlas https://petstore3.swagger.io/api/v3/openapi.json --list
 
-# show operation documentation
-anis https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id --help
+# show documentation for an operation
+atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id --help
 
 # call an operation
-anis https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
+atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
 
-# with query params
-anis https://petstore3.swagger.io/api/v3/openapi.json find-pets-by-status --query.status=available
+# query params
+atlas https://petstore3.swagger.io/api/v3/openapi.json find-pets-by-status --query.status=available
 
-# with request body (inline JSON)
-anis https://petstore3.swagger.io/api/v3/openapi.json add-pet --body='{"name":"Rex","status":"available"}'
-anis https://petstore3.swagger.io/api/v3/openapi.json add-pet -d '{"name":"Rex","status":"available"}'
+# request body — inline, file, or stdin
+atlas https://petstore3.swagger.io/api/v3/openapi.json add-pet -d '{"name":"Rex","status":"available"}'
+atlas https://petstore3.swagger.io/api/v3/openapi.json add-pet --body=@pet.json
+cat pet.json | atlas https://petstore3.swagger.io/api/v3/openapi.json add-pet -d @-
 
-# with request body from a file
-anis https://petstore3.swagger.io/api/v3/openapi.json add-pet --body=@pet.json
-anis https://petstore3.swagger.io/api/v3/openapi.json add-pet -d @pet.json
-
-# with request body from stdin
-cat pet.json | anis https://petstore3.swagger.io/api/v3/openapi.json add-pet -d @-
-echo '{"name":"Rex"}' | anis https://petstore3.swagger.io/api/v3/openapi.json add-pet --body=@-
-
-# with per-request headers and timeout
-anis https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 --header.x-request-id=abc --timeout=5
+# headers, timeout, verbose output
+atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 \
+  --header.authorization="Bearer tok" --timeout=10 -v
 ```
 
 ### Options
@@ -230,20 +172,20 @@ anis https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 --header.
 | Flag | Description |
 |------|-------------|
 | `--list` | List all operations with summaries |
-| `--help` | Show full documentation for an operation |
-| `--body=JSON` | Request body as inline JSON, `@file`, or `@-` for stdin |
-| `-d JSON\|@file\|@-` | Request body (alternative form) |
+| `--help` | Show documentation for an operation |
+| `--body=JSON\|@file\|@-` | Request body — inline JSON, file path, or stdin |
+| `-d JSON\|@file\|@-` | Alias for `--body` |
 | `--query.KEY=VAL` | Query parameter |
 | `--header.KEY=VAL` | Per-request header |
 | `--timeout=N` | Timeout in seconds |
-| `--base-url=URL` | Override the base URL from the schema |
-| `--output=FORMAT` | Output format: `json` (default), `raw`, `status`, `headers` |
+| `--base-url=URL` | Override the base URL |
+| `--output=FORMAT` | `json` (default), `raw`, `status`, `headers` |
 | `--no-color` | Disable colored output |
-| `-v`, `--verbose` | Show HTTP status and response headers |
+| `-v`, `--verbose` | Print status line and response headers |
 
 ### Profiles
 
-Save named API configurations in `~/.config/anis/config.json` to avoid repeating schema URLs and credentials:
+Save named configurations in `~/.config/atlas/config.json` to avoid repeating URLs and credentials:
 
 ```json
 {
@@ -255,70 +197,60 @@ Save named API configurations in `~/.config/anis/config.json` to avoid repeating
     "myapi": {
       "schema": "https://api.example.com/openapi.json",
       "base-url": "https://staging.example.com",
-      "headers": {
-        "authorization": "Bearer <token>"
-      },
-      "ssl": {
-        "cafile": "/etc/ssl/ca.pem"
-      }
+      "headers": { "authorization": "Bearer <token>" },
+      "ssl": { "cafile": "/etc/ssl/ca.pem" }
     }
   }
 }
 ```
 
-Then use the profile name instead of the URL:
+Use the profile name in place of the schema URL:
 
 ```sh
-anis petstore --list
-anis petstore get-pet-by-id 42
-anis myapi --list
+atlas petstore --list
+atlas petstore get-pet-by-id 42
+atlas myapi add-pet -d '{"name":"Rex"}'
 ```
 
-Profile management commands:
+Manage profiles from the CLI:
 
 ```sh
-# list all profiles
-anis profile list
-
-# show a profile's configuration
-anis profile show myapi
-
-# add or update a profile
-anis profile add myapi --schema=https://api.example.com/openapi.json \
+atlas profile list
+atlas profile show myapi
+atlas profile add myapi \
+  --schema=https://api.example.com/openapi.json \
   --base-url=https://staging.example.com \
   --header.authorization="Bearer <token>" \
   --timeout=30
-
-# remove a profile
-anis profile remove myapi
-anis profile rm myapi
+atlas profile remove myapi
 ```
 
 ### Shell completion
 
-Generate and install tab-completion for your shell:
-
-**Fish:**
-
 ```sh
-anis completion fish > ~/.config/fish/completions/anis.fish
+# fish
+atlas completion fish > ~/.config/fish/completions/atlas.fish
+
+# bash — add to ~/.bashrc
+source <(atlas completion bash)
+
+# zsh — add to ~/.zshrc
+atlas completion zsh > "${fpath[1]}/_atlas"
 ```
 
-**Bash:**
+Completion provides profile names as the first argument, operation names as the second (fetched live from the schema), and subcommand names for `profile`.
+
+## Building from source
 
 ```sh
-# add to ~/.bashrc
-source <(anis completion bash)
+make deps     # lunajson, luasocket, luasec, fennel, busted
+make build    # compile Fennel → Lua
+make test     # run test suite
+make install  # install bin/atlas to /usr/local/bin
+make binary   # build standalone binary → bin/atlas-bin
 ```
 
-**Zsh:**
-
-```sh
-# add to ~/.zshrc (ensure a fpath dir is set up first)
-anis completion zsh > "${fpath[1]}/_anis"
-```
-
-Completion covers profile names as the first argument, operation names as the second (fetched dynamically from the schema), and profile subcommands.
+`make binary` requires `fennel`, `lua 5.4`, `openssl`, and `pkg-config`. It statically links Lua, luasocket, and luasec — the resulting binary only needs OpenSSL at runtime.
 
 ## License
 

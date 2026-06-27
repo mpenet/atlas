@@ -1,7 +1,7 @@
 FENNEL ?= fnl
 FNL_DIR = fnl
 
-FNL_SOURCES = $(shell find $(FNL_DIR) -name "*.fnl" ! -name "anis-bin.fnl")
+FNL_SOURCES = $(shell find $(FNL_DIR) -name "*.fnl" ! -name "atlas-bin.fnl")
 LUA_TARGETS = $(FNL_SOURCES:$(FNL_DIR)/%.fnl=%.lua)
 
 # ---- OS detection ----
@@ -42,12 +42,14 @@ SOCKET_CORE_SRCS = luasocket.c timeout.c buffer.c io.c auxiliar.c compat.c \
                    options.c inet.c usocket.c except.c select.c tcp.c udp.c
 LUASEC_SRCS      = ssl.c context.c config.c options.c x509.c ec.c
 
-.PHONY: build binary clean deps install native-libs
+.PHONY: build binary clean deps install native-libs test
 
 deps:
 	luarocks install lunajson
 	luarocks install luasocket
 	luarocks install luasec
+	luarocks install fennel
+	luarocks install busted
 
 build: $(LUA_TARGETS)
 
@@ -55,8 +57,11 @@ $(LUA_TARGETS): %.lua: $(FNL_DIR)/%.fnl
 	@mkdir -p $(dir $@)
 	$(FENNEL) --compile $< > $@
 
+test: build
+	busted test/
+
 install: build
-	install -m 755 bin/anis /usr/local/bin/anis
+	install -m 755 bin/atlas /usr/local/bin/atlas
 
 # ---- standalone binary ----
 
@@ -99,8 +104,8 @@ $(NATIVE_BUILD)/.stamp:
 
 binary: build native-libs
 	CC_OPTS="$(OPENSSL_LDFLAGS)" \
-	$(FENNEL) --compile-binary fnl/anis-bin.fnl \
-	  bin/anis-bin \
+	$(FENNEL) --compile-binary fnl/atlas-bin.fnl \
+	  bin/atlas-bin \
 	  $(LUA_LIB) \
 	  $(LUA_INC) \
 	  --native-module $(NATIVE_BUILD)/libsocket_core.a \
@@ -109,5 +114,5 @@ binary: build native-libs
 
 clean:
 	rm -f $(LUA_TARGETS)
-	find anis -name "*.lua" -delete 2>/dev/null; true
-	rm -rf build bin/anis-bin fnl/anis-bin.fnl_binary.c
+	find atlas -name "*.lua" -delete 2>/dev/null; true
+	rm -rf build bin/atlas-bin fnl/atlas-bin.fnl_binary.c

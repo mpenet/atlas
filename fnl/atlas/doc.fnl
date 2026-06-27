@@ -1,4 +1,4 @@
-(local util (require :anis.util))
+(local util (require :atlas.util))
 
 (fn params-of-kind [op-spec kind]
   (icollect [_ p (ipairs (or op-spec.parameters []))]

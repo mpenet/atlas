@@ -1,9 +1,9 @@
-(local anis (require :anis))
+(local atlas (require :atlas))
 (local json (require :lunajson))
-(local pretty-mod (require :anis.pretty))
+(local pretty-mod (require :atlas.pretty))
 
 (fn config-path []
-  (.. (or (os.getenv :HOME) ".") "/.config/anis/config.json"))
+  (.. (or (os.getenv :HOME) ".") "/.config/atlas/config.json"))
 
 (fn load-config []
   (let [f (io.open (config-path) :r)]
@@ -179,77 +179,77 @@
     :remove (profile-remove config name)
     :rm     (profile-remove config name)
     _       (die (.. "Unknown profile subcommand: " (tostring subcmd)
-                     "\nUsage: anis profile <list|show|add|remove> [name] [options]"))))
+                     "\nUsage: atlas profile <list|show|add|remove> [name] [options]"))))
 
 (fn complete-ops [schema-or-profile]
   (let [config  (load-config)
         profile (?. config :profiles schema-or-profile)
         schema  (or (?. profile :schema) schema-or-profile)
         opts    {:headers (or (?. profile :headers) {})}
-        (ok c)  (pcall anis.client schema opts)]
+        (ok c)  (pcall atlas.client schema opts)]
     (when ok
       (each [k v (pairs c)]
         (when (op? v) (print k))))))
 
 (fn completion-fish []
-  (print "# anis fish completion — source this or put in ~/.config/fish/completions/anis.fish")
+  (print "# atlas fish completion — source this or put in ~/.config/fish/completions/atlas.fish")
   (print "")
   (print "# disable file completion by default")
-  (print "complete -c anis -f")
+  (print "complete -c atlas -f")
   (print "")
   (print "# flags")
-  (print "complete -c anis -l list      -d 'List all operations'")
-  (print "complete -c anis -l help      -d 'Show operation documentation'")
-  (print "complete -c anis -l no-color  -d 'Disable colored output'")
-  (print "complete -c anis -s v -l verbose -d 'Show status and headers'")
-  (print "complete -c anis -l output    -d 'Output format' -r -a 'json raw status headers'")
-  (print "complete -c anis -l timeout   -d 'Timeout in seconds' -r")
-  (print "complete -c anis -l base-url  -d 'Override base URL' -r")
-  (print "complete -c anis -l body      -d 'Request body JSON' -r")
-  (print "complete -c anis -s d         -d 'Request body JSON' -r")
+  (print "complete -c atlas -l list      -d 'List all operations'")
+  (print "complete -c atlas -l help      -d 'Show operation documentation'")
+  (print "complete -c atlas -l no-color  -d 'Disable colored output'")
+  (print "complete -c atlas -s v -l verbose -d 'Show status and headers'")
+  (print "complete -c atlas -l output    -d 'Output format' -r -a 'json raw status headers'")
+  (print "complete -c atlas -l timeout   -d 'Timeout in seconds' -r")
+  (print "complete -c atlas -l base-url  -d 'Override base URL' -r")
+  (print "complete -c atlas -l body      -d 'Request body JSON' -r")
+  (print "complete -c atlas -s d         -d 'Request body JSON' -r")
   (print "")
   (print "# profile names as first positional arg")
-  (print "complete -c anis -n '__fish_is_first_arg' -a '(anis profile list 2>/dev/null | cut -f1)' -d 'Profile'")
-  (print "complete -c anis -n '__fish_is_first_arg' -a 'profile' -d 'Manage profiles'")
+  (print "complete -c atlas -n '__fish_is_first_arg' -a '(atlas profile list 2>/dev/null | cut -f1)' -d 'Profile'")
+  (print "complete -c atlas -n '__fish_is_first_arg' -a 'profile' -d 'Manage profiles'")
   (print "")
   (print "# operation names as second positional arg")
-  (print "complete -c anis -n 'not __fish_is_first_arg' -a '(anis --complete-ops=(commandline -opc | string split \" \" -f2) 2>/dev/null)'")
+  (print "complete -c atlas -n 'not __fish_is_first_arg' -a '(atlas --complete-ops=(commandline -opc | string split \" \" -f2) 2>/dev/null)'")
   (print "")
   (print "# profile subcommands")
-  (print "complete -c anis -n '__fish_seen_subcommand_from profile' -a 'list show add remove' -d 'Profile subcommand'"))
+  (print "complete -c atlas -n '__fish_seen_subcommand_from profile' -a 'list show add remove' -d 'Profile subcommand'"))
 
 (fn completion-bash []
-  (print "# anis bash completion — add to ~/.bashrc: source <(anis completion bash)")
-  (print "_anis_complete() {")
+  (print "# atlas bash completion — add to ~/.bashrc: source <(atlas completion bash)")
+  (print "_atlas_complete() {")
   (print "  local cur=\"${COMP_WORDS[COMP_CWORD]}\"")
   (print "  local prev=\"${COMP_WORDS[COMP_CWORD-1]}\"")
   (print "  if [ $COMP_CWORD -eq 1 ]; then")
-  (print "    COMPREPLY=($(compgen -W \"$(anis profile list 2>/dev/null | cut -f1) profile\" -- \"$cur\"))")
+  (print "    COMPREPLY=($(compgen -W \"$(atlas profile list 2>/dev/null | cut -f1) profile\" -- \"$cur\"))")
   (print "  elif [ $COMP_CWORD -eq 2 ] && [ \"${COMP_WORDS[1]}\" != 'profile' ]; then")
-  (print "    COMPREPLY=($(compgen -W \"$(anis --complete-ops=${COMP_WORDS[1]} 2>/dev/null)\" -- \"$cur\"))")
+  (print "    COMPREPLY=($(compgen -W \"$(atlas --complete-ops=${COMP_WORDS[1]} 2>/dev/null)\" -- \"$cur\"))")
   (print "  elif [ \"${COMP_WORDS[1]}\" = 'profile' ] && [ $COMP_CWORD -eq 2 ]; then")
   (print "    COMPREPLY=($(compgen -W 'list show add remove' -- \"$cur\"))")
   (print "  fi")
   (print "}")
-  (print "complete -F _anis_complete anis"))
+  (print "complete -F _atlas_complete atlas"))
 
 (fn completion-zsh []
-  (print "# anis zsh completion — add to fpath or source directly")
-  (print "#compdef anis")
-  (print "_anis() {")
+  (print "# atlas zsh completion — add to fpath or source directly")
+  (print "#compdef atlas")
+  (print "_atlas() {")
   (print "  local state")
   (print "  _arguments '1:schema-or-profile:->profile' '2:operation:->operation'")
   (print "  case $state in")
-  (print "    profile) compadd $(anis profile list 2>/dev/null | cut -f1) profile ;;")
-  (print "    operation) compadd $(anis --complete-ops=${words[2]} 2>/dev/null) ;;")
+  (print "    profile) compadd $(atlas profile list 2>/dev/null | cut -f1) profile ;;")
+  (print "    operation) compadd $(atlas --complete-ops=${words[2]} 2>/dev/null) ;;")
   (print "  esac")
   (print "}")
-  (print "_anis"))
+  (print "_atlas"))
 
 (fn usage []
-  (print "Usage: anis <schema-or-profile> [operation] [path-params...] [options]")
-  (print "       anis profile <list|show|add|remove> [name] [options]")
-  (print "       anis completion <fish|bash|zsh>")
+  (print "Usage: atlas <schema-or-profile> [operation] [path-params...] [options]")
+  (print "       atlas profile <list|show|add|remove> [name] [options]")
+  (print "       atlas completion <fish|bash|zsh>")
   (print "")
   (print "Options:")
   (print "  --list                List all operations")
@@ -264,14 +264,14 @@
   (print "  --no-color            Disable colored output")
   (print "  -v, --verbose         Show status and response headers")
   (print "")
-  (print "Profile options (for 'anis profile add'):")
+  (print "Profile options (for 'atlas profile add'):")
   (print "  --schema=URL          Schema URL or file path")
   (print "  --base-url=URL        Override base URL")
   (print "  --header.KEY=VAL      Default request header")
   (print "  --timeout=N           Default timeout")
   (print "  --ssl.KEY=VAL         SSL options (cafile, verify, etc.)")
   (print "")
-  (print "Config: ~/.config/anis/config.json"))
+  (print "Config: ~/.config/atlas/config.json"))
 
 (fn run [args]
   (let [p (parse-args args)]
@@ -286,7 +286,7 @@
           :fish (completion-fish)
           :bash (completion-bash)
           :zsh  (completion-zsh)
-          _     (die "Usage: anis completion <fish|bash|zsh>"))
+          _     (die "Usage: atlas completion <fish|bash|zsh>"))
         (= p.schema :profile)
         (run-profile p.operation (. p.path-params 1) p (load-config))
         (let [config  (load-config)
@@ -297,7 +297,7 @@
                        :ssl     (or (?. profile :ssl) {})}]
           (when (or p.base-url (?. profile :base-url))
             (tset opts :base-url (or p.base-url (?. profile :base-url))))
-          (let [(ok-c c) (pcall anis.client schema opts)]
+          (let [(ok-c c) (pcall atlas.client schema opts)]
             (when (not ok-c) (die (.. "failed to build client: " (tostring c))))
             (if
               p.list
