@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: atlas-macos-arm64
+          - os: macos-13
+            artifact: atlas-macos-x86_64
+          - os: ubuntu-latest
+            artifact: atlas-linux-x86_64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install lua openssl pkg-config luarocks
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y lua5.4 liblua5.4-dev libssl-dev pkg-config unzip luarocks
+
+      - name: Install Lua dependencies
+        run: |
+          luarocks install fennel
+          luarocks install lunajson
+          luarocks install luasocket
+          luarocks install luasec
+
+      - name: Build binary
+        run: make binary FENNEL=fennel
+
+      - name: Stage artifact
+        run: cp bin/atlas-bin ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: atlas-*
+          generate_release_notes: true
