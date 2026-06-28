@@ -1,4 +1,5 @@
 local atlas = require("atlas")
+local cache = require("atlas.cache")
 local json = require("lunajson")
 local pretty_mod = require("atlas.pretty")
 local function config_path()
@@ -80,8 +81,13 @@ local function parse_args(args)
         r["help"] = true
       elseif (a == "--no-color") then
         r["no-color"] = true
+      elseif (a == "--reload") then
+        r["reload"] = true
       elseif ((a == "-v") or (a == "--verbose")) then
         r["verbose"] = true
+      elseif a:match("^%-%-cache%-ttl=(.+)") then
+        local v = a:match("^%-%-cache%-ttl=(.+)")
+        r["cache-ttl"] = tonumber(v)
       elseif a:match("^%-%-complete%-ops=(.+)") then
         local v = a:match("^%-%-complete%-ops=(.+)")
         r["complete-ops"] = v
@@ -128,7 +134,7 @@ local function list_ops(c)
   for _, op in ipairs(ops) do
     local _9_
     if op.summary then
-      _9_ = ("\9" .. op.summary)
+      _9_ = ("\t" .. op.summary)
     else
       _9_ = ""
     end
@@ -145,18 +151,18 @@ local function print_resp(resp, output, no_color, verbose)
     print("")
   else
   end
-  local _12_ = (output or "json")
-  if (_12_ == "raw") then
+  local case_12_ = (output or "json")
+  if (case_12_ == "raw") then
     return print(tostring(resp.body))
-  elseif (_12_ == "status") then
+  elseif (case_12_ == "status") then
     return print(resp.status)
-  elseif (_12_ == "headers") then
+  elseif (case_12_ == "headers") then
     for k, v in pairs((resp.headers or {})) do
       print((k .. ": " .. v))
     end
     return nil
   else
-    local _ = _12_
+    local _ = case_12_
     if resp.body then
       return print(pretty_mod.pretty(resp.body, 0, not no_color))
     else
@@ -193,7 +199,7 @@ local function profile_list(config)
     return print("No profiles configured.")
   else
     for name, p in pairs(profiles) do
-      print((name .. "\9" .. (p.schema or "(no schema)")))
+      print((name .. "\t" .. (p.schema or "(no schema)")))
     end
     return nil
   end
@@ -420,6 +426,8 @@ local function usage()
   print("  --output=json|raw|status|headers  Output format (default: json)")
   print("  --no-color            Disable colored output")
   print("  -v, --verbose         Show status and response headers")
+  print("  --reload              Re-fetch and re-cache the schema")
+  print("  --cache-ttl=N         Schema cache TTL in seconds (default: 3600)")
   print("")
   print("Profile options (for 'atlas profile add'):")
   print("  --schema=URL          Schema URL or file path")
@@ -429,6 +437,21 @@ local function usage()
   print("  --ssl.KEY=VAL         SSL options (cafile, verify, etc.)")
   print("")
   return print("Config: ~/.config/atlas/config.json")
+end
+local function load_schema_cached(url, ttl, reload_3f)
+  local cached
+  if not reload_3f then
+    cached = cache.get(url, ttl)
+  else
+    cached = nil
+  end
+  if cached then
+    return cached
+  else
+    local schema = atlas["load-schema"](url)
+    cache.put(url, schema)
+    return schema
+  end
 end
 local function run(args)
   local p = parse_args(args)
@@ -443,15 +466,15 @@ local function run(args)
   else
   end
   if (p.schema == "completion") then
-    local _51_ = p.operation
-    if (_51_ == "fish") then
+    local case_53_ = p.operation
+    if (case_53_ == "fish") then
       return completion_fish()
-    elseif (_51_ == "bash") then
+    elseif (case_53_ == "bash") then
       return completion_bash()
-    elseif (_51_ == "zsh") then
+    elseif (case_53_ == "zsh") then
       return completion_zsh()
     else
-      local _ = _51_
+      local _ = case_53_
       return die("Usage: atlas completion <fish|bash|zsh>")
     end
   elseif (p.schema == "profile") then
@@ -460,77 +483,98 @@ local function run(args)
     local config = load_config()
     local profile
     do
-      local t_53_ = config
-      if (nil ~= t_53_) then
-        t_53_ = t_53_.profiles
+      local t_55_ = config
+      if (nil ~= t_55_) then
+        t_55_ = t_55_.profiles
       else
       end
-      if (nil ~= t_53_) then
-        t_53_ = t_53_[p.schema]
+      if (nil ~= t_55_) then
+        t_55_ = t_55_[p.schema]
       else
       end
-      profile = t_53_
+      profile = t_55_
     end
+    local raw_schema
+    local _59_
+    do
+      local t_58_ = profile
+      if (nil ~= t_58_) then
+        t_58_ = t_58_.schema
+      else
+      end
+      _59_ = t_58_
+    end
+    raw_schema = (_59_ or p.schema)
+    local ttl
+    local or_61_ = p["cache-ttl"]
+    if not or_61_ then
+      local t_62_ = profile
+      if (nil ~= t_62_) then
+        t_62_ = t_62_["cache-ttl"]
+      else
+      end
+      or_61_ = t_62_
+    end
+    ttl = (or_61_ or 3600)
     local schema
-    local _57_
-    do
-      local t_56_ = profile
-      if (nil ~= t_56_) then
-        t_56_ = t_56_.schema
-      else
-      end
-      _57_ = t_56_
+    if ((type(raw_schema) == "string") and raw_schema:match("^https?://")) then
+      schema = load_schema_cached(raw_schema, ttl, p.reload)
+    else
+      schema = raw_schema
     end
-    schema = (_57_ or p.schema)
     local opts
-    local _60_
-    do
-      local t_59_ = profile
-      if (nil ~= t_59_) then
-        t_59_ = t_59_.headers
-      else
-      end
-      _60_ = t_59_
-    end
-    local or_62_ = p.timeout
-    if not or_62_ then
-      local t_63_ = profile
-      if (nil ~= t_63_) then
-        t_63_ = t_63_.timeout
-      else
-      end
-      or_62_ = t_63_
-    end
     local _66_
     do
       local t_65_ = profile
       if (nil ~= t_65_) then
-        t_65_ = t_65_.ssl
+        t_65_ = t_65_.headers
       else
       end
       _66_ = t_65_
     end
-    opts = {headers = (_60_ or {}), timeout = or_62_, ssl = (_66_ or {})}
-    local or_68_ = p["base-url"]
+    local or_68_ = p.timeout
     if not or_68_ then
       local t_69_ = profile
       if (nil ~= t_69_) then
-        t_69_ = t_69_["base-url"]
+        t_69_ = t_69_.timeout
       else
       end
       or_68_ = t_69_
     end
-    if or_68_ then
-      local or_71_ = p["base-url"]
-      if not or_71_ then
-        local t_72_ = profile
-        if (nil ~= t_72_) then
-          t_72_ = t_72_["base-url"]
+    local _72_
+    do
+      local t_71_ = profile
+      if (nil ~= t_71_) then
+        t_71_ = t_71_.ssl
+      else
+      end
+      _72_ = t_71_
+    end
+    opts = {headers = (_66_ or {}), timeout = or_68_, ssl = (_72_ or {})}
+    local or_74_ = p["base-url"]
+    if not or_74_ then
+      local t_75_ = profile
+      if (nil ~= t_75_) then
+        t_75_ = t_75_["base-url"]
+      else
+      end
+      or_74_ = t_75_
+    end
+    if or_74_ then
+      local or_77_ = p["base-url"]
+      if not or_77_ then
+        local t_78_ = profile
+        if (nil ~= t_78_) then
+          t_78_ = t_78_["base-url"]
         else
         end
-        or_71_ = t_72_
+        or_77_ = t_78_
       end
-      opts["base-url"] = or_71_
+      opts["base-url"] = or_77_
+    else
+    end
+    if (type(schema) == "table") then
+      opts["source-url"] = raw_schema
     else
     end
     local ok_c, c = pcall(atlas.client, schema, opts)
@@ -557,31 +601,31 @@ local function run(args)
       end
       local path_args
       do
-        local tbl_21_ = {}
-        local i_22_ = 0
+        local tbl_26_ = {}
+        local i_27_ = 0
         for _, v in ipairs(p["path-params"]) do
-          local val_23_ = coerce(v)
-          if (nil ~= val_23_) then
-            i_22_ = (i_22_ + 1)
-            tbl_21_[i_22_] = val_23_
+          local val_28_ = coerce(v)
+          if (nil ~= val_28_) then
+            i_27_ = (i_27_ + 1)
+            tbl_26_[i_27_] = val_28_
           else
           end
         end
-        path_args = tbl_21_
+        path_args = tbl_26_
       end
       local call_args
       do
-        local tbl_21_ = {}
-        local i_22_ = 0
+        local tbl_26_ = {}
+        local i_27_ = 0
         for _, v in ipairs(path_args) do
-          local val_23_ = v
-          if (nil ~= val_23_) then
-            i_22_ = (i_22_ + 1)
-            tbl_21_[i_22_] = val_23_
+          local val_28_ = v
+          if (nil ~= val_28_) then
+            i_27_ = (i_27_ + 1)
+            tbl_26_[i_27_] = val_28_
           else
           end
         end
-        call_args = tbl_21_
+        call_args = tbl_26_
       end
       local req_opts
       do

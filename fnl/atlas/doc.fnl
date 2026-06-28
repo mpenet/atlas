@@ -33,9 +33,9 @@
 (fn build [path method op-spec]
   (let [lines []
         add #(table.insert lines $)
-        path-params  (params-of-kind op-spec :path)
+        path-params (params-of-kind op-spec :path)
         query-params (params-of-kind op-spec :query)
-        has-body?    (not= nil op-spec.requestBody)]
+        has-body? (not= nil op-spec.requestBody)]
     (add (string.format "%s %s" (method:upper) path))
     (when op-spec.summary
       (add (.. "\n" op-spec.summary)))

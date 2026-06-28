@@ -63,8 +63,9 @@
   schema — parsed schema table, local file path, or http(s):// URL
   ?opts  — {:base-url \"https://...\" :headers {} :http-fn custom-fn}
            base-url defaults to schema.servers[1].url"
-  (let [source-url (when (= (type schema) :string) schema)
-        schema (if source-url (load-schema source-url) schema)
+  (let [source-url (or (when (= (type schema) :string) schema)
+                       (?. ?opts :source-url))
+        schema (if (= (type schema) :string) (load-schema schema) schema)
         server (and schema.servers (. schema.servers 1))
         server-url (when server
                      (var u server.url)
@@ -91,4 +92,4 @@
                 (make-operation client path method op-spec)))))
     client))
 
-{: client}
+{: client : load-schema}

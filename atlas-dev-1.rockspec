@@ -9,7 +9,7 @@ source = {
 description = {
   summary = "Runtime OpenAPI client for Fennel",
   detailed = "Dynamically builds a client from any OpenAPI 3.x schema at runtime. No code generation.",
-  license = "MIT",
+  license = "Apache-2.0",
   homepage = "https://github.com/mpenet/atlas",
 }
 

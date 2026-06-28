@@ -1,21 +1,21 @@
 local util = require("atlas.util")
 local function params_of_kind(op_spec, kind)
-  local tbl_21_ = {}
-  local i_22_ = 0
+  local tbl_26_ = {}
+  local i_27_ = 0
   for _, p in ipairs((op_spec.parameters or {})) do
-    local val_23_
+    local val_28_
     if (p["in"] == kind) then
-      val_23_ = p
+      val_28_ = p
     else
-      val_23_ = nil
+      val_28_ = nil
     end
-    if (nil ~= val_23_) then
-      i_22_ = (i_22_ + 1)
-      tbl_21_[i_22_] = val_23_
+    if (nil ~= val_28_) then
+      i_27_ = (i_27_ + 1)
+      tbl_26_[i_27_] = val_28_
     else
     end
   end
-  return tbl_21_
+  return tbl_26_
 end
 local function param_type(p)
   local _4_

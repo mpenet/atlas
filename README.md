@@ -1,8 +1,9 @@
 # atlas
 
-Runtime OpenAPI 3.x client for Fennel and Lua. Point it at any schema — local file, URL, or parsed table — and get back a callable client. No code generation, no build step.
+Runtime OpenAPI 3.x client for Fennel and Lua. Point it at any schema — local
+file, URL, or parsed table — and get back a callable client.
 
-Also ships as a standalone CLI for exploring and calling any HTTP API that has an OpenAPI schema.
+Also ships as a **standalone OpenApi CLI**.
 
 ## Install
 
@@ -83,37 +84,6 @@ Per-request opts:
 | `:query` | Query parameters |
 | `:headers` | Merged over client-level defaults |
 | `:timeout` | Overrides client-level timeout |
-
-### HTTP adapter
-
-The built-in adapter uses luasocket, luasec, and lunajson:
-
-- Routes `https://` through luasec, `http://` through luasocket
-- URL-encodes query params
-- Sets `Content-Type` and `Accept` from the schema's content declarations
-- Sets `Content-Length` automatically when a body is present
-- Returns `{:status N :headers {} :body table-or-string-or-nil}`
-
-Swap it out by passing `:http-fn`:
-
-```fennel
-(fn my-http [{: method : url : headers : query : body}]
-  ; must return {:status N :headers {} :body ...}
-  )
-
-(local client (atlas.client schema {:http-fn my-http}))
-```
-
-### Content negotiation
-
-`Content-Type` is selected from `requestBody.content` in this order:
-
-1. `application/json`
-2. `application/x-www-form-urlencoded`
-3. `multipart/form-data`
-4. First key present
-
-`Accept` is the union of all `responses.*.content` keys.
 
 ### Docstrings
 
@@ -254,4 +224,4 @@ make binary   # build standalone binary → bin/atlas-bin
 
 ## License
 
-MIT
+Apache 2.0

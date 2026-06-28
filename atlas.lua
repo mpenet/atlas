@@ -58,15 +58,15 @@ local function make_operation(client, path, method, op_spec)
     local opts = args[n_opts]
     local headers
     do
-      local tbl_16_ = {}
+      local tbl_21_ = {}
       for k, v in pairs((client.headers or {})) do
-        local k_17_, v_18_ = k, v
-        if ((k_17_ ~= nil) and (v_18_ ~= nil)) then
-          tbl_16_[k_17_] = v_18_
+        local k_22_, v_23_ = k, v
+        if ((k_22_ ~= nil) and (v_23_ ~= nil)) then
+          tbl_21_[k_22_] = v_23_
         else
         end
       end
-      headers = tbl_16_
+      headers = tbl_21_
     end
     local _9_
     do
@@ -116,14 +116,25 @@ local function make_operation(client, path, method, op_spec)
 end
 local function client(schema, _3fopts)
   local source_url
+  local _20_
   if (type(schema) == "string") then
-    source_url = schema
+    _20_ = schema
   else
-    source_url = nil
+    _20_ = nil
   end
+  local or_22_ = _20_
+  if not or_22_ then
+    local t_23_ = _3fopts
+    if (nil ~= t_23_) then
+      t_23_ = t_23_["source-url"]
+    else
+    end
+    or_22_ = t_23_
+  end
+  source_url = or_22_
   local schema0
-  if source_url then
-    schema0 = load_schema(source_url)
+  if (type(schema) == "string") then
+    schema0 = load_schema(schema)
   else
     schema0 = schema
   end
@@ -139,70 +150,70 @@ local function client(schema, _3fopts)
     server_url = nil
   end
   local base_url
-  local _24_
+  local _28_
   do
-    local t_23_ = _3fopts
-    if (nil ~= t_23_) then
-      t_23_ = t_23_["base-url"]
+    local t_27_ = _3fopts
+    if (nil ~= t_27_) then
+      t_27_ = t_27_["base-url"]
     else
     end
-    _24_ = t_23_
+    _28_ = t_27_
   end
-  local or_26_ = _24_
-  if not or_26_ then
+  local or_30_ = _28_
+  if not or_30_ then
     if (server_url and server_url:match("^https?://")) then
-      or_26_ = server_url
+      or_30_ = server_url
     else
-      or_26_ = nil
+      or_30_ = nil
     end
   end
-  if not or_26_ then
+  if not or_30_ then
     if (source_url and server_url and server_url:match("^/")) then
       local origin = source_url:match("^(https?://[^/]+)")
-      or_26_ = (origin .. server_url)
+      or_30_ = (origin .. server_url)
     else
-      or_26_ = nil
+      or_30_ = nil
     end
   end
-  base_url = (or_26_ or error("no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts"))
+  base_url = (or_30_ or error("no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts"))
   local client0
-  local _31_
+  local _35_
   do
-    local t_30_ = _3fopts
-    if (nil ~= t_30_) then
-      t_30_ = t_30_["http-fn"]
+    local t_34_ = _3fopts
+    if (nil ~= t_34_) then
+      t_34_ = t_34_["http-fn"]
     else
     end
-    _31_ = t_30_
+    _35_ = t_34_
   end
-  local _34_
+  local _38_
   do
-    local t_33_ = _3fopts
-    if (nil ~= t_33_) then
-      t_33_ = t_33_.headers
+    local t_37_ = _3fopts
+    if (nil ~= t_37_) then
+      t_37_ = t_37_.headers
     else
     end
-    _34_ = t_33_
+    _38_ = t_37_
   end
-  local _37_
+  local _41_
   do
-    local t_36_ = _3fopts
-    if (nil ~= t_36_) then
-      t_36_ = t_36_.timeout
+    local t_40_ = _3fopts
+    if (nil ~= t_40_) then
+      t_40_ = t_40_.timeout
     else
     end
-    _37_ = t_36_
+    _41_ = t_40_
   end
-  local _40_
+  local _44_
   do
-    local t_39_ = _3fopts
-    if (nil ~= t_39_) then
-      t_39_ = t_39_.ssl
+    local t_43_ = _3fopts
+    if (nil ~= t_43_) then
+      t_43_ = t_43_.ssl
     else
     end
-    _40_ = t_39_
+    _44_ = t_43_
   end
-  client0 = {["base-url"] = base_url, ["http-fn"] = (_31_ or http.request), headers = (_34_ or {}), timeout = _37_, ssl = _40_}
+  client0 = {["base-url"] = base_url, ["http-fn"] = (_35_ or http.request), headers = (_38_ or {}), timeout = _41_, ssl = _44_}
   for path, methods in pairs(schema0.paths) do
     for method, op_spec in pairs(methods) do
       if ((type(op_spec) == "table") and op_spec.operationId) then
@@ -213,4 +224,4 @@ local function client(schema, _3fopts)
   end
   return client0
 end
-return {client = client}
+return {client = client, ["load-schema"] = load_schema}

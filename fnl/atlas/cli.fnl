@@ -1,4 +1,5 @@
 (local atlas (require :atlas))
+(local cache (require :atlas.cache))
 (local json (require :lunajson))
 (local pretty-mod (require :atlas.pretty))
 
@@ -76,16 +77,21 @@
           (let [(v) (a:match "^%-%-output=(.+)")]
             (tset r :output v))
 
-          (= a :--list)          (tset r :list true)
-          (= a :--help)          (tset r :help true)
-          (= a :--no-color)      (tset r :no-color true)
+          (= a :--list) (tset r :list true)
+          (= a :--help) (tset r :help true)
+          (= a :--no-color) (tset r :no-color true)
+          (= a :--reload) (tset r :reload true)
           (or (= a :-v) (= a :--verbose)) (tset r :verbose true)
+
+          (a:match "^%-%-cache%-ttl=(.+)")
+          (let [(v) (a:match "^%-%-cache%-ttl=(.+)")]
+            (tset r :cache-ttl (tonumber v)))
           (a:match "^%-%-complete%-ops=(.+)")
           (let [(v) (a:match "^%-%-complete%-ops=(.+)")]
             (tset r :complete-ops v))
 
           (not (a:match "^%-"))
-          (if (not r.schema)    (tset r :schema a)
+          (if (not r.schema) (tset r :schema a)
               (not r.operation) (tset r :operation a)
               (table.insert r.path-params a))))
       (set i (+ i 1)))
@@ -154,11 +160,11 @@
           "profile add requires --schema=URL")
   (let [profiles (or config.profiles {})
         existing (or (. profiles name) {})
-        updated  {:schema (or p.schema-url existing.schema)}]
+        updated {:schema (or p.schema-url existing.schema)}]
     (when p.base-url (tset updated :base-url p.base-url))
-    (when p.timeout  (tset updated :timeout p.timeout))
+    (when p.timeout (tset updated :timeout p.timeout))
     (when (next p.headers) (tset updated :headers p.headers))
-    (when (next p.ssl)     (tset updated :ssl p.ssl))
+    (when (next p.ssl) (tset updated :ssl p.ssl))
     (tset profiles name updated)
     (tset config :profiles profiles)
     (save-config config)
@@ -173,12 +179,12 @@
 
 (fn run-profile [subcmd name p config]
   (match subcmd
-    :list   (profile-list config)
-    :show   (profile-show config name)
-    :add    (profile-add config name p nil)
+    :list (profile-list config)
+    :show (profile-show config name)
+    :add (profile-add config name p nil)
     :remove (profile-remove config name)
-    :rm     (profile-remove config name)
-    _       (die (.. "Unknown profile subcommand: " (tostring subcmd)
+    :rm (profile-remove config name)
+    _ (die (.. "Unknown profile subcommand: " (tostring subcmd)
                      "\nUsage: atlas profile <list|show|add|remove> [name] [options]"))))
 
 (fn complete-ops [schema-or-profile]
@@ -263,6 +269,8 @@
   (print "  --output=json|raw|status|headers  Output format (default: json)")
   (print "  --no-color            Disable colored output")
   (print "  -v, --verbose         Show status and response headers")
+  (print "  --reload              Re-fetch and re-cache the schema")
+  (print "  --cache-ttl=N         Schema cache TTL in seconds (default: 3600)")
   (print "")
   (print "Profile options (for 'atlas profile add'):")
   (print "  --schema=URL          Schema URL or file path")
@@ -272,6 +280,14 @@
   (print "  --ssl.KEY=VAL         SSL options (cafile, verify, etc.)")
   (print "")
   (print "Config: ~/.config/atlas/config.json"))
+
+(fn load-schema-cached [url ttl reload?]
+  (let [cached (when (not reload?) (cache.get url ttl))]
+    (if cached
+        cached
+        (let [schema (atlas.load-schema url)]
+          (cache.put url schema)
+          schema))))
 
 (fn run [args]
   (let [p (parse-args args)]
@@ -285,18 +301,25 @@
         (match p.operation
           :fish (completion-fish)
           :bash (completion-bash)
-          :zsh  (completion-zsh)
-          _     (die "Usage: atlas completion <fish|bash|zsh>"))
+          :zsh (completion-zsh)
+          _ (die "Usage: atlas completion <fish|bash|zsh>"))
         (= p.schema :profile)
         (run-profile p.operation (. p.path-params 1) p (load-config))
-        (let [config  (load-config)
+        (let [config (load-config)
               profile (?. config :profiles p.schema)
-              schema  (or (?. profile :schema) p.schema)
-              opts    {:headers (or (?. profile :headers) {})
-                       :timeout (or p.timeout (?. profile :timeout))
-                       :ssl     (or (?. profile :ssl) {})}]
+              raw-schema (or (?. profile :schema) p.schema)
+              ttl (or p.cache-ttl (?. profile :cache-ttl) 3600)
+              schema (if (and (= (type raw-schema) :string)
+                              (raw-schema:match "^https?://"))
+                        (load-schema-cached raw-schema ttl p.reload)
+                        raw-schema)
+              opts {:headers (or (?. profile :headers) {})
+                    :timeout (or p.timeout (?. profile :timeout))
+                    :ssl (or (?. profile :ssl) {})}]
           (when (or p.base-url (?. profile :base-url))
             (tset opts :base-url (or p.base-url (?. profile :base-url))))
+          (when (= (type schema) :table)
+            (tset opts :source-url raw-schema))
           (let [(ok-c c) (pcall atlas.client schema opts)]
             (when (not ok-c) (die (.. "failed to build client: " (tostring c))))
             (if
@@ -317,13 +340,13 @@
                 (when (not op) (die (.. "Unknown operation: " p.operation)))
                 (let [path-args (icollect [_ v (ipairs p.path-params)] (coerce v))
                       call-args (icollect [_ v (ipairs path-args)] v)
-                      req-opts  (let [o {}]
-                                  (when (next p.query)   (tset o :query p.query))
-                                  (when (next p.headers) (tset o :headers p.headers))
-                                  (when p.timeout        (tset o :timeout p.timeout))
-                                  (when (next o) o))]
+                      req-opts (let [o {}]
+                                 (when (next p.query) (tset o :query p.query))
+                                 (when (next p.headers) (tset o :headers p.headers))
+                                 (when p.timeout (tset o :timeout p.timeout))
+                                 (when (next o) o))]
                   (when op.has-body? (table.insert call-args p.body))
-                  (when req-opts     (table.insert call-args req-opts))
+                  (when req-opts (table.insert call-args req-opts))
                   (let [(ok-r resp) (pcall op (table.unpack call-args))]
                     (if ok-r
                         (print-resp resp p.output p.no-color p.verbose)
