@@ -13,9 +13,15 @@ SOCKET_SRC       = $(NATIVE_BUILD)/luasocket/src
 LUASEC_SRC       = $(NATIVE_BUILD)/luasec/src
 
 # ---- auto-detected tool paths (override if needed) ----
-LUA_INC         ?= $(shell pkg-config --cflags lua5.4 2>/dev/null | tr ' ' '\n' | grep '^-I' | head -1 | cut -c3-)
-_LUA_LIBDIR     := $(shell pkg-config --variable=libdir lua5.4 2>/dev/null)
+_lua_cflags     := $(shell pkg-config --cflags lua5.4 2>/dev/null || \
+                            pkg-config --cflags lua5.5 2>/dev/null || \
+                            pkg-config --cflags lua 2>/dev/null)
+LUA_INC         ?= $(patsubst -I%,%,$(firstword $(filter -I%,$(_lua_cflags))))
+_LUA_LIBDIR     := $(shell pkg-config --variable=libdir lua5.4 2>/dev/null || \
+                            pkg-config --variable=libdir lua5.5 2>/dev/null || \
+                            pkg-config --variable=libdir lua 2>/dev/null)
 LUA_LIB         ?= $(or $(wildcard $(_LUA_LIBDIR)/liblua5.4.a),\
+                         $(wildcard $(_LUA_LIBDIR)/liblua5.5.a),\
                          $(wildcard $(_LUA_LIBDIR)/liblua.a),\
                          $(_LUA_LIBDIR)/liblua.a)
 OPENSSL_INC     ?= $(shell pkg-config --variable=includedir openssl 2>/dev/null)
