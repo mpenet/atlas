@@ -118,6 +118,7 @@ $(NATIVE_BUILD)/.stamp:
 	@touch $@
 
 binary: build native-libs
+	LUA_PATH="./?.lua;./?/init.lua;;" \
 	CC_OPTS="$(OPENSSL_LDFLAGS)" \
 	$(FENNEL) --compile-binary fnl/atlas-bin.fnl \
 	  bin/atlas-bin \
@@ -126,6 +127,7 @@ binary: build native-libs
 	  --native-module $(NATIVE_BUILD)/libsocket_core.a \
 	  --native-module $(NATIVE_BUILD)/libmime_core.a \
 	  --native-module $(NATIVE_BUILD)/libssl_lua.a
+	strip bin/atlas-bin
 
 clean:
 	rm -f $(LUA_TARGETS)
