@@ -4,6 +4,7 @@ local cache = require("atlas.cache")
 local http_mod = require("atlas.http")
 local json = require("lunajson")
 local pretty_mod = require("atlas.pretty")
+local socket = require("socket")
 local function config_path()
   return ((os.getenv("HOME") or ".") .. "/.config/atlas/config.json")
 end
@@ -248,7 +249,7 @@ local function select_path(data, path)
   end
   return cur
 end
-local function print_resp(resp, output, no_color, verbose, _3fselect)
+local function print_resp(resp, output, no_color, verbose, _3fselect, _3felapsed)
   local error_3f = (resp.status and (resp.status >= 400))
   local body
   if (not error_3f and _3fselect and resp.body) then
@@ -256,8 +257,14 @@ local function print_resp(resp, output, no_color, verbose, _3fselect)
   else
     body = resp.body
   end
+  local timing
+  if _3felapsed then
+    timing = ("  " .. string.format("%.3fs", _3felapsed))
+  else
+    timing = ""
+  end
   if error_3f then
-    io.stderr:write(("HTTP " .. resp.status .. "\n"))
+    io.stderr:write(("HTTP " .. resp.status .. timing .. "\n"))
     if verbose then
       for k, v in pairs((resp.headers or {})) do
         io.stderr:write((k .. ": " .. v .. "\n"))
@@ -272,25 +279,25 @@ local function print_resp(resp, output, no_color, verbose, _3fselect)
     return os.exit(1)
   else
     if verbose then
-      print(("HTTP " .. resp.status))
+      print(("HTTP " .. resp.status .. timing))
       for k, v in pairs((resp.headers or {})) do
         print((k .. ": " .. v))
       end
       print("")
     else
     end
-    local case_24_ = (output or "json")
-    if (case_24_ == "raw") then
+    local case_25_ = (output or "json")
+    if (case_25_ == "raw") then
       return print(tostring(body))
-    elseif (case_24_ == "status") then
+    elseif (case_25_ == "status") then
       return print(resp.status)
-    elseif (case_24_ == "headers") then
+    elseif (case_25_ == "headers") then
       for k, v in pairs((resp.headers or {})) do
         print((k .. ": " .. v))
       end
       return nil
     else
-      local _ = case_24_
+      local _ = case_25_
       if body then
         return print(pretty_mod.pretty(body, 0, not no_color))
       else
@@ -314,16 +321,16 @@ local function die(msg)
 end
 local function profile_list(config)
   local profiles
-  local _30_
+  local _31_
   do
-    local t_29_ = config
-    if (nil ~= t_29_) then
-      t_29_ = t_29_.profiles
+    local t_30_ = config
+    if (nil ~= t_30_) then
+      t_30_ = t_30_.profiles
     else
     end
-    _30_ = t_29_
+    _31_ = t_30_
   end
-  profiles = (_30_ or {})
+  profiles = (_31_ or {})
   if (next(profiles) == nil) then
     return print("No profiles configured.")
   else
@@ -335,16 +342,16 @@ local function profile_list(config)
 end
 local function profile_show(config, name)
   local profiles
-  local _34_
+  local _35_
   do
-    local t_33_ = config
-    if (nil ~= t_33_) then
-      t_33_ = t_33_.profiles
+    local t_34_ = config
+    if (nil ~= t_34_) then
+      t_34_ = t_34_.profiles
     else
     end
-    _34_ = t_33_
+    _35_ = t_34_
   end
-  profiles = (_34_ or {})
+  profiles = (_35_ or {})
   local p
   if profiles[name] then
     p = resolve_profile(name, profiles, {})
@@ -359,24 +366,24 @@ local function profile_show(config, name)
 end
 local function profile_add(config, name, p)
   assert(name, "profile name required")
-  local or_38_ = p["schema-url"]
-  if not or_38_ then
-    local t_39_ = config
-    if (nil ~= t_39_) then
-      t_39_ = t_39_.profiles
+  local or_39_ = p["schema-url"]
+  if not or_39_ then
+    local t_40_ = config
+    if (nil ~= t_40_) then
+      t_40_ = t_40_.profiles
     else
     end
-    if (nil ~= t_39_) then
-      t_39_ = t_39_[name]
+    if (nil ~= t_40_) then
+      t_40_ = t_40_[name]
     else
     end
-    if (nil ~= t_39_) then
-      t_39_ = t_39_.schema
+    if (nil ~= t_40_) then
+      t_40_ = t_40_.schema
     else
     end
-    or_38_ = t_39_
+    or_39_ = t_40_
   end
-  assert(or_38_, "profile add requires --schema=URL")
+  assert(or_39_, "profile add requires --schema=URL")
   local profiles = (config.profiles or {})
   local existing = (profiles[name] or {})
   local updated = {schema = (p["schema-url"] or existing.schema)}
@@ -403,20 +410,20 @@ local function profile_add(config, name, p)
 end
 local function profile_remove(config, name)
   assert(name, "profile name required")
-  local _48_
+  local _49_
   do
-    local t_47_ = config
-    if (nil ~= t_47_) then
-      t_47_ = t_47_.profiles
+    local t_48_ = config
+    if (nil ~= t_48_) then
+      t_48_ = t_48_.profiles
     else
     end
-    if (nil ~= t_47_) then
-      t_47_ = t_47_[name]
+    if (nil ~= t_48_) then
+      t_48_ = t_48_[name]
     else
     end
-    _48_ = t_47_
+    _49_ = t_48_
   end
-  assert(_48_, ("Profile not found: " .. name))
+  assert(_49_, ("Profile not found: " .. name))
   config.profiles[name] = nil
   save_config(config)
   return print(("Profile '" .. name .. "' removed."))
@@ -440,16 +447,16 @@ end
 local function complete_ops(schema_or_profile)
   local config = load_config()
   local profiles
-  local _53_
+  local _54_
   do
-    local t_52_ = config
-    if (nil ~= t_52_) then
-      t_52_ = t_52_.profiles
+    local t_53_ = config
+    if (nil ~= t_53_) then
+      t_53_ = t_53_.profiles
     else
     end
-    _53_ = t_52_
+    _54_ = t_53_
   end
-  profiles = (_53_ or {})
+  profiles = (_54_ or {})
   local profile
   if profiles[schema_or_profile] then
     profile = resolve_profile(schema_or_profile, profiles, {})
@@ -457,27 +464,27 @@ local function complete_ops(schema_or_profile)
     profile = nil
   end
   local schema
-  local _57_
+  local _58_
   do
-    local t_56_ = profile
-    if (nil ~= t_56_) then
-      t_56_ = t_56_.schema
+    local t_57_ = profile
+    if (nil ~= t_57_) then
+      t_57_ = t_57_.schema
     else
     end
-    _57_ = t_56_
+    _58_ = t_57_
   end
-  schema = (_57_ or schema_or_profile)
+  schema = (_58_ or schema_or_profile)
   local opts
-  local _60_
+  local _61_
   do
-    local t_59_ = profile
-    if (nil ~= t_59_) then
-      t_59_ = t_59_.headers
+    local t_60_ = profile
+    if (nil ~= t_60_) then
+      t_60_ = t_60_.headers
     else
     end
-    _60_ = t_59_
+    _61_ = t_60_
   end
-  opts = {headers = (_60_ or {})}
+  opts = {headers = (_61_ or {})}
   local ok, c = pcall(atlas.client, schema, opts)
   if ok then
     for k, v in pairs(c) do
@@ -608,16 +615,16 @@ local function merge_ssl(profile, cli_ssl)
   local ssl
   do
     local tbl_21_ = {}
-    local _70_
+    local _71_
     do
-      local t_69_ = profile
-      if (nil ~= t_69_) then
-        t_69_ = t_69_.ssl
+      local t_70_ = profile
+      if (nil ~= t_70_) then
+        t_70_ = t_70_.ssl
       else
       end
-      _70_ = t_69_
+      _71_ = t_70_
     end
-    for k, v in pairs((_70_ or {})) do
+    for k, v in pairs((_71_ or {})) do
       local k_22_, v_23_ = k, v
       if ((k_22_ ~= nil) and (v_23_ ~= nil)) then
         tbl_21_[k_22_] = v_23_
@@ -627,15 +634,15 @@ local function merge_ssl(profile, cli_ssl)
     ssl = tbl_21_
   end
   local tls
-  local function _74_()
-    local t_73_ = profile
-    if (nil ~= t_73_) then
-      t_73_ = t_73_.tls
+  local function _75_()
+    local t_74_ = profile
+    if (nil ~= t_74_) then
+      t_74_ = t_74_.tls
     else
     end
-    return t_73_
+    return t_74_
   end
-  tls = tls__3essl(_74_())
+  tls = tls__3essl(_75_())
   if tls then
     for k, v in pairs(tls) do
       ssl[k] = v
@@ -653,16 +660,16 @@ end
 local function run_auth(profile_name, p, config)
   assert(profile_name, "Usage: atlas auth <profile> [--logout]")
   local profiles
-  local _79_
+  local _80_
   do
-    local t_78_ = config
-    if (nil ~= t_78_) then
-      t_78_ = t_78_.profiles
+    local t_79_ = config
+    if (nil ~= t_79_) then
+      t_79_ = t_79_.profiles
     else
     end
-    _79_ = t_78_
+    _80_ = t_79_
   end
-  profiles = (_79_ or {})
+  profiles = (_80_ or {})
   local profile
   if profiles[profile_name] then
     profile = resolve_profile(profile_name, profiles, {})
@@ -672,12 +679,12 @@ local function run_auth(profile_name, p, config)
   assert(profile, ("Profile not found: " .. profile_name))
   local auth_cfg
   do
-    local t_82_ = profile
-    if (nil ~= t_82_) then
-      t_82_ = t_82_.auth
+    local t_83_ = profile
+    if (nil ~= t_83_) then
+      t_83_ = t_83_.auth
     else
     end
-    auth_cfg = t_82_
+    auth_cfg = t_83_
   end
   assert((auth_cfg and auth_cfg.name and (auth_cfg.name ~= "")), ("No auth configured for profile: " .. profile_name))
   local ssl = merge_ssl(profile, p.ssl)
@@ -732,15 +739,15 @@ local function run(args)
   else
   end
   if (p.schema == "completion") then
-    local case_91_ = p.operation
-    if (case_91_ == "fish") then
+    local case_92_ = p.operation
+    if (case_92_ == "fish") then
       return completion_fish()
-    elseif (case_91_ == "bash") then
+    elseif (case_92_ == "bash") then
       return completion_bash()
-    elseif (case_91_ == "zsh") then
+    elseif (case_92_ == "zsh") then
       return completion_zsh()
     else
-      local _ = case_91_
+      local _ = case_92_
       return die("Usage: atlas completion <fish|bash|zsh>")
     end
   elseif (p.schema == "profile") then
@@ -750,16 +757,16 @@ local function run(args)
   else
     local config = load_config()
     local profiles
-    local _94_
+    local _95_
     do
-      local t_93_ = config
-      if (nil ~= t_93_) then
-        t_93_ = t_93_.profiles
+      local t_94_ = config
+      if (nil ~= t_94_) then
+        t_94_ = t_94_.profiles
       else
       end
-      _94_ = t_93_
+      _95_ = t_94_
     end
-    profiles = (_94_ or {})
+    profiles = (_95_ or {})
     local profile
     if profiles[p.schema] then
       profile = resolve_profile(p.schema, profiles, {})
@@ -767,38 +774,38 @@ local function run(args)
       profile = nil
     end
     local raw_schema
-    local _98_
+    local _99_
     do
-      local t_97_ = profile
-      if (nil ~= t_97_) then
-        t_97_ = t_97_.schema
+      local t_98_ = profile
+      if (nil ~= t_98_) then
+        t_98_ = t_98_.schema
       else
       end
-      _98_ = t_97_
+      _99_ = t_98_
     end
-    raw_schema = (_98_ or p.schema)
+    raw_schema = (_99_ or p.schema)
     local ttl
-    local or_100_ = p["cache-ttl"]
-    if not or_100_ then
-      local t_101_ = profile
-      if (nil ~= t_101_) then
-        t_101_ = t_101_["cache-ttl"]
+    local or_101_ = p["cache-ttl"]
+    if not or_101_ then
+      local t_102_ = profile
+      if (nil ~= t_102_) then
+        t_102_ = t_102_["cache-ttl"]
       else
       end
-      or_100_ = t_101_
+      or_101_ = t_102_
     end
-    ttl = (or_100_ or 3600)
+    ttl = (or_101_ or 3600)
     local ssl = merge_ssl(profile, p.ssl)
     local auth_cfg
     do
       local a
       do
-        local t_103_ = profile
-        if (nil ~= t_103_) then
-          t_103_ = t_103_.auth
+        local t_104_ = profile
+        if (nil ~= t_104_) then
+          t_104_ = t_104_.auth
         else
         end
-        a = t_103_
+        a = t_104_
       end
       if (a and a.name and (a.name ~= "")) then
         auth_cfg = a
@@ -824,37 +831,37 @@ local function run(args)
       schema = raw_schema
     end
     local opts
-    local _109_
+    local _110_
     do
       local tbl_21_ = {}
-      local _111_
+      local _112_
       do
-        local t_110_ = profile
-        if (nil ~= t_110_) then
-          t_110_ = t_110_.headers
+        local t_111_ = profile
+        if (nil ~= t_111_) then
+          t_111_ = t_111_.headers
         else
         end
-        _111_ = t_110_
+        _112_ = t_111_
       end
-      for k, v in pairs((_111_ or {})) do
+      for k, v in pairs((_112_ or {})) do
         local k_22_, v_23_ = k, v
         if ((k_22_ ~= nil) and (v_23_ ~= nil)) then
           tbl_21_[k_22_] = v_23_
         else
         end
       end
-      _109_ = tbl_21_
+      _110_ = tbl_21_
     end
-    local or_114_ = p.timeout
-    if not or_114_ then
-      local t_115_ = profile
-      if (nil ~= t_115_) then
-        t_115_ = t_115_.timeout
+    local or_115_ = p.timeout
+    if not or_115_ then
+      local t_116_ = profile
+      if (nil ~= t_116_) then
+        t_116_ = t_116_.timeout
       else
       end
-      or_114_ = t_115_
+      or_115_ = t_116_
     end
-    opts = {headers = _109_, timeout = or_114_, ssl = ssl}
+    opts = {headers = _110_, timeout = or_115_, ssl = ssl}
     if auth_headers then
       for k, v in pairs(auth_headers) do
         opts.headers[k] = v
@@ -869,26 +876,26 @@ local function run(args)
       end
     else
     end
-    local or_120_ = p["base-url"]
-    if not or_120_ then
-      local t_121_ = profile
-      if (nil ~= t_121_) then
-        t_121_ = t_121_["base-url"]
+    local or_121_ = p["base-url"]
+    if not or_121_ then
+      local t_122_ = profile
+      if (nil ~= t_122_) then
+        t_122_ = t_122_["base-url"]
       else
       end
-      or_120_ = t_121_
+      or_121_ = t_122_
     end
-    if or_120_ then
-      local or_123_ = p["base-url"]
-      if not or_123_ then
-        local t_124_ = profile
-        if (nil ~= t_124_) then
-          t_124_ = t_124_["base-url"]
+    if or_121_ then
+      local or_124_ = p["base-url"]
+      if not or_124_ then
+        local t_125_ = profile
+        if (nil ~= t_125_) then
+          t_125_ = t_125_["base-url"]
         else
         end
-        or_123_ = t_124_
+        or_124_ = t_125_
       end
-      opts["base-url"] = or_123_
+      opts["base-url"] = or_124_
     else
     end
     if (type(schema) == "table") then
@@ -974,9 +981,11 @@ local function run(args)
         table.insert(call_args, req_opts)
       else
       end
+      local t0 = socket.gettime()
       local ok_r, resp = pcall(op, table.unpack(call_args))
+      local elapsed = (socket.gettime() - t0)
       if ok_r then
-        return print_resp(resp, p.output, p["no-color"], p.verbose, p.select)
+        return print_resp(resp, p.output, p["no-color"], p.verbose, p.select, elapsed)
       else
         return die(("request failed: " .. tostring(resp)))
       end

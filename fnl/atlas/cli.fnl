@@ -4,6 +4,7 @@
 (local http-mod (require :atlas.http))
 (local json (require :lunajson))
 (local pretty-mod (require :atlas.pretty))
+(local socket (require :socket))
 
 (fn config-path []
   (.. (or (os.getenv :HOME) ".") "/.config/atlas/config.json"))
@@ -164,14 +165,15 @@
                   (do (set cur nil) (set i (+ n 1)))))))))
   cur)
 
-(fn print-resp [resp output no-color verbose ?select]
+(fn print-resp [resp output no-color verbose ?select ?elapsed]
   (let [error? (and resp.status (>= resp.status 400))
         body (if (and (not error?) ?select resp.body)
                  (select-path resp.body ?select)
-                 resp.body)]
+                 resp.body)
+        timing (if ?elapsed (.. "  " (string.format "%.3fs" ?elapsed)) "")]
     (if error?
         (do
-          (io.stderr:write (.. "HTTP " resp.status "\n"))
+          (io.stderr:write (.. "HTTP " resp.status timing "\n"))
           (when verbose
             (each [k v (pairs (or resp.headers {}))]
               (io.stderr:write (.. k ": " v "\n")))
@@ -181,7 +183,7 @@
           (os.exit 1))
         (do
           (when verbose
-            (print (.. "HTTP " resp.status))
+            (print (.. "HTTP " resp.status timing))
             (each [k v (pairs (or resp.headers {}))]
               (print (.. k ": " v)))
             (print ""))
@@ -476,9 +478,11 @@
                                  (when (next o) o))]
                   (when op.has-body? (table.insert call-args p.body))
                   (when req-opts (table.insert call-args req-opts))
-                  (let [(ok-r resp) (pcall op (table.unpack call-args))]
+                  (let [t0 (socket.gettime)
+                        (ok-r resp) (pcall op (table.unpack call-args))
+                        elapsed (- (socket.gettime) t0)]
                     (if ok-r
-                        (print-resp resp p.output p.no-color p.verbose p.select)
+                        (print-resp resp p.output p.no-color p.verbose p.select elapsed)
                         (die (.. "request failed: " (tostring resp)))))))
 
               (die "No operation specified. Use --list to see available operations.")))))))

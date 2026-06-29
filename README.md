@@ -137,7 +137,13 @@ cat pet.json | atlas https://petstore3.swagger.io/api/v3/openapi.json add-pet -d
 # headers, timeout, verbose output
 atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 \
   --header.authorization="Bearer tok" --timeout=10 -v
+
+# extract a nested value from the response
+atlas https://petstore3.swagger.io/api/v3/openapi.json get-inventory --select=.available
+atlas https://petstore3.swagger.io/api/v3/openapi.json find-pets-by-status --select=.pets[0].name
 ```
+
+HTTP 4xx/5xx responses are printed to stderr and exit with status 1. With `-v` the response headers are included.
 
 ### Options
 
@@ -152,6 +158,7 @@ atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 \
 | `--timeout=N` | Timeout in seconds |
 | `--base-url=URL` | Override the base URL |
 | `--output=FORMAT` | `json` (default), `raw`, `status`, `headers` |
+| `--select=PATH` | Extract a nested value from the response (e.g. `.items[0].name`) |
 | `--no-color` | Disable colored output |
 | `-v`, `--verbose` | Print status line and response headers |
 | `--reload` | Re-fetch and re-cache the schema |
@@ -185,6 +192,30 @@ atlas petstore --list
 atlas petstore get-pet-by-id 42
 atlas myapi add-pet -d '{"name":"Rex"}'
 ```
+
+#### Profile inheritance
+
+Use `extends` to inherit from another profile, overriding only what differs:
+
+```json
+{
+  "profiles": {
+    "myapi": {
+      "schema": "https://api.example.com/openapi.json",
+      "base-url": "https://api.example.com",
+      "tls": { "cert": "/path/to/client.pem", "key": "/path/to/client.key" },
+      "auth": { "name": "oauth-authorization-code", "params": { "..." : "..." } }
+    },
+    "myapi-staging": {
+      "extends": "myapi",
+      "schema": "https://staging.example.com/openapi.json",
+      "base-url": "https://staging.example.com"
+    }
+  }
+}
+```
+
+`myapi-staging` inherits `tls` and `auth` from `myapi`. `headers` are deep-merged (child adds or overrides keys); all other fields are replaced by the child when present. Chains (`A extends B extends C`) and circular reference detection are supported. `atlas profile show` displays the fully resolved profile.
 
 Manage profiles from the CLI:
 
