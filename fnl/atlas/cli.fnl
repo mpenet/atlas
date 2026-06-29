@@ -37,6 +37,29 @@
       (f:write (json.encode cfg))
       (f:close))))
 
+(fn merge-profiles [base child]
+  (let [result (collect [k v (pairs base)] k v)]
+    (each [k v (pairs child)]
+      (if (and (= k :headers) (= (type v) :table) (= (type (. result k)) :table))
+          (let [merged (collect [hk hv (pairs (. result k))] hk hv)]
+            (each [hk hv (pairs v)] (tset merged hk hv))
+            (tset result k merged))
+          (tset result k v)))
+    result))
+
+(fn resolve-profile [name profiles ?seen]
+  (let [seen (or ?seen {})
+        p (. profiles name)]
+    (assert p (.. "Profile not found: " name))
+    (assert (not (. seen name)) (.. "Circular extends: " name))
+    (tset seen name true)
+    (if p.extends
+        (let [base (resolve-profile p.extends profiles seen)
+              child (collect [k v (pairs p)] k v)]
+          (tset child :extends nil)
+          (merge-profiles base child))
+        p)))
+
 (fn parse-args [args]
   (let [r {:path-params [] :query {} :headers {} :ssl {}}]
     (var i 1)
@@ -121,6 +144,26 @@
     (each [_ op (ipairs ops)]
       (print (.. op.k (if op.summary (.. "\t" op.summary) ""))))))
 
+(fn select-path [data path]
+  (var cur data)
+  (var i 1)
+  (let [n (length path)]
+    (while (and cur (<= i n))
+      (let [c (path:sub i i)]
+        (if (= c :.)
+            (set i (+ i 1))
+            (= c "[")
+            (let [(idx j) (path:match "^%[(%d+)%]()" i)]
+              (if idx
+                  (do (set cur (. cur (+ 1 (tonumber idx))))
+                      (set i j))
+                  (do (set cur nil) (set i (+ n 1)))))
+            (let [(key j) (path:match "^([^%.%[]+)()" i)]
+              (if key
+                  (do (set cur (. cur key)) (set i j))
+                  (do (set cur nil) (set i (+ n 1)))))))))
+  cur)
+
 (fn print-resp [resp output no-color verbose ?select]
   (let [error? (and resp.status (>= resp.status 400))
         body (if (and (not error?) ?select resp.body)
@@ -152,26 +195,6 @@
                   (when (not verbose)
                     (io.stderr:write (.. "HTTP " resp.status "\n")))))))))
 
-(fn select-path [data path]
-  (var cur data)
-  (var i 1)
-  (let [n (length path)]
-    (while (and cur (<= i n))
-      (let [c (path:sub i i)]
-        (if (= c :.)
-            (set i (+ i 1))
-            (= c "[")
-            (let [(idx j) (path:match "^%[(%d+)%]()" i)]
-              (if idx
-                  (do (set cur (. cur (+ 1 (tonumber idx))))
-                      (set i j))
-                  (do (set cur nil) (set i (+ n 1)))))
-            (let [(key j) (path:match "^([^%.%[]+)()" i)]
-              (if key
-                  (do (set cur (. cur key)) (set i j))
-                  (do (set cur nil) (set i (+ n 1)))))))))
-  cur)
-
 (fn strip-location [msg]
   (let [s (tostring msg)
         (r) (s:gsub "[^%s:]+%.lua:%d+: " "")]
@@ -191,7 +214,8 @@
           (print (.. name "\t" (or p.schema "(no schema)")))))))
 
 (fn profile-show [config name]
-  (let [p (?. config :profiles name)]
+  (let [profiles (or (?. config :profiles) {})
+        p (when (. profiles name) (resolve-profile name profiles {}))]
     (if p
         (print (pretty-mod.pretty p 0 true))
         (die (.. "Profile not found: " name)))))
@@ -230,11 +254,13 @@
                      "\nUsage: atlas profile <list|show|add|remove> [name] [options]"))))
 
 (fn complete-ops [schema-or-profile]
-  (let [config  (load-config)
-        profile (?. config :profiles schema-or-profile)
-        schema  (or (?. profile :schema) schema-or-profile)
-        opts    {:headers (or (?. profile :headers) {})}
-        (ok c)  (pcall atlas.client schema opts)]
+  (let [config   (load-config)
+        profiles (or (?. config :profiles) {})
+        profile  (when (. profiles schema-or-profile)
+                   (resolve-profile schema-or-profile profiles {}))
+        schema   (or (?. profile :schema) schema-or-profile)
+        opts     {:headers (or (?. profile :headers) {})}
+        (ok c)   (pcall atlas.client schema opts)]
     (when ok
       (each [k v (pairs c)]
         (when (op? v) (print k))))))
@@ -345,7 +371,9 @@
 
 (fn run-auth [profile-name p config]
   (assert profile-name "Usage: atlas auth <profile> [--logout]")
-  (let [profile (?. config :profiles profile-name)]
+  (let [profiles (or (?. config :profiles) {})
+        profile  (when (. profiles profile-name)
+                   (resolve-profile profile-name profiles {}))]
     (assert profile (.. "Profile not found: " profile-name))
     (let [auth-cfg (?. profile :auth)]
       (assert (and auth-cfg auth-cfg.name (not= auth-cfg.name ""))
@@ -393,7 +421,9 @@
         (= p.schema :auth)
         (run-auth p.operation p (load-config))
         (let [config (load-config)
-              profile (?. config :profiles p.schema)
+              profiles (or (?. config :profiles) {})
+              profile (when (. profiles p.schema)
+                        (resolve-profile p.schema profiles {}))
               raw-schema (or (?. profile :schema) p.schema)
               ttl (or p.cache-ttl (?. profile :cache-ttl) 3600)
               ssl (merge-ssl profile p.ssl)
