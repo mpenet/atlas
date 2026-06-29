@@ -3,3 +3,4 @@ luarocks.lock
 /build/
 /bin/anis-bin
 /bin/atlas-bin
+/test/*_spec.lua

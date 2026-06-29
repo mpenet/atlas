@@ -4,6 +4,9 @@ FNL_DIR = fnl
 FNL_SOURCES = $(shell find $(FNL_DIR) -name "*.fnl" ! -name "atlas-bin.fnl")
 LUA_TARGETS = $(FNL_SOURCES:$(FNL_DIR)/%.fnl=%.lua)
 
+TEST_FNL = $(wildcard test/*_spec.fnl)
+TEST_LUA = $(TEST_FNL:.fnl=.lua)
+
 # ---- OS detection ----
 UNAME_S := $(shell uname -s)
 
@@ -72,8 +75,11 @@ $(LUA_TARGETS): %.lua: $(FNL_DIR)/%.fnl
 	@mkdir -p $(dir $@)
 	$(FENNEL) --compile $< > $@
 
-test: build
-	busted test/
+test: build $(TEST_LUA)
+	busted --pattern=_spec test/
+
+$(TEST_LUA): test/%_spec.lua: test/%_spec.fnl
+	$(FENNEL) --compile $< > $@
 
 install: build
 	install -m 755 bin/atlas /usr/local/bin/atlas
