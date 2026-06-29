@@ -1,4 +1,4 @@
-FENNEL ?= fnl
+FENNEL ?= $(shell command -v fnl 2>/dev/null || command -v fennel 2>/dev/null || echo fnl)
 FNL_DIR = fnl
 
 FNL_SOURCES = $(shell find $(FNL_DIR) -name "*.fnl" ! -name "atlas-bin.fnl")
