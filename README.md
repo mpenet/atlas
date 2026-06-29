@@ -12,7 +12,7 @@ OpenAPI 3.x toolbox.
 **Lua library:**
 
 ```sh
-luarocks install atlas
+luarocks install atlas-oai
 ```
 
 **CLI — standalone binary** (no Lua required at runtime), download from https://github.com/mpenet/atlas/releases, then:
