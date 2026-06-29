@@ -16,6 +16,7 @@
 (require :atlas.http)
 (require :atlas.pretty)
 (require :atlas.cache)
+(require :atlas.auth)
 (require :atlas)
 (require :atlas.cli)
 

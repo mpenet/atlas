@@ -1,4 +1,5 @@
 (local atlas (require :atlas))
+(local auth (require :atlas.auth))
 (local cache (require :atlas.cache))
 (local json (require :lunajson))
 (local pretty-mod (require :atlas.pretty))
@@ -9,9 +10,9 @@
 (fn load-config []
   (let [f (io.open (config-path) :r)]
     (if f
-        (let [cfg (json.decode (f:read :*a))]
+        (let [(ok cfg) (pcall json.decode (f:read :*a))]
           (f:close)
-          cfg)
+          (if ok cfg (error (.. "corrupt config: " (config-path)))))
         {})))
 
 (fn read-body [s]
@@ -81,6 +82,7 @@
           (= a :--help) (tset r :help true)
           (= a :--no-color) (tset r :no-color true)
           (= a :--reload) (tset r :reload true)
+          (= a :--logout) (tset r :logout true)
           (or (= a :-v) (= a :--verbose)) (tset r :verbose true)
 
           (a:match "^%-%-cache%-ttl=(.+)")
@@ -154,7 +156,7 @@
         (print (pretty-mod.pretty p 0 true))
         (die (.. "Profile not found: " name)))))
 
-(fn profile-add [config name p args]
+(fn profile-add [config name p]
   (assert name "profile name required")
   (assert (or p.schema-url (?. config :profiles name :schema))
           "profile add requires --schema=URL")
@@ -181,7 +183,7 @@
   (match subcmd
     :list (profile-list config)
     :show (profile-show config name)
-    :add (profile-add config name p nil)
+    :add (profile-add config name p)
     :remove (profile-remove config name)
     :rm (profile-remove config name)
     _ (die (.. "Unknown profile subcommand: " (tostring subcmd)
@@ -255,6 +257,7 @@
 (fn usage []
   (print "Usage: atlas <schema-or-profile> [operation] [path-params...] [options]")
   (print "       atlas profile <list|show|add|remove> [name] [options]")
+  (print "       atlas auth <profile> [--logout]")
   (print "       atlas completion <fish|bash|zsh>")
   (print "")
   (print "Options:")
@@ -272,6 +275,9 @@
   (print "  --reload              Re-fetch and re-cache the schema")
   (print "  --cache-ttl=N         Schema cache TTL in seconds (default: 3600)")
   (print "")
+  (print "Auth options (for 'atlas auth <profile>'):")
+  (print "  --logout              Clear cached token")
+  (print "")
   (print "Profile options (for 'atlas profile add'):")
   (print "  --schema=URL          Schema URL or file path")
   (print "  --base-url=URL        Override base URL")
@@ -281,11 +287,43 @@
   (print "")
   (print "Config: ~/.config/atlas/config.json"))
 
-(fn load-schema-cached [url ttl reload?]
+(fn tls->ssl [tls]
+  (when tls
+    (let [ssl {}]
+      (when tls.cert (tset ssl :certificate tls.cert))
+      (when tls.key (tset ssl :key tls.key))
+      (when tls.insecure (tset ssl :verify "none"))
+      (when (next ssl) ssl))))
+
+(fn merge-ssl [profile cli-ssl]
+  (let [ssl (collect [k v (pairs (or (?. profile :ssl) {}))] k v)
+        tls (tls->ssl (?. profile :tls))]
+    (when tls (each [k v (pairs tls)] (tset ssl k v)))
+    (when cli-ssl (each [k v (pairs cli-ssl)] (tset ssl k v)))
+    ssl))
+
+(fn run-auth [profile-name p config]
+  (assert profile-name "Usage: atlas auth <profile> [--logout]")
+  (let [profile (?. config :profiles profile-name)]
+    (assert profile (.. "Profile not found: " profile-name))
+    (let [auth-cfg (?. profile :auth)]
+      (assert (and auth-cfg auth-cfg.name (not= auth-cfg.name ""))
+              (.. "No auth configured for profile: " profile-name))
+      (let [ssl (merge-ssl profile p.ssl)]
+        (if p.logout
+            (do (auth.clear-token profile-name)
+                (print (.. "Logged out: " profile-name)))
+            (do (auth.clear-token profile-name)
+                (let [(ok result) (pcall auth.authenticate profile-name auth-cfg ssl)]
+                  (if ok
+                      (print (.. "Authenticated: " profile-name))
+                      (die (tostring result))))))))))
+
+(fn load-schema-cached [url ttl reload? ssl headers]
   (let [cached (when (not reload?) (cache.get url ttl))]
     (if cached
         cached
-        (let [schema (atlas.load-schema url)]
+        (let [schema (atlas.load-schema url ssl headers)]
           (cache.put url schema)
           schema))))
 
@@ -305,17 +343,28 @@
           _ (die "Usage: atlas completion <fish|bash|zsh>"))
         (= p.schema :profile)
         (run-profile p.operation (. p.path-params 1) p (load-config))
+        (= p.schema :auth)
+        (run-auth p.operation p (load-config))
         (let [config (load-config)
               profile (?. config :profiles p.schema)
               raw-schema (or (?. profile :schema) p.schema)
               ttl (or p.cache-ttl (?. profile :cache-ttl) 3600)
+              ssl (merge-ssl profile p.ssl)
+              auth-cfg (let [a (?. profile :auth)]
+                         (when (and a a.name (not= a.name "")) a))
+              auth-token (when auth-cfg
+                           (let [(ok token) (pcall auth.ensure-token p.schema auth-cfg ssl)]
+                             (if ok token (die (.. "authentication failed: " (tostring token))))))
+              schema-headers (when auth-token {:authorization (.. "Bearer " auth-token)})
               schema (if (and (= (type raw-schema) :string)
                               (raw-schema:match "^https?://"))
-                        (load-schema-cached raw-schema ttl p.reload)
+                        (load-schema-cached raw-schema ttl p.reload ssl schema-headers)
                         raw-schema)
-              opts {:headers (or (?. profile :headers) {})
+              opts {:headers (collect [k v (pairs (or (?. profile :headers) {}))] k v)
                     :timeout (or p.timeout (?. profile :timeout))
-                    :ssl (or (?. profile :ssl) {})}]
+                    :ssl ssl}]
+          (when auth-token
+            (tset opts.headers :authorization (.. "Bearer " auth-token)))
           (when (or p.base-url (?. profile :base-url))
             (tset opts :base-url (or p.base-url (?. profile :base-url))))
           (when (= (type schema) :table)

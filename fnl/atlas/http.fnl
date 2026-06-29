@@ -4,7 +4,7 @@
 (local json (require :lunajson))
 
 (fn url-encode [s]
-  ((tostring s):gsub "[^%w%-%.%_%~]"
+  (: (tostring s) :gsub "[^%w%-%.%_%~]"
     (fn [c] (string.format "%%%02X" (string.byte c)))))
 
 (fn encode-query [params]
@@ -22,9 +22,11 @@
 (fn request [req]
   (let [url (build-url req.url req.query)
         requester (if (url:match "^https://") https socket-http)
-        (ok-enc payload) (if req.body
-                             (pcall json.encode req.body)
-                             (values true nil))]
+        (ok-enc payload) (if req.raw-body
+                             (values true req.raw-body)
+                             (if req.body
+                                 (pcall json.encode req.body)
+                                 (values true nil)))]
     (assert ok-enc (string.format "failed to encode request body: %s" (tostring payload)))
     (let [headers (collect [k v (pairs (or req.headers {}))] k v)
           body-out []]

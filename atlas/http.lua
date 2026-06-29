@@ -6,7 +6,7 @@ local function url_encode(s)
   local function _1_(c)
     return string.format("%%%02X", string.byte(c))
   end
-  return tostring(s)("gsub", "[^%w%-%.%_%~]", _1_)
+  return tostring(s):gsub("[^%w%-%.%_%~]", _1_)
 end
 local function encode_query(params)
   if params then
@@ -39,24 +39,28 @@ local function request(req)
   else
     requester = socket_http
   end
-  local ok_enc, payload = nil, nil
-  if req.body then
-    ok_enc, payload = pcall(json.encode, req.body)
+  local ok_enc, payload
+  if req["raw-body"] then
+    ok_enc, payload = true, req["raw-body"]
   else
-    ok_enc, payload = true, nil
+    if req.body then
+      ok_enc, payload = pcall(json.encode, req.body)
+    else
+      ok_enc, payload = true, nil
+    end
   end
   assert(ok_enc, string.format("failed to encode request body: %s", tostring(payload)))
   local headers
   do
-    local tbl_16_ = {}
+    local tbl_21_ = {}
     for k, v in pairs((req.headers or {})) do
-      local k_17_, v_18_ = k, v
-      if ((k_17_ ~= nil) and (v_18_ ~= nil)) then
-        tbl_16_[k_17_] = v_18_
+      local k_22_, v_23_ = k, v
+      if ((k_22_ ~= nil) and (v_23_ ~= nil)) then
+        tbl_21_[k_22_] = v_23_
       else
       end
     end
-    headers = tbl_16_
+    headers = tbl_21_
   end
   local body_out = {}
   if payload then
@@ -64,13 +68,13 @@ local function request(req)
   else
   end
   local req_table
-  local _9_
+  local _10_
   if payload then
-    _9_ = ltn12.source.string(payload)
+    _10_ = ltn12.source.string(payload)
   else
-    _9_ = nil
+    _10_ = nil
   end
-  req_table = {url = url, method = req.method, headers = headers, timeout = req.timeout, source = _9_, sink = ltn12.sink.table(body_out)}
+  req_table = {url = url, method = req.method, headers = headers, timeout = req.timeout, source = _10_, sink = ltn12.sink.table(body_out)}
   if (req.ssl and url:match("^https://")) then
     for k, v in pairs(req.ssl) do
       req_table[k] = v

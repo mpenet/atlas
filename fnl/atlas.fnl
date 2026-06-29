@@ -7,25 +7,30 @@
 (local socket-http (require :socket.http))
 (local https (require :ssl.https))
 
-(fn load-schema [path]
+(fn load-schema [path ?ssl ?headers]
   "Load an OpenAPI schema from a local file path or http(s):// URL."
   (let [content (if (path:match "^https?://")
                     (let [requester (if (path:match "^https://") https socket-http)
                           body-out []
-                          (ok code) (requester.request {:url path
-                                                        :method :GET
-                                                        :sink (ltn12.sink.table body-out)})]
-                      (assert ok (string.format "failed to fetch schema from %s: %s" path (tostring code)))
-                      (assert (and (>= code 200) (< code 300))
-                              (string.format "HTTP %s fetching schema from %s" code path))
-                      (table.concat body-out))
+                          req {:url path
+                               :method :GET
+                               :headers (or ?headers {})
+                               :sink (ltn12.sink.table body-out)}]
+                      (when (and ?ssl (path:match "^https://"))
+                        (each [k v (pairs ?ssl)]
+                          (tset req k v)))
+                      (let [(ok code) (requester.request req)]
+                        (assert ok (string.format "failed to fetch schema from %s: %s" path (tostring code)))
+                        (assert (and (>= code 200) (< code 300))
+                                (string.format "HTTP %s fetching schema from %s" code path))
+                        (table.concat body-out)))
                     (let [(f err) (io.open path :r)]
                       (assert f (string.format "failed to open schema file '%s': %s" path (tostring err)))
                       (let [c (f:read :*a)]
                         (f:close)
                         c)))
-        (ok parsed err) (pcall json.decode content)]
-    (assert ok (string.format "failed to parse schema JSON from '%s': %s" path (tostring err)))
+        (ok parsed) (pcall json.decode content)]
+    (assert ok (string.format "failed to parse schema JSON from '%s': %s" path (tostring parsed)))
     parsed))
 
 (fn make-operation [client path method op-spec]
@@ -84,7 +89,7 @@
                 :headers (or (?. ?opts :headers) {})
                 :timeout (?. ?opts :timeout)
                 :ssl (?. ?opts :ssl)}]
-    (each [path methods (pairs schema.paths)]
+    (each [path methods (pairs (or schema.paths {}))]
       (each [method op-spec (pairs methods)]
         (when (and (= (type op-spec) :table) op-spec.operationId)
           (tset client

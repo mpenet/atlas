@@ -27,7 +27,8 @@ local function get(url, ttl)
   end
 end
 local function put(url, schema)
-  os.execute(("mkdir -p " .. cache_dir()))
+  local dir = cache_dir()
+  os.execute(("mkdir -p '" .. dir:gsub("'", "'\\''") .. "'"))
   local f = io.open(cache_path(url), "w")
   if f then
     f:write(json.encode({url = url, cached_at = os.time(), schema = schema}))

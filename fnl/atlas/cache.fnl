@@ -23,10 +23,11 @@
           data.schema)))))
 
 (fn put [url schema]
-  (os.execute (.. "mkdir -p " (cache-dir)))
-  (let [f (io.open (cache-path url) :w)]
-    (when f
-      (f:write (json.encode {:url url :cached_at (os.time) :schema schema}))
-      (f:close))))
+  (let [dir (cache-dir)]
+    (os.execute (.. "mkdir -p '" (dir:gsub "'" "'\\''") "'"))
+    (let [f (io.open (cache-path url) :w)]
+      (when f
+        (f:write (json.encode {:url url :cached_at (os.time) :schema schema}))
+        (f:close)))))
 
 {: get : put}

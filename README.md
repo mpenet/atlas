@@ -1,11 +1,11 @@
-# atlas
+# Atlas
 
-OpenAPI 3.x toolbox. 
+<img width="225" height="225" src="https://github.com/user-attachments/assets/31408610-9fc2-47b1-a493-191d84eade9e" />
 
-* It includes a client for Fennel and Lua. Point it at any schema — local
-file, URL, or parsed table — and get back a callable client.
+OpenAPI 3.x toolbox.
 
-* Also ships a **standalone OpenApi CLI**, similar to restish
+* Fennel/Lua client — point it at any schema (local file, URL, or parsed table) and get back a callable client.
+* Standalone CLI — similar to restish, with profiles, OAuth, mTLS, and shell completion.
 
 ## Install
 
@@ -154,10 +154,12 @@ atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 \
 | `--output=FORMAT` | `json` (default), `raw`, `status`, `headers` |
 | `--no-color` | Disable colored output |
 | `-v`, `--verbose` | Print status line and response headers |
+| `--reload` | Re-fetch and re-cache the schema |
+| `--cache-ttl=N` | Schema cache TTL in seconds (default: 3600) |
 
 ### Profiles
 
-Save named configurations in `~/.config/atlas/config.json` to avoid repeating URLs and credentials:
+Save named configurations in `~/.config/atlas/config.json`:
 
 ```json
 {
@@ -170,7 +172,7 @@ Save named configurations in `~/.config/atlas/config.json` to avoid repeating UR
       "schema": "https://api.example.com/openapi.json",
       "base-url": "https://staging.example.com",
       "headers": { "authorization": "Bearer <token>" },
-      "ssl": { "cafile": "/etc/ssl/ca.pem" }
+      "timeout": 30
     }
   }
 }
@@ -195,6 +197,153 @@ atlas profile add myapi \
   --header.authorization="Bearer <token>" \
   --timeout=30
 atlas profile remove myapi
+```
+
+### Authentication
+
+Add an `auth` block to a profile. atlas uses the same config shape as restish.
+
+#### OAuth 2.0 — Authorization Code (browser)
+
+Opens a browser, listens on a local callback server, and caches the token (with auto-refresh). Uses PKCE S256.
+
+```json
+{
+  "profiles": {
+    "myapi": {
+      "schema": "https://api.example.com/openapi.json",
+      "auth": {
+        "name": "oauth-authorization-code",
+        "params": {
+          "authorize_url": "https://auth.example.com/oauth/authorize",
+          "token_url": "https://auth.example.com/oauth/token",
+          "client_id": "my-client",
+          "scope": "openid email",
+          "redirect_host": "localhost",
+          "redirect_port": 8484,
+          "redirect_path": "/"
+        }
+      }
+    }
+  }
+}
+```
+
+`redirect_host`, `redirect_port`, and `redirect_path` must match a redirect URI registered with your OAuth provider. The defaults are `127.0.0.1`, a random port, and `/callback` — override them to match what your provider has registered.
+
+If `client_secret` is omitted the flow runs as a public client (PKCE only). Set it for confidential clients:
+
+```json
+"client_secret": "env:MY_CLIENT_SECRET"
+```
+
+Values prefixed with `env:` are read from the environment at runtime.
+
+#### OAuth 2.0 — Client Credentials
+
+```json
+{
+  "profiles": {
+    "myapi": {
+      "schema": "https://api.example.com/openapi.json",
+      "auth": {
+        "name": "oauth-client-credentials",
+        "params": {
+          "token_url": "https://auth.example.com/oauth/token",
+          "client_id": "env:CLIENT_ID",
+          "client_secret": "env:CLIENT_SECRET",
+          "scope": "read write",
+          "audience": "https://api.example.com"
+        }
+      }
+    }
+  }
+}
+```
+
+#### Token management
+
+```sh
+# force re-authentication (clears cached token, opens browser)
+atlas auth myapi
+
+# clear cached token without re-authenticating
+atlas auth myapi --logout
+```
+
+Tokens are cached in `~/.cache/atlas/tokens/<profile>.json` (mode 0600). The token is refreshed automatically using the refresh token when it expires. If the refresh fails, atlas re-authenticates interactively.
+
+### mTLS
+
+Add a `tls` block to a profile for mutual TLS (client certificate authentication). The schema is also fetched using the client certificate.
+
+```json
+{
+  "profiles": {
+    "myapi": {
+      "schema": "https://api.example.com/openapi.json",
+      "tls": {
+        "cert": "/path/to/client.pem",
+        "key": "/path/to/client.key",
+        "insecure": false
+      }
+    }
+  }
+}
+```
+
+| Key | Description |
+|-----|-------------|
+| `cert` | Path to PEM client certificate |
+| `key` | Path to PEM private key |
+| `insecure` | Set `true` to skip server certificate verification |
+
+For custom CA bundles or other luasec options, use `ssl` alongside or instead of `tls`:
+
+```json
+"ssl": { "cafile": "/etc/ssl/internal-ca.pem" }
+```
+
+`tls` and `ssl` are merged, with `tls` taking precedence for fields they share.
+
+#### Combined example (OAuth + mTLS)
+
+```json
+{
+  "profiles": {
+    "internal-api": {
+      "schema": "https://api.internal.example.com/openapi.json",
+      "tls": {
+        "cert": "/home/user/.pki/client.pem",
+        "key": "/home/user/.pki/client.key"
+      },
+      "auth": {
+        "name": "oauth-authorization-code",
+        "params": {
+          "authorize_url": "https://dex.internal.example.com/auth",
+          "token_url": "https://dex.internal.example.com/token",
+          "client_id": "my-cli",
+          "scope": "openid email groups",
+          "redirect_host": "localhost",
+          "redirect_port": 8484,
+          "redirect_path": "/"
+        }
+      }
+    }
+  }
+}
+```
+
+### Schema caching
+
+Schemas fetched from URLs are cached in `~/.cache/atlas/schemas/` with a 1-hour TTL by default.
+
+```sh
+# force re-fetch
+atlas myapi --reload --list
+
+# set cache TTL to 5 minutes
+atlas myapi --cache-ttl=300 --list
 ```
 
 ### Shell completion
@@ -222,8 +371,8 @@ make install  # install bin/atlas to /usr/local/bin
 make binary   # build standalone binary → bin/atlas-bin
 ```
 
-`make binary` requires `fennel`, `lua`, `openssl`, and `pkg-config`. It statically links Lua, luasocket, luasec, and OpenSSL — the resulting binary is truly standalone and tiny (441KB on linux).
+`make binary` requires `fennel`, `lua`, `openssl`, and `pkg-config`. It statically links Lua, luasocket, luasec, and OpenSSL — the resulting binary is standalone with no runtime dependencies.
 
 ## License
 
-Max Penet - Apache 2.0
+Max Penet — Apache 2.0
