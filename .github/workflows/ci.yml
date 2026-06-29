@@ -13,13 +13,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y lua5.4 liblua5.4-dev luarocks libssl-dev pkg-config
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.4"
 
-      - name: Install Lua dependencies
-        run: sudo make deps
+      - uses: leafo/gh-actions-luarocks@v4
+
+      - name: Install dependencies
+        run: make deps
 
       - name: Build
         run: make build
