@@ -20,7 +20,9 @@ jobs:
       - uses: leafo/gh-actions-luarocks@v4
 
       - name: Install dependencies
-        run: make deps
+        run: |
+          make deps
+          echo "$(luarocks path --bin)" >> $GITHUB_PATH
 
       - name: Build
         run: make build
