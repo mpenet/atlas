@@ -25,7 +25,19 @@ LUA_LIB         ?= $(or $(wildcard $(_LUA_LIBDIR)/liblua5.4.a),\
                          $(wildcard $(_LUA_LIBDIR)/liblua.a),\
                          $(_LUA_LIBDIR)/liblua.a)
 OPENSSL_INC     ?= $(shell pkg-config --variable=includedir openssl 2>/dev/null)
-OPENSSL_LDFLAGS ?= $(shell pkg-config --static --libs openssl 2>/dev/null)
+_OPENSSL_LIBDIR := $(shell pkg-config --variable=libdir openssl 2>/dev/null)
+# Prefer static OpenSSL so the binary has no runtime dependency on Homebrew.
+# Fall back to dynamic if .a files are absent (e.g. some Linux distros).
+ifeq ($(UNAME_S),Darwin)
+  _OPENSSL_STATIC := $(wildcard $(_OPENSSL_LIBDIR)/libssl.a)
+  ifneq ($(_OPENSSL_STATIC),)
+    OPENSSL_LDFLAGS ?= -L$(_OPENSSL_LIBDIR) $(_OPENSSL_LIBDIR)/libssl.a $(_OPENSSL_LIBDIR)/libcrypto.a -framework CoreFoundation -framework Security
+  else
+    OPENSSL_LDFLAGS ?= $(shell pkg-config --static --libs openssl 2>/dev/null)
+  endif
+else
+  OPENSSL_LDFLAGS ?= $(shell pkg-config --static --libs openssl 2>/dev/null)
+endif
 
 # macOS requires -DUNIX_HAS_SUN_LEN and -fno-common; Linux needs neither
 ifeq ($(UNAME_S),Darwin)
