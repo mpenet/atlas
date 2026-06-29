@@ -1,9 +1,11 @@
 # atlas
 
-Runtime OpenAPI 3.x client for Fennel and Lua. Point it at any schema — local
+Runtime OpenAPI 3.x toolbox. 
+
+* It includes a client for Fennel and Lua. Point it at any schema — local
 file, URL, or parsed table — and get back a callable client.
 
-Also ships as a **standalone OpenApi CLI**.
+* Also ships a **standalone OpenApi CLI**, similar to restish
 
 ## Install
 
