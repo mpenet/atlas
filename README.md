@@ -1,6 +1,6 @@
 # atlas
 
-Runtime OpenAPI 3.x toolbox. 
+OpenAPI 3.x toolbox. 
 
 * It includes a client for Fennel and Lua. Point it at any schema — local
 file, URL, or parsed table — and get back a callable client.
