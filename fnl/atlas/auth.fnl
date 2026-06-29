@@ -222,6 +222,43 @@
           (tset form :code_verifier code-verifier))
         (store-token (post-form params.token_url form ssl) profile-name)))))
 
+;; ---- external tool ----
+
+(fn run-external [params stdin-json]
+  (assert params.commandline "external-tool auth requires params.commandline")
+  (let [cmd (if stdin-json
+                (let [tmp (os.tmpname)
+                      f (io.open tmp :w)]
+                  (assert f "failed to write external tool input")
+                  (f:write stdin-json)
+                  (f:close)
+                  (let [c (.. "/bin/sh -c "
+                              (shell-quote (.. params.commandline " < " (shell-quote tmp))))]
+                    c))
+                (.. "/bin/sh -c " (shell-quote params.commandline)))
+        h (io.popen cmd)]
+    (assert h "failed to start external auth command")
+    (let [out (h:read "*a")]
+      (h:close)
+      out)))
+
+(fn external-bearer [params]
+  (let [out (: (run-external params nil) :match "^%s*(.-)%s*$")]
+    (assert (and out (> (length out) 0)) "external auth command produced no output")
+    {:authorization (.. "Bearer " out)}))
+
+(fn external-signing-headers [params req]
+  (let [body (when (not params.omitbody) (or req.body ""))
+        payload (json.encode {:method (or req.method "GET")
+                              :uri req.url
+                              :headers (or req.headers {})
+                              :body body})
+        raw (run-external params payload)]
+    (when (and raw (> (length raw) 0))
+      (let [(ok result) (pcall json.decode raw)]
+        (when (and ok result result.headers)
+          result.headers)))))
+
 ;; ---- public API ----
 
 (fn authenticate [profile-name auth-config ssl]
@@ -242,4 +279,29 @@
                        (authenticate profile-name auth-config ssl))]
           data.access_token))))
 
-{: ensure-token : authenticate : clear-token}
+(fn get-headers [profile-name auth-config ssl]
+  "Returns static headers for any auth type.
+  For external-tool with output=bearer-token: runs command once, returns Authorization header.
+  For external-tool signing mode: returns {} — per-request headers come via wrap-http-fn.
+  OAuth types: returns {:authorization 'Bearer <token>'}."
+  (match auth-config.name
+    "external-tool" (if (= (?. auth-config :params :output) "bearer-token")
+                        (external-bearer auth-config.params)
+                        {})
+    _ {:authorization (.. "Bearer " (ensure-token profile-name auth-config ssl))}))
+
+(fn wrap-http-fn [auth-config base-fn]
+  "Returns a per-request signing wrapper, or nil if not needed."
+  (when (and (= auth-config.name "external-tool")
+             (not= (?. auth-config :params :output) "bearer-token"))
+    (let [params auth-config.params]
+      (fn [req]
+        (let [extra (external-signing-headers params req)]
+          (when extra
+            (let [headers (or req.headers {})]
+              (each [k vs (pairs extra)]
+                (tset headers k (if (= (type vs) :table) (. vs 1) vs)))
+              (tset req :headers headers)))
+          (base-fn req))))))
+
+{: get-headers : wrap-http-fn : authenticate : clear-token}

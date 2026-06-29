@@ -1,6 +1,7 @@
 (local atlas (require :atlas))
 (local auth (require :atlas.auth))
 (local cache (require :atlas.cache))
+(local http-mod (require :atlas.http))
 (local json (require :lunajson))
 (local pretty-mod (require :atlas.pretty))
 
@@ -310,11 +311,17 @@
       (assert (and auth-cfg auth-cfg.name (not= auth-cfg.name ""))
               (.. "No auth configured for profile: " profile-name))
       (let [ssl (merge-ssl profile p.ssl)]
-        (if p.logout
+        (if (= auth-cfg.name "external-tool")
+            (let [(ok headers) (pcall auth.get-headers profile-name auth-cfg ssl)]
+              (if ok
+                  (each [k v (pairs headers)]
+                    (print (.. k ": " v)))
+                  (die (tostring headers))))
+            p.logout
             (do (auth.clear-token profile-name)
                 (print (.. "Logged out: " profile-name)))
             (do (auth.clear-token profile-name)
-                (let [(ok result) (pcall auth.authenticate profile-name auth-cfg ssl)]
+                (let [(ok result) (pcall auth.get-headers profile-name auth-cfg ssl)]
                   (if ok
                       (print (.. "Authenticated: " profile-name))
                       (die (tostring result))))))))))
@@ -352,19 +359,22 @@
               ssl (merge-ssl profile p.ssl)
               auth-cfg (let [a (?. profile :auth)]
                          (when (and a a.name (not= a.name "")) a))
-              auth-token (when auth-cfg
-                           (let [(ok token) (pcall auth.ensure-token p.schema auth-cfg ssl)]
-                             (if ok token (die (.. "authentication failed: " (tostring token))))))
-              schema-headers (when auth-token {:authorization (.. "Bearer " auth-token)})
+              auth-headers (when auth-cfg
+                             (let [(ok h) (pcall auth.get-headers p.schema auth-cfg ssl)]
+                               (if ok h (die (.. "authentication failed: " (tostring h))))))
               schema (if (and (= (type raw-schema) :string)
                               (raw-schema:match "^https?://"))
-                        (load-schema-cached raw-schema ttl p.reload ssl schema-headers)
+                        (load-schema-cached raw-schema ttl p.reload ssl auth-headers)
                         raw-schema)
               opts {:headers (collect [k v (pairs (or (?. profile :headers) {}))] k v)
                     :timeout (or p.timeout (?. profile :timeout))
                     :ssl ssl}]
-          (when auth-token
-            (tset opts.headers :authorization (.. "Bearer " auth-token)))
+          (when auth-headers
+            (each [k v (pairs auth-headers)]
+              (tset opts.headers k v)))
+          (when auth-cfg
+            (let [wrapped (auth.wrap-http-fn auth-cfg http-mod.request)]
+              (when wrapped (tset opts :http-fn wrapped))))
           (when (or p.base-url (?. profile :base-url))
             (tset opts :base-url (or p.base-url (?. profile :base-url))))
           (when (= (type schema) :table)

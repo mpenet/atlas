@@ -261,6 +261,55 @@ Values prefixed with `env:` are read from the environment at runtime.
 }
 ```
 
+#### External tool
+
+Delegates auth to an arbitrary shell command. Use this for custom signing, proprietary auth schemes, or credential helpers.
+
+```json
+{
+  "profiles": {
+    "myapi": {
+      "schema": "https://api.example.com/openapi.json",
+      "auth": {
+        "name": "external-tool",
+        "params": {
+          "commandline": "my-auth-helper",
+          "omitbody": false,
+          "output": "bearer-token"
+        }
+      }
+    }
+  }
+}
+```
+
+| Param | Description |
+|-------|-------------|
+| `commandline` | Shell command to execute (`/bin/sh -c`) |
+| `omitbody` | If `true`, omit the request body from stdin (default: `false`) |
+| `output` | `"bearer-token"` for plain-token output (see below) |
+
+**Default mode (JSON signing):** the tool is called per-request. atlas writes a JSON object to stdin:
+
+```json
+{"method":"GET","uri":"https://api.example.com/items","headers":{},"body":""}
+```
+
+The tool must write a JSON object to stdout with headers to inject:
+
+```json
+{"headers":{"X-Signature":["abc123"],"Authorization":["Bearer tok"]}}
+```
+
+**Bearer-token mode (`output: "bearer-token"`):** the tool is called once (not per-request). It receives no stdin and must write a plain token to stdout. atlas injects `Authorization: Bearer <token>`.
+
+```sh
+# example: call a credential helper that prints a token
+my-auth-helper --get-token
+```
+
+`atlas auth myapi` prints the headers the tool produces. There is no token cache for external tool auth.
+
 #### Token management
 
 ```sh

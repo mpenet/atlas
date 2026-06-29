@@ -263,15 +263,60 @@ local function authorization_code(profile_name, params, ssl)
   end
   return store_token(post_form(params.token_url, form, ssl), profile_name)
 end
+local function run_external(params, stdin_json)
+  assert(params.commandline, "external-tool auth requires params.commandline")
+  local cmd
+  if stdin_json then
+    local tmp = os.tmpname()
+    local f = io.open(tmp, "w")
+    assert(f, "failed to write external tool input")
+    f:write(stdin_json)
+    f:close()
+    local c = ("/bin/sh -c " .. shell_quote((params.commandline .. " < " .. shell_quote(tmp))))
+    cmd = c
+  else
+    cmd = ("/bin/sh -c " .. shell_quote(params.commandline))
+  end
+  local h = io.popen(cmd)
+  assert(h, "failed to start external auth command")
+  local out = h:read("*a")
+  h:close()
+  return out
+end
+local function external_bearer(params)
+  local out = run_external(params, nil):match("^%s*(.-)%s*$")
+  assert((out and (#out > 0)), "external auth command produced no output")
+  return {authorization = ("Bearer " .. out)}
+end
+local function external_signing_headers(params, req)
+  local body
+  if not params.omitbody then
+    body = (req.body or "")
+  else
+    body = nil
+  end
+  local payload = json.encode({method = (req.method or "GET"), uri = req.url, headers = (req.headers or {}), body = body})
+  local raw = run_external(params, payload)
+  if (raw and (#raw > 0)) then
+    local ok, result = pcall(json.decode, raw)
+    if (ok and result and result.headers) then
+      return result.headers
+    else
+      return nil
+    end
+  else
+    return nil
+  end
+end
 local function authenticate(profile_name, auth_config, ssl)
   local params = auth_config.params
-  local case_27_ = auth_config.name
-  if (case_27_ == "oauth-authorization-code") then
+  local case_31_ = auth_config.name
+  if (case_31_ == "oauth-authorization-code") then
     return authorization_code(profile_name, params, ssl)
-  elseif (case_27_ == "oauth-client-credentials") then
+  elseif (case_31_ == "oauth-client-credentials") then
     return client_credentials(profile_name, params, ssl)
   else
-    local _ = case_27_
+    local _ = case_31_
     return error(("unsupported auth type: " .. auth_config.name))
   end
 end
@@ -290,4 +335,73 @@ local function ensure_token(profile_name, auth_config, ssl)
     return data.access_token
   end
 end
-return {["ensure-token"] = ensure_token, authenticate = authenticate, ["clear-token"] = clear_token}
+local function get_headers(profile_name, auth_config, ssl)
+  local case_35_ = auth_config.name
+  if (case_35_ == "external-tool") then
+    local _37_
+    do
+      local t_36_ = auth_config
+      if (nil ~= t_36_) then
+        t_36_ = t_36_.params
+      else
+      end
+      if (nil ~= t_36_) then
+        t_36_ = t_36_.output
+      else
+      end
+      _37_ = t_36_
+    end
+    if (_37_ == "bearer-token") then
+      return external_bearer(auth_config.params)
+    else
+      return {}
+    end
+  else
+    local _ = case_35_
+    return {authorization = ("Bearer " .. ensure_token(profile_name, auth_config, ssl))}
+  end
+end
+local function wrap_http_fn(auth_config, base_fn)
+  local and_42_ = (auth_config.name == "external-tool")
+  if and_42_ then
+    local _44_
+    do
+      local t_43_ = auth_config
+      if (nil ~= t_43_) then
+        t_43_ = t_43_.params
+      else
+      end
+      if (nil ~= t_43_) then
+        t_43_ = t_43_.output
+      else
+      end
+      _44_ = t_43_
+    end
+    and_42_ = (_44_ ~= "bearer-token")
+  end
+  if and_42_ then
+    local params = auth_config.params
+    local function _47_(req)
+      local extra = external_signing_headers(params, req)
+      if extra then
+        local headers = (req.headers or {})
+        for k, vs in pairs(extra) do
+          local _48_
+          if (type(vs) == "table") then
+            _48_ = vs[1]
+          else
+            _48_ = vs
+          end
+          headers[k] = _48_
+        end
+        req["headers"] = headers
+      else
+      end
+      return base_fn(req)
+    end
+    return _47_
+  else
+    return nil
+  end
+end
+return {["get-headers"] = get_headers, ["wrap-http-fn"] = wrap_http_fn, authenticate = authenticate, ["clear-token"] = clear_token}

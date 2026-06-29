@@ -1,6 +1,7 @@
 local atlas = require("atlas")
 local auth = require("atlas.auth")
 local cache = require("atlas.cache")
+local http_mod = require("atlas.http")
 local json = require("lunajson")
 local pretty_mod = require("atlas.pretty")
 local function config_path()
@@ -546,12 +547,22 @@ local function run_auth(profile_name, p, config)
   end
   assert((auth_cfg and auth_cfg.name and (auth_cfg.name ~= "")), ("No auth configured for profile: " .. profile_name))
   local ssl = merge_ssl(profile, p.ssl)
-  if p.logout then
+  if (auth_cfg.name == "external-tool") then
+    local ok, headers = pcall(auth["get-headers"], profile_name, auth_cfg, ssl)
+    if ok then
+      for k, v in pairs(headers) do
+        print((k .. ": " .. v))
+      end
+      return nil
+    else
+      return die(tostring(headers))
+    end
+  elseif p.logout then
     auth["clear-token"](profile_name)
     return print(("Logged out: " .. profile_name))
   else
     auth["clear-token"](profile_name)
-    local ok, result = pcall(auth.authenticate, profile_name, auth_cfg, ssl)
+    local ok, result = pcall(auth["get-headers"], profile_name, auth_cfg, ssl)
     if ok then
       return print(("Authenticated: " .. profile_name))
     else
@@ -587,15 +598,15 @@ local function run(args)
   else
   end
   if (p.schema == "completion") then
-    local case_75_ = p.operation
-    if (case_75_ == "fish") then
+    local case_76_ = p.operation
+    if (case_76_ == "fish") then
       return completion_fish()
-    elseif (case_75_ == "bash") then
+    elseif (case_76_ == "bash") then
       return completion_bash()
-    elseif (case_75_ == "zsh") then
+    elseif (case_76_ == "zsh") then
       return completion_zsh()
     else
-      local _ = case_75_
+      local _ = case_76_
       return die("Usage: atlas completion <fish|bash|zsh>")
     end
   elseif (p.schema == "profile") then
@@ -606,50 +617,50 @@ local function run(args)
     local config = load_config()
     local profile
     do
-      local t_77_ = config
-      if (nil ~= t_77_) then
-        t_77_ = t_77_.profiles
+      local t_78_ = config
+      if (nil ~= t_78_) then
+        t_78_ = t_78_.profiles
       else
       end
-      if (nil ~= t_77_) then
-        t_77_ = t_77_[p.schema]
+      if (nil ~= t_78_) then
+        t_78_ = t_78_[p.schema]
       else
       end
-      profile = t_77_
+      profile = t_78_
     end
     local raw_schema
-    local _81_
+    local _82_
     do
-      local t_80_ = profile
-      if (nil ~= t_80_) then
-        t_80_ = t_80_.schema
+      local t_81_ = profile
+      if (nil ~= t_81_) then
+        t_81_ = t_81_.schema
       else
       end
-      _81_ = t_80_
+      _82_ = t_81_
     end
-    raw_schema = (_81_ or p.schema)
+    raw_schema = (_82_ or p.schema)
     local ttl
-    local or_83_ = p["cache-ttl"]
-    if not or_83_ then
-      local t_84_ = profile
-      if (nil ~= t_84_) then
-        t_84_ = t_84_["cache-ttl"]
+    local or_84_ = p["cache-ttl"]
+    if not or_84_ then
+      local t_85_ = profile
+      if (nil ~= t_85_) then
+        t_85_ = t_85_["cache-ttl"]
       else
       end
-      or_83_ = t_84_
+      or_84_ = t_85_
     end
-    ttl = (or_83_ or 3600)
+    ttl = (or_84_ or 3600)
     local ssl = merge_ssl(profile, p.ssl)
     local auth_cfg
     do
       local a
       do
-        local t_86_ = profile
-        if (nil ~= t_86_) then
-          t_86_ = t_86_.auth
+        local t_87_ = profile
+        if (nil ~= t_87_) then
+          t_87_ = t_87_.auth
         else
         end
-        a = t_86_
+        a = t_87_
       end
       if (a and a.name and (a.name ~= "")) then
         auth_cfg = a
@@ -657,26 +668,20 @@ local function run(args)
         auth_cfg = nil
       end
     end
-    local auth_token
+    local auth_headers
     if auth_cfg then
-      local ok, token = pcall(auth["ensure-token"], p.schema, auth_cfg, ssl)
+      local ok, h = pcall(auth["get-headers"], p.schema, auth_cfg, ssl)
       if ok then
-        auth_token = token
+        auth_headers = h
       else
-        auth_token = die(("authentication failed: " .. tostring(token)))
+        auth_headers = die(("authentication failed: " .. tostring(h)))
       end
     else
-      auth_token = nil
-    end
-    local schema_headers
-    if auth_token then
-      schema_headers = {authorization = ("Bearer " .. auth_token)}
-    else
-      schema_headers = nil
+      auth_headers = nil
     end
     local schema
     if ((type(raw_schema) == "string") and raw_schema:match("^https?://")) then
-      schema = load_schema_cached(raw_schema, ttl, p.reload, ssl, schema_headers)
+      schema = load_schema_cached(raw_schema, ttl, p.reload, ssl, auth_headers)
     else
       schema = raw_schema
     end
@@ -712,30 +717,40 @@ local function run(args)
       or_98_ = t_99_
     end
     opts = {headers = _93_, timeout = or_98_, ssl = ssl}
-    if auth_token then
-      opts.headers["authorization"] = ("Bearer " .. auth_token)
+    if auth_headers then
+      for k, v in pairs(auth_headers) do
+        opts.headers[k] = v
+      end
     else
     end
-    local or_102_ = p["base-url"]
-    if not or_102_ then
-      local t_103_ = profile
-      if (nil ~= t_103_) then
-        t_103_ = t_103_["base-url"]
+    if auth_cfg then
+      local wrapped = auth["wrap-http-fn"](auth_cfg, http_mod.request)
+      if wrapped then
+        opts["http-fn"] = wrapped
       else
       end
-      or_102_ = t_103_
+    else
     end
-    if or_102_ then
-      local or_105_ = p["base-url"]
-      if not or_105_ then
-        local t_106_ = profile
-        if (nil ~= t_106_) then
-          t_106_ = t_106_["base-url"]
+    local or_104_ = p["base-url"]
+    if not or_104_ then
+      local t_105_ = profile
+      if (nil ~= t_105_) then
+        t_105_ = t_105_["base-url"]
+      else
+      end
+      or_104_ = t_105_
+    end
+    if or_104_ then
+      local or_107_ = p["base-url"]
+      if not or_107_ then
+        local t_108_ = profile
+        if (nil ~= t_108_) then
+          t_108_ = t_108_["base-url"]
         else
         end
-        or_105_ = t_106_
+        or_107_ = t_108_
       end
-      opts["base-url"] = or_105_
+      opts["base-url"] = or_107_
     else
     end
     if (type(schema) == "table") then
