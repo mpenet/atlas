@@ -59,7 +59,7 @@ Each `operationId` in the schema becomes a function on the client, converted to 
 
 Signature: `(op-name ...path-params ?body ?opts)`
 
-```fennel
+```clojure
 ; no params
 (client.list-pets)
 
