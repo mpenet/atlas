@@ -5,7 +5,7 @@
 OpenAPI 3.x toolbox.
 
 * Fennel/Lua client — point it at any schema (local file, URL, or parsed table) and get back a callable client.
-* Standalone CLI — similar to restish, with profiles, OAuth, mTLS, and shell completion.
+* Standalone OpenAPI CLI — similar to Restish, with profiles, OAuth, mTLS, and shell completion.
 
 ## Install
 
@@ -15,14 +15,14 @@ OpenAPI 3.x toolbox.
 luarocks install atlas
 ```
 
-**CLI — standalone binary** (no Lua required at runtime):
+**CLI — standalone binary** (no Lua required at runtime), download from https://github.com/mpenet/atlas/releases, then:
 
 ```sh
-# download from https://github.com/mpenet/atlas/releases, then:
+# 
 install -m 755 atlas-bin /usr/local/bin/atlas
 ```
 
-**CLI — from source:**
+**Build CLI from source:**
 
 ```sh
 make deps     # installs luarocks dependencies
@@ -460,4 +460,5 @@ make binary   # build standalone binary → bin/atlas-bin
 
 ## License
 
-Max Penet — Apache 2.0
+Copyright © 2026 Max Penet
+Distributed under the Mozilla Public License Version 2.0
