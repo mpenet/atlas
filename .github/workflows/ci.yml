@@ -23,7 +23,9 @@ jobs:
         run: make deps
 
       - name: Add luarocks bin to PATH
-        run: echo "$HOME/.luarocks/bin" >> $GITHUB_PATH
+        run: |
+          echo "$HOME/.luarocks/bin" >> $GITHUB_PATH
+          echo "${{ github.workspace }}/.luarocks/bin" >> $GITHUB_PATH
 
       - name: Build
         run: make build
