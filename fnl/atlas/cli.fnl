@@ -154,11 +154,21 @@
         (if (= c :.)
             (set i (+ i 1))
             (= c "[")
-            (let [(idx j) (path:match "^%[(%d+)%]()" i)]
-              (if idx
-                  (do (set cur (. cur (+ 1 (tonumber idx))))
-                      (set i j))
-                  (do (set cur nil) (set i (+ n 1)))))
+            (let [(j-iter) (path:match "^%[%]()" i)]
+              (if j-iter
+                  (let [rest (path:sub j-iter)
+                        result []]
+                    (when (= (type cur) :table)
+                      (each [_ v (ipairs cur)]
+                        (table.insert result
+                          (if (> (length rest) 0) (select-path v rest) v))))
+                    (set cur result)
+                    (set i (+ n 1)))
+                  (let [(idx j) (path:match "^%[(%d+)%]()" i)]
+                    (if idx
+                        (do (set cur (. cur (+ 1 (tonumber idx))))
+                            (set i j))
+                        (do (set cur nil) (set i (+ n 1)))))))
             (let [(key j) (path:match "^([^%.%[]+)()" i)]
               (if key
                   (do (set cur (. cur key)) (set i j))

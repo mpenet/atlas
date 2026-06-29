@@ -140,7 +140,12 @@ atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 \
 
 # extract a nested value from the response
 atlas https://petstore3.swagger.io/api/v3/openapi.json get-inventory --select=.available
+
+# index into an array
 atlas https://petstore3.swagger.io/api/v3/openapi.json find-pets-by-status --select=.pets[0].name
+
+# iterate an array — returns all matching values
+atlas https://petstore3.swagger.io/api/v3/openapi.json find-pets-by-status --select=.pets[].name
 ```
 
 HTTP 4xx/5xx responses are printed to stderr and exit with status 1. With `-v` the response headers are included.
@@ -158,7 +163,7 @@ HTTP 4xx/5xx responses are printed to stderr and exit with status 1. With `-v` t
 | `--timeout=N` | Timeout in seconds |
 | `--base-url=URL` | Override the base URL |
 | `--output=FORMAT` | `json` (default), `raw`, `status`, `headers` |
-| `--select=PATH` | Extract a nested value from the response (e.g. `.items[0].name`) |
+| `--select=PATH` | Extract a nested value from the response (e.g. `.items[0].name`, `.items[].name`) |
 | `--no-color` | Disable colored output |
 | `-v`, `--verbose` | Print status line and response headers |
 | `--reload` | Re-fetch and re-cache the schema |
