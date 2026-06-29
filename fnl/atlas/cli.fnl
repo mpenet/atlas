@@ -33,7 +33,7 @@
 (fn save-config [cfg]
   (let [path (config-path)
         dir  (path:match "^(.+)/[^/]+$")]
-    (os.execute (.. "mkdir -p " dir))
+    (os.execute (.. "mkdir -p '" (dir:gsub "'" "'\\''") "'"))
     (let [f (assert (io.open path :w))]
       (f:write (json.encode cfg))
       (f:close))))

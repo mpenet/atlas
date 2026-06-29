@@ -68,19 +68,31 @@ local function request(req)
   else
   end
   local req_table
-  local _10_
-  if payload then
-    _10_ = ltn12.source.string(payload)
-  else
-    _10_ = nil
-  end
-  req_table = {url = url, method = req.method, headers = headers, timeout = req.timeout, source = _10_, sink = ltn12.sink.table(body_out)}
   if (req.ssl and url:match("^https://")) then
+    local tbl_21_ = {}
     for k, v in pairs(req.ssl) do
-      req_table[k] = v
+      local k_22_, v_23_ = k, v
+      if ((k_22_ ~= nil) and (v_23_ ~= nil)) then
+        tbl_21_[k_22_] = v_23_
+      else
+      end
     end
+    req_table = tbl_21_
   else
+    req_table = {}
   end
+  req_table["url"] = url
+  req_table["method"] = req.method
+  req_table["headers"] = headers
+  req_table["timeout"] = req.timeout
+  local _12_
+  if payload then
+    _12_ = ltn12.source.string(payload)
+  else
+    _12_ = nil
+  end
+  req_table["source"] = _12_
+  req_table["sink"] = ltn12.sink.table(body_out)
   local ok, code, resp_headers = requester.request(req_table)
   assert(ok, string.format("%s %s failed: %s", req.method, url, tostring(code)))
   local raw = table.concat(body_out)

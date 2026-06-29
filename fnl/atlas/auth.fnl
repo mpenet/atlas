@@ -226,20 +226,22 @@
 
 (fn run-external [params stdin-json]
   (assert params.commandline "external-tool auth requires params.commandline")
+  (var tmp-path nil)
   (let [cmd (if stdin-json
                 (let [tmp (os.tmpname)
                       f (io.open tmp :w)]
                   (assert f "failed to write external tool input")
                   (f:write stdin-json)
                   (f:close)
-                  (let [c (.. "/bin/sh -c "
-                              (shell-quote (.. params.commandline " < " (shell-quote tmp))))]
-                    c))
+                  (set tmp-path tmp)
+                  (.. "/bin/sh -c "
+                      (shell-quote (.. params.commandline " < " (shell-quote tmp)))))
                 (.. "/bin/sh -c " (shell-quote params.commandline)))
         h (io.popen cmd)]
     (assert h "failed to start external auth command")
     (let [out (h:read "*a")]
       (h:close)
+      (when tmp-path (os.remove tmp-path))
       out)))
 
 (fn external-bearer [params]
@@ -275,7 +277,8 @@
         (let [data (if (and cached cached.refresh_token)
                        (do (io.stderr:write "Refreshing token...\n")
                            (or (try-refresh profile-name auth-config.params ssl cached)
-                               (authenticate profile-name auth-config ssl)))
+                               (do (io.stderr:write "Token refresh failed, re-authenticating...\n")
+                                   (authenticate profile-name auth-config ssl))))
                        (authenticate profile-name auth-config ssl))]
           data.access_token))))
 

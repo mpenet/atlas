@@ -32,15 +32,15 @@
           body-out []]
       (when payload
         (tset headers :content-length (tostring (length payload))))
-      (let [req-table {:url url
-                       :method req.method
-                       :headers headers
-                       :timeout req.timeout
-                       :source (when payload (ltn12.source.string payload))
-                       :sink (ltn12.sink.table body-out)}]
-        (when (and req.ssl (url:match "^https://"))
-          (each [k v (pairs req.ssl)]
-            (tset req-table k v)))
+      (let [req-table (if (and req.ssl (url:match "^https://"))
+                         (collect [k v (pairs req.ssl)] k v)
+                         {})]
+        (tset req-table :url url)
+        (tset req-table :method req.method)
+        (tset req-table :headers headers)
+        (tset req-table :timeout req.timeout)
+        (tset req-table :source (when payload (ltn12.source.string payload)))
+        (tset req-table :sink (ltn12.sink.table body-out))
         (let [(ok code resp-headers) (requester.request req-table)]
           (assert ok (string.format "%s %s failed: %s" req.method url (tostring code)))
           (let [raw (table.concat body-out)

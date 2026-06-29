@@ -265,6 +265,7 @@ local function authorization_code(profile_name, params, ssl)
 end
 local function run_external(params, stdin_json)
   assert(params.commandline, "external-tool auth requires params.commandline")
+  local tmp_path = nil
   local cmd
   if stdin_json then
     local tmp = os.tmpname()
@@ -272,8 +273,8 @@ local function run_external(params, stdin_json)
     assert(f, "failed to write external tool input")
     f:write(stdin_json)
     f:close()
-    local c = ("/bin/sh -c " .. shell_quote((params.commandline .. " < " .. shell_quote(tmp))))
-    cmd = c
+    tmp_path = tmp
+    cmd = ("/bin/sh -c " .. shell_quote((params.commandline .. " < " .. shell_quote(tmp))))
   else
     cmd = ("/bin/sh -c " .. shell_quote(params.commandline))
   end
@@ -281,6 +282,10 @@ local function run_external(params, stdin_json)
   assert(h, "failed to start external auth command")
   local out = h:read("*a")
   h:close()
+  if tmp_path then
+    os.remove(tmp_path)
+  else
+  end
   return out
 end
 local function external_bearer(params)
@@ -310,13 +315,13 @@ local function external_signing_headers(params, req)
 end
 local function authenticate(profile_name, auth_config, ssl)
   local params = auth_config.params
-  local case_31_ = auth_config.name
-  if (case_31_ == "oauth-authorization-code") then
+  local case_32_ = auth_config.name
+  if (case_32_ == "oauth-authorization-code") then
     return authorization_code(profile_name, params, ssl)
-  elseif (case_31_ == "oauth-client-credentials") then
+  elseif (case_32_ == "oauth-client-credentials") then
     return client_credentials(profile_name, params, ssl)
   else
-    local _ = case_31_
+    local _ = case_32_
     return error(("unsupported auth type: " .. auth_config.name))
   end
 end
@@ -328,7 +333,12 @@ local function ensure_token(profile_name, auth_config, ssl)
     local data
     if (cached and cached.refresh_token) then
       io.stderr:write("Refreshing token...\n")
-      data = (try_refresh(profile_name, auth_config.params, ssl, cached) or authenticate(profile_name, auth_config, ssl))
+      local or_34_ = try_refresh(profile_name, auth_config.params, ssl, cached)
+      if not or_34_ then
+        io.stderr:write("Token refresh failed, re-authenticating...\n")
+        or_34_ = authenticate(profile_name, auth_config, ssl)
+      end
+      data = or_34_
     else
       data = authenticate(profile_name, auth_config, ssl)
     end
@@ -336,70 +346,70 @@ local function ensure_token(profile_name, auth_config, ssl)
   end
 end
 local function get_headers(profile_name, auth_config, ssl)
-  local case_35_ = auth_config.name
-  if (case_35_ == "external-tool") then
-    local _37_
+  local case_37_ = auth_config.name
+  if (case_37_ == "external-tool") then
+    local _39_
     do
-      local t_36_ = auth_config
-      if (nil ~= t_36_) then
-        t_36_ = t_36_.params
+      local t_38_ = auth_config
+      if (nil ~= t_38_) then
+        t_38_ = t_38_.params
       else
       end
-      if (nil ~= t_36_) then
-        t_36_ = t_36_.output
+      if (nil ~= t_38_) then
+        t_38_ = t_38_.output
       else
       end
-      _37_ = t_36_
+      _39_ = t_38_
     end
-    if (_37_ == "bearer-token") then
+    if (_39_ == "bearer-token") then
       return external_bearer(auth_config.params)
     else
       return {}
     end
   else
-    local _ = case_35_
+    local _ = case_37_
     return {authorization = ("Bearer " .. ensure_token(profile_name, auth_config, ssl))}
   end
 end
 local function wrap_http_fn(auth_config, base_fn)
-  local and_42_ = (auth_config.name == "external-tool")
-  if and_42_ then
-    local _44_
+  local and_44_ = (auth_config.name == "external-tool")
+  if and_44_ then
+    local _46_
     do
-      local t_43_ = auth_config
-      if (nil ~= t_43_) then
-        t_43_ = t_43_.params
+      local t_45_ = auth_config
+      if (nil ~= t_45_) then
+        t_45_ = t_45_.params
       else
       end
-      if (nil ~= t_43_) then
-        t_43_ = t_43_.output
+      if (nil ~= t_45_) then
+        t_45_ = t_45_.output
       else
       end
-      _44_ = t_43_
+      _46_ = t_45_
     end
-    and_42_ = (_44_ ~= "bearer-token")
+    and_44_ = (_46_ ~= "bearer-token")
   end
-  if and_42_ then
+  if and_44_ then
     local params = auth_config.params
-    local function _47_(req)
+    local function _49_(req)
       local extra = external_signing_headers(params, req)
       if extra then
         local headers = (req.headers or {})
         for k, vs in pairs(extra) do
-          local _48_
+          local _50_
           if (type(vs) == "table") then
-            _48_ = vs[1]
+            _50_ = vs[1]
           else
-            _48_ = vs
+            _50_ = vs
           end
-          headers[k] = _48_
+          headers[k] = _50_
         end
         req["headers"] = headers
       else
       end
       return base_fn(req)
     end
-    return _47_
+    return _49_
   else
     return nil
   end

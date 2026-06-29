@@ -41,6 +41,7 @@ local function pick_accept(op_spec)
     end
   end
   if (#types > 0) then
+    table.sort(types)
     return table.concat(types, ", ")
   else
     return nil

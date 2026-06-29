@@ -8,9 +8,11 @@
 
 (fn resolve-path [template args]
   (var i 0)
-  (template:gsub "{[^}]+}"
-    (fn [_]
+  (template:gsub "{([^}]+)}"
+    (fn [param]
       (set i (+ i 1))
-      (tostring (. args i)))))
+      (let [v (. args i)]
+        (assert v (.. "missing required path parameter: " param))
+        (tostring v)))))
 
 {: camel->kebab : extract-path-params : resolve-path}

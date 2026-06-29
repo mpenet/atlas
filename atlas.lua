@@ -16,13 +16,24 @@ local function load_schema(path, _3fssl, _3fheaders)
       requester = socket_http
     end
     local body_out = {}
-    local req = {url = path, method = "GET", headers = (_3fheaders or {}), sink = ltn12.sink.table(body_out)}
+    local req
     if (_3fssl and path:match("^https://")) then
+      local tbl_21_ = {}
       for k, v in pairs(_3fssl) do
-        req[k] = v
+        local k_22_, v_23_ = k, v
+        if ((k_22_ ~= nil) and (v_23_ ~= nil)) then
+          tbl_21_[k_22_] = v_23_
+        else
+        end
       end
+      req = tbl_21_
     else
+      req = {}
     end
+    req["url"] = path
+    req["method"] = "GET"
+    req["headers"] = (_3fheaders or {})
+    req["sink"] = ltn12.sink.table(body_out)
     local ok, code = requester.request(req)
     assert(ok, string.format("failed to fetch schema from %s: %s", path, tostring(code)))
     assert(((code >= 200) and (code < 300)), string.format("HTTP %s fetching schema from %s", code, path))
@@ -38,24 +49,39 @@ local function load_schema(path, _3fssl, _3fheaders)
   assert(ok, string.format("failed to parse schema JSON from '%s': %s", path, tostring(parsed)))
   return parsed
 end
-local function make_operation(client, path, method, op_spec)
+local function make_operation(client_opts, path, method, op_spec)
   local param_names = util["extract-path-params"](path)
   local n_path = #param_names
   local has_body_3f = (nil ~= op_spec.requestBody)
-  local ct = negotiate["pick-content-type"](op_spec)
-  local accept = negotiate["pick-accept"](op_spec)
-  local n_opts
-  local _4_
-  if has_body_3f then
-    _4_ = 2
-  else
-    _4_ = 1
+  local fixed_headers
+  do
+    local tbl_21_ = {}
+    for k, v in pairs({["content-type"] = negotiate["pick-content-type"](op_spec), accept = negotiate["pick-accept"](op_spec)}) do
+      local k_22_, v_23_
+      if v then
+        k_22_, v_23_ = k, v
+      else
+        k_22_, v_23_ = nil
+      end
+      if ((k_22_ ~= nil) and (v_23_ ~= nil)) then
+        tbl_21_[k_22_] = v_23_
+      else
+      end
+    end
+    fixed_headers = tbl_21_
   end
-  n_opts = (n_path + _4_)
+  local n_opts
+  local _7_
+  if has_body_3f then
+    _7_ = 2
+  else
+    _7_ = 1
+  end
+  n_opts = (n_path + _7_)
   local f
-  local function _6_(...)
+  local function _9_(...)
     local args = {...}
-    local url = (client["base-url"] .. util["resolve-path"](path, args))
+    local url = (client_opts["base-url"] .. util["resolve-path"](path, args))
     local body
     if has_body_3f then
       body = args[(n_path + 1)]
@@ -66,7 +92,7 @@ local function make_operation(client, path, method, op_spec)
     local headers
     do
       local tbl_21_ = {}
-      for k, v in pairs((client.headers or {})) do
+      for k, v in pairs((client_opts.headers or {})) do
         local k_22_, v_23_ = k, v
         if ((k_22_ ~= nil) and (v_23_ ~= nil)) then
           tbl_21_[k_22_] = v_23_
@@ -75,70 +101,65 @@ local function make_operation(client, path, method, op_spec)
       end
       headers = tbl_21_
     end
-    local _10_
+    local _13_
     do
-      local t_9_ = opts
-      if (nil ~= t_9_) then
-        t_9_ = t_9_.headers
+      local t_12_ = opts
+      if (nil ~= t_12_) then
+        t_12_ = t_12_.headers
       else
       end
-      _10_ = t_9_
+      _13_ = t_12_
     end
-    for k, v in pairs((_10_ or {})) do
+    for k, v in pairs((_13_ or {})) do
       headers[k] = v
     end
-    if ct then
-      headers["content-type"] = ct
-    else
+    for k, v in pairs(fixed_headers) do
+      headers[k] = v
     end
-    if accept then
-      headers["accept"] = accept
-    else
-    end
-    local _15_
+    local _16_
     do
-      local t_14_ = opts
-      if (nil ~= t_14_) then
-        t_14_ = t_14_.query
+      local t_15_ = opts
+      if (nil ~= t_15_) then
+        t_15_ = t_15_.query
       else
       end
-      _15_ = t_14_
+      _16_ = t_15_
     end
-    local _18_
+    local _19_
     do
-      local t_17_ = opts
-      if (nil ~= t_17_) then
-        t_17_ = t_17_.timeout
+      local t_18_ = opts
+      if (nil ~= t_18_) then
+        t_18_ = t_18_.timeout
       else
       end
-      _18_ = t_17_
+      _19_ = t_18_
     end
-    return client["http-fn"]({method = method:upper(), url = url, query = _15_, body = body, headers = headers, timeout = (_18_ or client.timeout), ssl = client.ssl})
+    return client_opts["http-fn"]({method = method:upper(), url = url, query = _16_, body = body, headers = headers, timeout = (_19_ or client_opts.timeout), ssl = client_opts.ssl})
   end
-  f = _6_
-  local function _20_(_, ...)
+  f = _9_
+  local function _21_(_, ...)
     return f(...)
   end
-  return setmetatable({["fnl/docstring"] = doc.build(path, method, op_spec), ["has-body?"] = has_body_3f, ["n-path"] = n_path}, {__call = _20_})
+  return setmetatable({["fnl/docstring"] = doc.build(path, method, op_spec), ["has-body?"] = has_body_3f, ["n-path"] = n_path}, {__call = _21_})
 end
 local function client(schema, _3fopts)
   local source_url
-  local _21_
+  local _22_
   if (type(schema) == "string") then
-    _21_ = schema
+    _22_ = schema
   else
-    _21_ = nil
+    _22_ = nil
   end
-  local or_23_ = _21_
-  if not or_23_ then
-    local t_24_ = _3fopts
-    if (nil ~= t_24_) then
-      t_24_ = t_24_["source-url"]
+  local or_24_ = _22_
+  if not or_24_ then
+    local t_25_ = _3fopts
+    if (nil ~= t_25_) then
+      t_25_ = t_25_["source-url"]
     else
     end
-    or_23_ = t_24_
+    or_24_ = t_25_
   end
-  source_url = or_23_
+  source_url = or_24_
   local schema0
   if (type(schema) == "string") then
     schema0 = load_schema(schema)
@@ -157,74 +178,75 @@ local function client(schema, _3fopts)
     server_url = nil
   end
   local base_url
-  local _29_
+  local _30_
   do
-    local t_28_ = _3fopts
-    if (nil ~= t_28_) then
-      t_28_ = t_28_["base-url"]
+    local t_29_ = _3fopts
+    if (nil ~= t_29_) then
+      t_29_ = t_29_["base-url"]
     else
     end
-    _29_ = t_28_
+    _30_ = t_29_
   end
-  local or_31_ = _29_
-  if not or_31_ then
+  local or_32_ = _30_
+  if not or_32_ then
     if (server_url and server_url:match("^https?://")) then
-      or_31_ = server_url
+      or_32_ = server_url
     else
-      or_31_ = nil
+      or_32_ = nil
     end
   end
-  if not or_31_ then
+  if not or_32_ then
     if (source_url and server_url and server_url:match("^/")) then
       local origin = source_url:match("^(https?://[^/]+)")
-      or_31_ = (origin .. server_url)
+      or_32_ = (origin .. server_url)
     else
-      or_31_ = nil
+      or_32_ = nil
     end
   end
-  base_url = (or_31_ or error("no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts"))
-  local client0
-  local _36_
+  base_url = (or_32_ or error("no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts"))
+  local client_opts
+  local _37_
   do
-    local t_35_ = _3fopts
-    if (nil ~= t_35_) then
-      t_35_ = t_35_["http-fn"]
+    local t_36_ = _3fopts
+    if (nil ~= t_36_) then
+      t_36_ = t_36_["http-fn"]
     else
     end
-    _36_ = t_35_
+    _37_ = t_36_
   end
-  local _39_
+  local _40_
   do
-    local t_38_ = _3fopts
-    if (nil ~= t_38_) then
-      t_38_ = t_38_.headers
+    local t_39_ = _3fopts
+    if (nil ~= t_39_) then
+      t_39_ = t_39_.headers
     else
     end
-    _39_ = t_38_
+    _40_ = t_39_
   end
-  local _42_
+  local _43_
   do
-    local t_41_ = _3fopts
-    if (nil ~= t_41_) then
-      t_41_ = t_41_.timeout
+    local t_42_ = _3fopts
+    if (nil ~= t_42_) then
+      t_42_ = t_42_.timeout
     else
     end
-    _42_ = t_41_
+    _43_ = t_42_
   end
-  local _45_
+  local _46_
   do
-    local t_44_ = _3fopts
-    if (nil ~= t_44_) then
-      t_44_ = t_44_.ssl
+    local t_45_ = _3fopts
+    if (nil ~= t_45_) then
+      t_45_ = t_45_.ssl
     else
     end
-    _45_ = t_44_
+    _46_ = t_45_
   end
-  client0 = {["base-url"] = base_url, ["http-fn"] = (_36_ or http.request), headers = (_39_ or {}), timeout = _42_, ssl = _45_}
+  client_opts = {["base-url"] = base_url, ["http-fn"] = (_37_ or http.request), headers = (_40_ or {}), timeout = _43_, ssl = _46_}
+  local client0 = {}
   for path, methods in pairs((schema0.paths or {})) do
     for method, op_spec in pairs(methods) do
       if ((type(op_spec) == "table") and op_spec.operationId) then
-        client0[util["camel->kebab"](op_spec.operationId)] = make_operation(client0, path, method, op_spec)
+        client0[util["camel->kebab"](op_spec.operationId)] = make_operation(client_opts, path, method, op_spec)
       else
       end
     end

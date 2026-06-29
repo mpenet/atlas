@@ -26,6 +26,7 @@
           (tset seen mt true)
           (table.insert types mt))))
     (when (> (length types) 0)
+      (table.sort types)
       (table.concat types ", "))))
 
 {: pick-content-type : pick-accept}

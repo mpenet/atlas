@@ -12,13 +12,13 @@
   (let [content (if (path:match "^https?://")
                     (let [requester (if (path:match "^https://") https socket-http)
                           body-out []
-                          req {:url path
-                               :method :GET
-                               :headers (or ?headers {})
-                               :sink (ltn12.sink.table body-out)}]
-                      (when (and ?ssl (path:match "^https://"))
-                        (each [k v (pairs ?ssl)]
-                          (tset req k v)))
+                          req (if (and ?ssl (path:match "^https://"))
+                                  (collect [k v (pairs ?ssl)] k v)
+                                  {})]
+                      (tset req :url path)
+                      (tset req :method :GET)
+                      (tset req :headers (or ?headers {}))
+                      (tset req :sink (ltn12.sink.table body-out))
                       (let [(ok code) (requester.request req)]
                         (assert ok (string.format "failed to fetch schema from %s: %s" path (tostring code)))
                         (assert (and (>= code 200) (< code 300))
@@ -33,30 +33,31 @@
     (assert ok (string.format "failed to parse schema JSON from '%s': %s" path (tostring parsed)))
     parsed))
 
-(fn make-operation [client path method op-spec]
+(fn make-operation [client-opts path method op-spec]
   (let [param-names (util.extract-path-params path)
         n-path (length param-names)
         has-body? (not= nil op-spec.requestBody)
-        ct (negotiate.pick-content-type op-spec)
-        accept (negotiate.pick-accept op-spec)
+        fixed-headers (collect [k v (pairs {:content-type (negotiate.pick-content-type op-spec)
+                                            :accept (negotiate.pick-accept op-spec)})]
+                        (when v (values k v)))
         n-opts (+ n-path (if has-body? 2 1))
         f (fn [...]
             (let [args [...]
-                  url (.. client.base-url (util.resolve-path path args))
+                  url (.. client-opts.base-url (util.resolve-path path args))
                   body (when has-body? (. args (+ n-path 1)))
                   opts (. args n-opts)
-                  headers (collect [k v (pairs (or client.headers {}))] k v)]
+                  headers (collect [k v (pairs (or client-opts.headers {}))] k v)]
               (each [k v (pairs (or (?. opts :headers) {}))]
                 (tset headers k v))
-              (when ct (tset headers :content-type ct))
-              (when accept (tset headers :accept accept))
-              (client.http-fn {:method (method:upper)
-                               :url url
-                               :query (?. opts :query)
-                               :body body
-                               :headers headers
-                               :timeout (or (?. opts :timeout) client.timeout)
-                               :ssl client.ssl})))]
+              (each [k v (pairs fixed-headers)]
+                (tset headers k v))
+              (client-opts.http-fn {:method (method:upper)
+                                    :url url
+                                    :query (?. opts :query)
+                                    :body body
+                                    :headers headers
+                                    :timeout (or (?. opts :timeout) client-opts.timeout)
+                                    :ssl client-opts.ssl})))]
     (setmetatable {:fnl/docstring (doc.build path method op-spec)
                    :has-body? has-body?
                    :n-path n-path}
@@ -84,17 +85,18 @@
                        (let [(origin) (source-url:match "^(https?://[^/]+)")]
                          (.. origin server-url)))
                      (error "no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts"))
-        client {:base-url base-url
-                :http-fn (or (?. ?opts :http-fn) http.request)
-                :headers (or (?. ?opts :headers) {})
-                :timeout (?. ?opts :timeout)
-                :ssl (?. ?opts :ssl)}]
+        client-opts {:base-url base-url
+                     :http-fn (or (?. ?opts :http-fn) http.request)
+                     :headers (or (?. ?opts :headers) {})
+                     :timeout (?. ?opts :timeout)
+                     :ssl (?. ?opts :ssl)}
+        client {}]
     (each [path methods (pairs (or schema.paths {}))]
       (each [method op-spec (pairs methods)]
         (when (and (= (type op-spec) :table) op-spec.operationId)
           (tset client
                 (util.camel->kebab op-spec.operationId)
-                (make-operation client path method op-spec)))))
+                (make-operation client-opts path method op-spec)))))
     client))
 
 {: client : load-schema}

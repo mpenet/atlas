@@ -44,7 +44,7 @@ end
 local function save_config(cfg)
   local path = config_path()
   local dir = path:match("^(.+)/[^/]+$")
-  os.execute(("mkdir -p " .. dir))
+  os.execute(("mkdir -p '" .. dir:gsub("'", "'\\''") .. "'"))
   local f = assert(io.open(path, "w"))
   f:write(json.encode(cfg))
   return f:close()
