@@ -93,6 +93,10 @@
           (let [(v) (a:match "^%-%-complete%-ops=(.+)")]
             (tset r :complete-ops v))
 
+          (a:match "^%-%-select=(.+)")
+          (let [(v) (a:match "^%-%-select=(.+)")]
+            (tset r :select v))
+
           (not (a:match "^%-"))
           (if (not r.schema) (tset r :schema a)
               (not r.operation) (tset r :operation a)
@@ -117,21 +121,56 @@
     (each [_ op (ipairs ops)]
       (print (.. op.k (if op.summary (.. "\t" op.summary) ""))))))
 
-(fn print-resp [resp output no-color verbose]
-  (when verbose
-    (print (.. "HTTP " resp.status))
-    (each [k v (pairs (or resp.headers {}))]
-      (print (.. k ": " v)))
-    (print ""))
-  (match (or output :json)
-    :raw    (print (tostring resp.body))
-    :status (print resp.status)
-    :headers (each [k v (pairs (or resp.headers {}))]
-               (print (.. k ": " v)))
-    _ (if resp.body
-          (print (pretty-mod.pretty resp.body 0 (not no-color)))
-          (when (not verbose)
-            (io.stderr:write (.. "HTTP " resp.status "\n"))))))
+(fn print-resp [resp output no-color verbose ?select]
+  (let [error? (and resp.status (>= resp.status 400))
+        body (if (and (not error?) ?select resp.body)
+                 (select-path resp.body ?select)
+                 resp.body)]
+    (if error?
+        (do
+          (io.stderr:write (.. "HTTP " resp.status "\n"))
+          (when verbose
+            (each [k v (pairs (or resp.headers {}))]
+              (io.stderr:write (.. k ": " v "\n")))
+            (io.stderr:write "\n"))
+          (when resp.body
+            (io.stderr:write (.. (pretty-mod.pretty resp.body 0 (not no-color)) "\n")))
+          (os.exit 1))
+        (do
+          (when verbose
+            (print (.. "HTTP " resp.status))
+            (each [k v (pairs (or resp.headers {}))]
+              (print (.. k ": " v)))
+            (print ""))
+          (match (or output :json)
+            :raw     (print (tostring body))
+            :status  (print resp.status)
+            :headers (each [k v (pairs (or resp.headers {}))]
+                       (print (.. k ": " v)))
+            _ (if body
+                  (print (pretty-mod.pretty body 0 (not no-color)))
+                  (when (not verbose)
+                    (io.stderr:write (.. "HTTP " resp.status "\n")))))))))
+
+(fn select-path [data path]
+  (var cur data)
+  (var i 1)
+  (let [n (length path)]
+    (while (and cur (<= i n))
+      (let [c (path:sub i i)]
+        (if (= c :.)
+            (set i (+ i 1))
+            (= c "[")
+            (let [(idx j) (path:match "^%[(%d+)%]()" i)]
+              (if idx
+                  (do (set cur (. cur (+ 1 (tonumber idx))))
+                      (set i j))
+                  (do (set cur nil) (set i (+ n 1)))))
+            (let [(key j) (path:match "^([^%.%[]+)()" i)]
+              (if key
+                  (do (set cur (. cur key)) (set i j))
+                  (do (set cur nil) (set i (+ n 1)))))))))
+  cur)
 
 (fn strip-location [msg]
   (let [s (tostring msg)
@@ -271,6 +310,7 @@
   (print "  --timeout=N           Timeout in seconds")
   (print "  --base-url=URL        Override base URL")
   (print "  --output=json|raw|status|headers  Output format (default: json)")
+  (print "  --select=PATH             Select nested value (e.g. .items[0].name)")
   (print "  --no-color            Disable colored output")
   (print "  -v, --verbose         Show status and response headers")
   (print "  --reload              Re-fetch and re-cache the schema")
@@ -408,7 +448,7 @@
                   (when req-opts (table.insert call-args req-opts))
                   (let [(ok-r resp) (pcall op (table.unpack call-args))]
                     (if ok-r
-                        (print-resp resp p.output p.no-color p.verbose)
+                        (print-resp resp p.output p.no-color p.verbose p.select)
                         (die (.. "request failed: " (tostring resp)))))))
 
               (die "No operation specified. Use --list to see available operations.")))))))
