@@ -41,14 +41,6 @@ local function read_body(s)
   assert(ok, ("invalid JSON in body: " .. tostring(parsed)))
   return parsed
 end
-local function save_config(cfg)
-  local path = config_path()
-  local dir = path:match("^(.+)/[^/]+$")
-  os.execute(("mkdir -p '" .. dir:gsub("'", "'\\''") .. "'"))
-  local f = assert(io.open(path, "w"))
-  f:write(json.encode(cfg))
-  return f:close()
-end
 local function merge_profiles(base, child)
   local result
   do
@@ -385,99 +377,29 @@ local function profile_show(config, name)
     return die(("Profile not found: " .. name))
   end
 end
-local function profile_add(config, name, p)
-  assert(name, "profile name required")
-  local or_42_ = p["schema-url"]
-  if not or_42_ then
-    local t_43_ = config
-    if (nil ~= t_43_) then
-      t_43_ = t_43_.profiles
-    else
-    end
-    if (nil ~= t_43_) then
-      t_43_ = t_43_[name]
-    else
-    end
-    if (nil ~= t_43_) then
-      t_43_ = t_43_.schema
-    else
-    end
-    or_42_ = t_43_
-  end
-  assert(or_42_, "profile add requires --schema=URL")
-  local profiles = (config.profiles or {})
-  local existing = (profiles[name] or {})
-  local updated = {schema = (p["schema-url"] or existing.schema)}
-  if p["base-url"] then
-    updated["base-url"] = p["base-url"]
-  else
-  end
-  if p.timeout then
-    updated["timeout"] = p.timeout
-  else
-  end
-  if next(p.headers) then
-    updated["headers"] = p.headers
-  else
-  end
-  if next(p.ssl) then
-    updated["ssl"] = p.ssl
-  else
-  end
-  profiles[name] = updated
-  config["profiles"] = profiles
-  save_config(config)
-  return print(("Profile '" .. name .. "' saved."))
-end
-local function profile_remove(config, name)
-  assert(name, "profile name required")
-  local _52_
-  do
-    local t_51_ = config
-    if (nil ~= t_51_) then
-      t_51_ = t_51_.profiles
-    else
-    end
-    if (nil ~= t_51_) then
-      t_51_ = t_51_[name]
-    else
-    end
-    _52_ = t_51_
-  end
-  assert(_52_, ("Profile not found: " .. name))
-  config.profiles[name] = nil
-  save_config(config)
-  return print(("Profile '" .. name .. "' removed."))
-end
-local function run_profile(subcmd, name, p, config)
+local function run_profile(subcmd, name, config)
   if (subcmd == "list") then
     return profile_list(config)
   elseif (subcmd == "show") then
     return profile_show(config, name)
-  elseif (subcmd == "add") then
-    return profile_add(config, name, p)
-  elseif (subcmd == "remove") then
-    return profile_remove(config, name)
-  elseif (subcmd == "rm") then
-    return profile_remove(config, name)
   else
     local _ = subcmd
-    return die(("Unknown profile subcommand: " .. tostring(subcmd) .. "\nUsage: atlas profile <list|show|add|remove> [name] [options]"))
+    return die(("Unknown profile subcommand: " .. tostring(subcmd) .. "\nUsage: atlas profile <list|show> [name]"))
   end
 end
 local function complete_ops(schema_or_profile)
   local config = load_config()
   local profiles
-  local _57_
+  local _44_
   do
-    local t_56_ = config
-    if (nil ~= t_56_) then
-      t_56_ = t_56_.profiles
+    local t_43_ = config
+    if (nil ~= t_43_) then
+      t_43_ = t_43_.profiles
     else
     end
-    _57_ = t_56_
+    _44_ = t_43_
   end
-  profiles = (_57_ or {})
+  profiles = (_44_ or {})
   local profile
   if profiles[schema_or_profile] then
     profile = resolve_profile(schema_or_profile, profiles, {})
@@ -485,27 +407,27 @@ local function complete_ops(schema_or_profile)
     profile = nil
   end
   local schema
-  local _61_
+  local _48_
   do
-    local t_60_ = profile
-    if (nil ~= t_60_) then
-      t_60_ = t_60_.schema
+    local t_47_ = profile
+    if (nil ~= t_47_) then
+      t_47_ = t_47_.schema
     else
     end
-    _61_ = t_60_
+    _48_ = t_47_
   end
-  schema = (_61_ or schema_or_profile)
+  schema = (_48_ or schema_or_profile)
   local opts
-  local _64_
+  local _51_
   do
-    local t_63_ = profile
-    if (nil ~= t_63_) then
-      t_63_ = t_63_.headers
+    local t_50_ = profile
+    if (nil ~= t_50_) then
+      t_50_ = t_50_.headers
     else
     end
-    _64_ = t_63_
+    _51_ = t_50_
   end
-  opts = {headers = (_64_ or {})}
+  opts = {headers = (_51_ or {})}
   local ok, c = pcall(atlas.client, schema, opts)
   if ok then
     for k, v in pairs(c) do
@@ -522,41 +444,70 @@ end
 local function completion_fish()
   print("# atlas fish completion \226\128\148 source this or put in ~/.config/fish/completions/atlas.fish")
   print("")
-  print("# disable file completion by default")
   print("complete -c atlas -f")
   print("")
-  print("# flags")
+  print("# count non-flag positional args before cursor")
+  print("function __atlas_num_args")
+  print("    set -l n 0")
+  print("    for t in (commandline -opc)[2..]")
+  print("        string match -qr '^-' -- $t; or set n (math $n + 1)")
+  print("    end")
+  print("    echo $n")
+  print("end")
+  print("")
+  print("# \226\148\128\226\148\128 first positional \226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128")
+  print("complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a '(atlas profile list 2>/dev/null | cut -f1)' -d Profile")
+  print("complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a profile    -d 'Manage profiles'")
+  print("complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a auth       -d 'Authenticate a profile'")
+  print("complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a completion -d 'Print shell completion script'")
+  print("")
+  print("# \226\148\128\226\148\128 profile subcommands \226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128")
+  print("complete -c atlas -n '__fish_seen_subcommand_from profile; and test (__atlas_num_args) -eq 1' -a list -d 'List profiles'")
+  print("complete -c atlas -n '__fish_seen_subcommand_from profile; and test (__atlas_num_args) -eq 1' -a show -d 'Show resolved profile'")
+  print("complete -c atlas -n '__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from show' -a '(atlas profile list 2>/dev/null | cut -f1)'")
+  print("")
+  print("# \226\148\128\226\148\128 auth <profile> \226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128")
+  print("complete -c atlas -n '__fish_seen_subcommand_from auth; and test (__atlas_num_args) -eq 1' -a '(atlas profile list 2>/dev/null | cut -f1)'")
+  print("")
+  print("# \226\148\128\226\148\128 completion <shell> \226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128")
+  print("complete -c atlas -n '__fish_seen_subcommand_from completion; and test (__atlas_num_args) -eq 1' -a 'fish bash zsh'")
+  print("")
+  print("# \226\148\128\226\148\128 operation names (second positional, non-special first arg) \226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128")
+  print("complete -c atlas -n 'not __fish_seen_subcommand_from profile auth completion; and test (__atlas_num_args) -eq 1' -a '(atlas --complete-ops=(commandline -opc)[2] 2>/dev/null)'")
+  print("")
+  print("# \226\148\128\226\148\128 flags \226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128\226\148\128")
   print("complete -c atlas -l list      -d 'List all operations'")
   print("complete -c atlas -l help      -d 'Show operation documentation'")
   print("complete -c atlas -l no-color  -d 'Disable colored output'")
-  print("complete -c atlas -s v -l verbose -d 'Show status and headers'")
-  print("complete -c atlas -l output    -d 'Output format' -r -a 'json raw status headers'")
-  print("complete -c atlas -l timeout   -d 'Timeout in seconds' -r")
-  print("complete -c atlas -l base-url  -d 'Override base URL' -r")
-  print("complete -c atlas -l body      -d 'Request body JSON' -r")
-  print("complete -c atlas -s d         -d 'Request body JSON' -r")
-  print("")
-  print("# profile names as first positional arg")
-  print("complete -c atlas -n '__fish_is_first_arg' -a '(atlas profile list 2>/dev/null | cut -f1)' -d 'Profile'")
-  print("complete -c atlas -n '__fish_is_first_arg' -a 'profile' -d 'Manage profiles'")
-  print("")
-  print("# operation names as second positional arg")
-  print("complete -c atlas -n 'not __fish_is_first_arg' -a '(atlas --complete-ops=(commandline -opc | string split \" \" -f2) 2>/dev/null)'")
-  print("")
-  print("# profile subcommands")
-  return print("complete -c atlas -n '__fish_seen_subcommand_from profile' -a 'list show add remove' -d 'Profile subcommand'")
+  print("complete -c atlas -s v -l verbose -d 'Show status and response headers'")
+  print("complete -c atlas -l reload    -d 'Re-fetch and re-cache the schema'")
+  print("complete -c atlas -l output    -r -d 'Output format' -a 'json raw status headers'")
+  print("complete -c atlas -l select    -r -d 'Select nested value (.items[0].name)'")
+  print("complete -c atlas -l timeout   -r -d 'Timeout in seconds'")
+  print("complete -c atlas -l cache-ttl -r -d 'Schema cache TTL in seconds'")
+  print("complete -c atlas -l base-url  -r -d 'Override base URL'")
+  print("complete -c atlas -l body      -r -d 'Request body (JSON, @file, @-)'")
+  print("complete -c atlas -s d         -r -d 'Request body (JSON, @file, @-)'")
+  return print("complete -c atlas -l logout    -d 'Clear cached token (for auth subcommand)'")
 end
 local function completion_bash()
   print("# atlas bash completion \226\128\148 add to ~/.bashrc: source <(atlas completion bash)")
   print("_atlas_complete() {")
   print("  local cur=\"${COMP_WORDS[COMP_CWORD]}\"")
-  print("  local prev=\"${COMP_WORDS[COMP_CWORD-1]}\"")
+  print("  local first=\"${COMP_WORDS[1]}\"")
+  print("  local second=\"${COMP_WORDS[2]}\"")
   print("  if [ $COMP_CWORD -eq 1 ]; then")
-  print("    COMPREPLY=($(compgen -W \"$(atlas profile list 2>/dev/null | cut -f1) profile\" -- \"$cur\"))")
-  print("  elif [ $COMP_CWORD -eq 2 ] && [ \"${COMP_WORDS[1]}\" != 'profile' ]; then")
-  print("    COMPREPLY=($(compgen -W \"$(atlas --complete-ops=${COMP_WORDS[1]} 2>/dev/null)\" -- \"$cur\"))")
-  print("  elif [ \"${COMP_WORDS[1]}\" = 'profile' ] && [ $COMP_CWORD -eq 2 ]; then")
-  print("    COMPREPLY=($(compgen -W 'list show add remove' -- \"$cur\"))")
+  print("    local profiles=$(atlas profile list 2>/dev/null | cut -f1)")
+  print("    COMPREPLY=($(compgen -W \"$profiles profile auth completion\" -- \"$cur\"))")
+  print("  elif [ $COMP_CWORD -eq 2 ]; then")
+  print("    case \"$first\" in")
+  print("      profile)    COMPREPLY=($(compgen -W 'list show' -- \"$cur\")) ;;")
+  print("      auth)       COMPREPLY=($(compgen -W \"$(atlas profile list 2>/dev/null | cut -f1)\" -- \"$cur\")) ;;")
+  print("      completion) COMPREPLY=($(compgen -W 'fish bash zsh' -- \"$cur\")) ;;")
+  print("      *)          COMPREPLY=($(compgen -W \"$(atlas --complete-ops=$first 2>/dev/null)\" -- \"$cur\")) ;;")
+  print("    esac")
+  print("  elif [ $COMP_CWORD -eq 3 ] && [ \"$first\" = 'profile' ] && [ \"$second\" = 'show' ]; then")
+  print("    COMPREPLY=($(compgen -W \"$(atlas profile list 2>/dev/null | cut -f1)\" -- \"$cur\"))")
   print("  fi")
   print("}")
   return print("complete -F _atlas_complete atlas")
@@ -565,18 +516,30 @@ local function completion_zsh()
   print("# atlas zsh completion \226\128\148 add to fpath or source directly")
   print("#compdef atlas")
   print("_atlas() {")
-  print("  local state")
-  print("  _arguments '1:schema-or-profile:->profile' '2:operation:->operation'")
+  print("  local state first=${words[2]}")
+  print("  _arguments '1:schema-or-profile:->first' '2:arg:->second' '3:name:->third'")
   print("  case $state in")
-  print("    profile) compadd $(atlas profile list 2>/dev/null | cut -f1) profile ;;")
-  print("    operation) compadd $(atlas --complete-ops=${words[2]} 2>/dev/null) ;;")
+  print("    first)")
+  print("      local profiles=($(atlas profile list 2>/dev/null | cut -f1))")
+  print("      compadd $profiles profile auth completion ;;")
+  print("    second)")
+  print("      case $first in")
+  print("        profile)    compadd list show ;;")
+  print("        auth)       compadd $(atlas profile list 2>/dev/null | cut -f1) ;;")
+  print("        completion) compadd fish bash zsh ;;")
+  print("        *)          compadd $(atlas --complete-ops=$first 2>/dev/null) ;;")
+  print("      esac ;;")
+  print("    third)")
+  print("      if [ \"${words[2]}\" = 'profile' ] && [ \"${words[3]}\" = 'show' ]; then")
+  print("        compadd $(atlas profile list 2>/dev/null | cut -f1)")
+  print("      fi ;;")
   print("  esac")
   print("}")
   return print("_atlas")
 end
 local function usage()
   print("Usage: atlas <schema-or-profile> [operation] [path-params...] [options]")
-  print("       atlas profile <list|show|add|remove> [name] [options]")
+  print("       atlas profile <list|show> [name]")
   print("       atlas auth <profile> [--logout]")
   print("       atlas completion <fish|bash|zsh>")
   print("")
@@ -590,7 +553,7 @@ local function usage()
   print("  --timeout=N           Timeout in seconds")
   print("  --base-url=URL        Override base URL")
   print("  --output=json|raw|status|headers  Output format (default: json)")
-  print("  --select=PATH             Select nested value (e.g. .items[0].name)")
+  print("  --select=PATH         Select nested value (e.g. .items[0].name)")
   print("  --no-color            Disable colored output")
   print("  -v, --verbose         Show status and response headers")
   print("  --reload              Re-fetch and re-cache the schema")
@@ -598,13 +561,6 @@ local function usage()
   print("")
   print("Auth options (for 'atlas auth <profile>'):")
   print("  --logout              Clear cached token")
-  print("")
-  print("Profile options (for 'atlas profile add'):")
-  print("  --schema=URL          Schema URL or file path")
-  print("  --base-url=URL        Override base URL")
-  print("  --header.KEY=VAL      Default request header")
-  print("  --timeout=N           Default timeout")
-  print("  --ssl.KEY=VAL         SSL options (cafile, verify, etc.)")
   print("")
   return print("Config: ~/.config/atlas/config.json")
 end
@@ -636,16 +592,16 @@ local function merge_ssl(profile, cli_ssl)
   local ssl
   do
     local tbl_21_ = {}
-    local _74_
+    local _61_
     do
-      local t_73_ = profile
-      if (nil ~= t_73_) then
-        t_73_ = t_73_.ssl
+      local t_60_ = profile
+      if (nil ~= t_60_) then
+        t_60_ = t_60_.ssl
       else
       end
-      _74_ = t_73_
+      _61_ = t_60_
     end
-    for k, v in pairs((_74_ or {})) do
+    for k, v in pairs((_61_ or {})) do
       local k_22_, v_23_ = k, v
       if ((k_22_ ~= nil) and (v_23_ ~= nil)) then
         tbl_21_[k_22_] = v_23_
@@ -655,15 +611,15 @@ local function merge_ssl(profile, cli_ssl)
     ssl = tbl_21_
   end
   local tls
-  local function _78_()
-    local t_77_ = profile
-    if (nil ~= t_77_) then
-      t_77_ = t_77_.tls
+  local function _65_()
+    local t_64_ = profile
+    if (nil ~= t_64_) then
+      t_64_ = t_64_.tls
     else
     end
-    return t_77_
+    return t_64_
   end
-  tls = tls__3essl(_78_())
+  tls = tls__3essl(_65_())
   if tls then
     for k, v in pairs(tls) do
       ssl[k] = v
@@ -681,16 +637,16 @@ end
 local function run_auth(profile_name, p, config)
   assert(profile_name, "Usage: atlas auth <profile> [--logout]")
   local profiles
-  local _83_
+  local _70_
   do
-    local t_82_ = config
-    if (nil ~= t_82_) then
-      t_82_ = t_82_.profiles
+    local t_69_ = config
+    if (nil ~= t_69_) then
+      t_69_ = t_69_.profiles
     else
     end
-    _83_ = t_82_
+    _70_ = t_69_
   end
-  profiles = (_83_ or {})
+  profiles = (_70_ or {})
   local profile
   if profiles[profile_name] then
     profile = resolve_profile(profile_name, profiles, {})
@@ -700,12 +656,12 @@ local function run_auth(profile_name, p, config)
   assert(profile, ("Profile not found: " .. profile_name))
   local auth_cfg
   do
-    local t_86_ = profile
-    if (nil ~= t_86_) then
-      t_86_ = t_86_.auth
+    local t_73_ = profile
+    if (nil ~= t_73_) then
+      t_73_ = t_73_.auth
     else
     end
-    auth_cfg = t_86_
+    auth_cfg = t_73_
   end
   assert((auth_cfg and auth_cfg.name and (auth_cfg.name ~= "")), ("No auth configured for profile: " .. profile_name))
   local ssl = merge_ssl(profile, p.ssl)
@@ -760,34 +716,34 @@ local function run(args)
   else
   end
   if (p.schema == "completion") then
-    local case_95_ = p.operation
-    if (case_95_ == "fish") then
+    local case_82_ = p.operation
+    if (case_82_ == "fish") then
       return completion_fish()
-    elseif (case_95_ == "bash") then
+    elseif (case_82_ == "bash") then
       return completion_bash()
-    elseif (case_95_ == "zsh") then
+    elseif (case_82_ == "zsh") then
       return completion_zsh()
     else
-      local _ = case_95_
+      local _ = case_82_
       return die("Usage: atlas completion <fish|bash|zsh>")
     end
   elseif (p.schema == "profile") then
-    return run_profile(p.operation, p["path-params"][1], p, load_config())
+    return run_profile(p.operation, p["path-params"][1], load_config())
   elseif (p.schema == "auth") then
     return run_auth(p.operation, p, load_config())
   else
     local config = load_config()
     local profiles
-    local _98_
+    local _85_
     do
-      local t_97_ = config
-      if (nil ~= t_97_) then
-        t_97_ = t_97_.profiles
+      local t_84_ = config
+      if (nil ~= t_84_) then
+        t_84_ = t_84_.profiles
       else
       end
-      _98_ = t_97_
+      _85_ = t_84_
     end
-    profiles = (_98_ or {})
+    profiles = (_85_ or {})
     local profile
     if profiles[p.schema] then
       profile = resolve_profile(p.schema, profiles, {})
@@ -795,38 +751,38 @@ local function run(args)
       profile = nil
     end
     local raw_schema
-    local _102_
+    local _89_
     do
-      local t_101_ = profile
-      if (nil ~= t_101_) then
-        t_101_ = t_101_.schema
+      local t_88_ = profile
+      if (nil ~= t_88_) then
+        t_88_ = t_88_.schema
       else
       end
-      _102_ = t_101_
+      _89_ = t_88_
     end
-    raw_schema = (_102_ or p.schema)
+    raw_schema = (_89_ or p.schema)
     local ttl
-    local or_104_ = p["cache-ttl"]
-    if not or_104_ then
-      local t_105_ = profile
-      if (nil ~= t_105_) then
-        t_105_ = t_105_["cache-ttl"]
+    local or_91_ = p["cache-ttl"]
+    if not or_91_ then
+      local t_92_ = profile
+      if (nil ~= t_92_) then
+        t_92_ = t_92_["cache-ttl"]
       else
       end
-      or_104_ = t_105_
+      or_91_ = t_92_
     end
-    ttl = (or_104_ or 3600)
+    ttl = (or_91_ or 3600)
     local ssl = merge_ssl(profile, p.ssl)
     local auth_cfg
     do
       local a
       do
-        local t_107_ = profile
-        if (nil ~= t_107_) then
-          t_107_ = t_107_.auth
+        local t_94_ = profile
+        if (nil ~= t_94_) then
+          t_94_ = t_94_.auth
         else
         end
-        a = t_107_
+        a = t_94_
       end
       if (a and a.name and (a.name ~= "")) then
         auth_cfg = a
@@ -852,37 +808,37 @@ local function run(args)
       schema = raw_schema
     end
     local opts
-    local _113_
+    local _100_
     do
       local tbl_21_ = {}
-      local _115_
+      local _102_
       do
-        local t_114_ = profile
-        if (nil ~= t_114_) then
-          t_114_ = t_114_.headers
+        local t_101_ = profile
+        if (nil ~= t_101_) then
+          t_101_ = t_101_.headers
         else
         end
-        _115_ = t_114_
+        _102_ = t_101_
       end
-      for k, v in pairs((_115_ or {})) do
+      for k, v in pairs((_102_ or {})) do
         local k_22_, v_23_ = k, v
         if ((k_22_ ~= nil) and (v_23_ ~= nil)) then
           tbl_21_[k_22_] = v_23_
         else
         end
       end
-      _113_ = tbl_21_
+      _100_ = tbl_21_
     end
-    local or_118_ = p.timeout
-    if not or_118_ then
-      local t_119_ = profile
-      if (nil ~= t_119_) then
-        t_119_ = t_119_.timeout
+    local or_105_ = p.timeout
+    if not or_105_ then
+      local t_106_ = profile
+      if (nil ~= t_106_) then
+        t_106_ = t_106_.timeout
       else
       end
-      or_118_ = t_119_
+      or_105_ = t_106_
     end
-    opts = {headers = _113_, timeout = or_118_, ssl = ssl}
+    opts = {headers = _100_, timeout = or_105_, ssl = ssl}
     if auth_headers then
       for k, v in pairs(auth_headers) do
         opts.headers[k] = v
@@ -897,26 +853,26 @@ local function run(args)
       end
     else
     end
-    local or_124_ = p["base-url"]
-    if not or_124_ then
-      local t_125_ = profile
-      if (nil ~= t_125_) then
-        t_125_ = t_125_["base-url"]
+    local or_111_ = p["base-url"]
+    if not or_111_ then
+      local t_112_ = profile
+      if (nil ~= t_112_) then
+        t_112_ = t_112_["base-url"]
       else
       end
-      or_124_ = t_125_
+      or_111_ = t_112_
     end
-    if or_124_ then
-      local or_127_ = p["base-url"]
-      if not or_127_ then
-        local t_128_ = profile
-        if (nil ~= t_128_) then
-          t_128_ = t_128_["base-url"]
+    if or_111_ then
+      local or_114_ = p["base-url"]
+      if not or_114_ then
+        local t_115_ = profile
+        if (nil ~= t_115_) then
+          t_115_ = t_115_["base-url"]
         else
         end
-        or_127_ = t_128_
+        or_114_ = t_115_
       end
-      opts["base-url"] = or_127_
+      opts["base-url"] = or_114_
     else
     end
     if (type(schema) == "table") then

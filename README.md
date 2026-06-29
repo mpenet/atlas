@@ -227,12 +227,6 @@ Manage profiles from the CLI:
 ```sh
 atlas profile list
 atlas profile show myapi
-atlas profile add myapi \
-  --schema=https://api.example.com/openapi.json \
-  --base-url=https://staging.example.com \
-  --header.authorization="Bearer <token>" \
-  --timeout=30
-atlas profile remove myapi
 ```
 
 ### Authentication
