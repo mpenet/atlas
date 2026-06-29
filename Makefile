@@ -118,7 +118,7 @@ $(NATIVE_BUILD)/.stamp:
 	@touch $@
 
 binary: build native-libs
-	LUA_PATH="./?.lua;./?/init.lua;;" \
+	LUA_PATH="./?.lua;./?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" \
 	CC_OPTS="$(OPENSSL_LDFLAGS)" \
 	$(FENNEL) --compile-binary fnl/atlas-bin.fnl \
 	  bin/atlas-bin \

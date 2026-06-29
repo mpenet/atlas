@@ -22,7 +22,8 @@ RUN luarocks install fennel \
 WORKDIR /src
 COPY . .
 
-RUN make binary FENNEL=fennel
+RUN LUA_PATH_EXTRA=$(luarocks path --lr-path 2>/dev/null) && \
+    make binary FENNEL=fennel "LUA_PATH=./?.lua;./?/init.lua;${LUA_PATH_EXTRA}"
 
 # ---- export stage ----
 FROM scratch

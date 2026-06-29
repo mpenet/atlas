@@ -1,2 +1,23 @@
+;; fennel --compile-binary cannot follow transitive requires,
+;; so every dependency must be required directly from the entry point.
+(require :lunajson)
+(require :ltn12)
+(require :mime)
+(require :socket)
+(require :socket.url)
+(require :socket.headers)
+(require :socket.tp)
+(require :socket.http)
+(require :ssl)
+(require :ssl.https)
+(require :atlas.util)
+(require :atlas.negotiate)
+(require :atlas.doc)
+(require :atlas.http)
+(require :atlas.pretty)
+(require :atlas.cache)
+(require :atlas)
+(require :atlas.cli)
+
 (local cli (require :atlas.cli))
 (cli.main arg)
