@@ -220,7 +220,7 @@ make install  # install bin/atlas to /usr/local/bin
 make binary   # build standalone binary → bin/atlas-bin
 ```
 
-`make binary` requires `fennel`, `lua 5.4`, `openssl`, and `pkg-config`. It statically links Lua, luasocket, and luasec — the resulting binary only needs OpenSSL at runtime.
+`make binary` requires `fennel`, `lua 5.4`, `openssl`, and `pkg-config`. It statically links Lua, luasocket, and luasec — the resulting binary is truly standalone.
 
 ## License
 
