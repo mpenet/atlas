@@ -49,14 +49,15 @@ local function load_schema(path, _3fssl, _3fheaders)
   assert(ok, string.format("failed to parse schema JSON from '%s': %s", path, tostring(parsed)))
   return parsed
 end
-local function make_operation(client_opts, path, method, op_spec)
+local function make_operation(client_opts, root_schema, path, method, op_spec)
+  local op_spec0 = util["deref-deep"](root_schema, op_spec)
   local param_names = util["extract-path-params"](path)
   local n_path = #param_names
-  local has_body_3f = (nil ~= op_spec.requestBody)
+  local has_body_3f = (nil ~= op_spec0.requestBody)
   local fixed_headers
   do
     local tbl_21_ = {}
-    for k, v in pairs({["content-type"] = negotiate["pick-content-type"](op_spec), accept = negotiate["pick-accept"](op_spec)}) do
+    for k, v in pairs({["content-type"] = negotiate["pick-content-type"](op_spec0), accept = negotiate["pick-accept"](op_spec0)}) do
       local k_22_, v_23_
       if v then
         k_22_, v_23_ = k, v
@@ -140,7 +141,7 @@ local function make_operation(client_opts, path, method, op_spec)
   local function _21_(_, ...)
     return f(...)
   end
-  return setmetatable({["fnl/docstring"] = doc.build(path, method, op_spec), ["cli/help"] = doc["build-cli"](path, method, op_spec), ["has-body?"] = has_body_3f, ["n-path"] = n_path}, {__call = _21_})
+  return setmetatable({["fnl/docstring"] = doc.build(path, method, op_spec0), ["cli/help"] = doc["build-cli"](path, method, op_spec0), ["has-body?"] = has_body_3f, ["n-path"] = n_path}, {__call = _21_})
 end
 local function client(schema, _3fopts)
   local source_url
@@ -246,7 +247,7 @@ local function client(schema, _3fopts)
   for path, methods in pairs((schema0.paths or {})) do
     for method, op_spec in pairs(methods) do
       if ((type(op_spec) == "table") and op_spec.operationId) then
-        client0[util["camel->kebab"](op_spec.operationId)] = make_operation(client_opts, path, method, op_spec)
+        client0[util["camel->kebab"](op_spec.operationId)] = make_operation(client_opts, schema0, path, method, op_spec)
       else
       end
     end

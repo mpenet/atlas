@@ -33,8 +33,9 @@
     (assert ok (string.format "failed to parse schema JSON from '%s': %s" path (tostring parsed)))
     parsed))
 
-(fn make-operation [client-opts path method op-spec]
-  (let [param-names (util.extract-path-params path)
+(fn make-operation [client-opts root-schema path method op-spec]
+  (let [op-spec (util.deref-deep root-schema op-spec)
+        param-names (util.extract-path-params path)
         n-path (length param-names)
         has-body? (not= nil op-spec.requestBody)
         fixed-headers (collect [k v (pairs {:content-type (negotiate.pick-content-type op-spec)
@@ -97,7 +98,7 @@
         (when (and (= (type op-spec) :table) op-spec.operationId)
           (tset client
                 (util.camel->kebab op-spec.operationId)
-                (make-operation client-opts path method op-spec)))))
+                (make-operation client-opts schema path method op-spec)))))
     client))
 
 {: client : load-schema}
