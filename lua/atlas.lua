@@ -140,7 +140,7 @@ local function make_operation(client_opts, path, method, op_spec)
   local function _21_(_, ...)
     return f(...)
   end
-  return setmetatable({["fnl/docstring"] = doc.build(path, method, op_spec), ["has-body?"] = has_body_3f, ["n-path"] = n_path}, {__call = _21_})
+  return setmetatable({["fnl/docstring"] = doc.build(path, method, op_spec), ["cli/help"] = doc["build-cli"](path, method, op_spec), ["has-body?"] = has_body_3f, ["n-path"] = n_path}, {__call = _21_})
 end
 local function client(schema, _3fopts)
   local source_url

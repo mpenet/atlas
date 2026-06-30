@@ -53,8 +53,11 @@
           (merge-profiles base child))
         p)))
 
+(fn coerce [s]
+  (or (tonumber s) s))
+
 (fn parse-args [args]
-  (let [r {:path-params [] :query {} :headers {} :ssl {}}]
+  (let [r {:path-params [] :query {} :headers {} :ssl {} :body-params {}}]
     (var i 1)
     (while (<= i (length args))
       (let [a (. args i)]
@@ -70,6 +73,10 @@
           (a:match "^%-%-ssl%.(.-)=(.+)")
           (let [(k v) (a:match "^%-%-ssl%.(.-)=(.+)")]
             (tset r.ssl k v))
+
+          (a:match "^%-%-body%.(.-)=(.+)")
+          (let [(k v) (a:match "^%-%-body%.(.-)=(.+)")]
+            (tset r.body-params k (coerce v)))
 
           (a:match "^%-%-body=(.*)")
           (let [(v) (a:match "^%-%-body=(.*)")]
@@ -119,9 +126,6 @@
               (table.insert r.path-params a))))
       (set i (+ i 1)))
     r))
-
-(fn coerce [s]
-  (or (tonumber s) s))
 
 (fn op? [v]
   (and (= (type v) :table) (~= nil (. v :has-body?))))
@@ -348,8 +352,9 @@
   (print "Options:")
   (print "  --list                List all operations")
   (print "  --help                Show operation documentation")
-  (print "  --body=JSON           Request body")
-  (print "  -d JSON               Request body (alternative)")
+  (print "  --body=JSON           Request body (inline JSON, @file, @-)")
+  (print "  -d JSON               Alias for --body")
+  (print "  --body.KEY=VAL        Build request body from individual fields")
   (print "  --query.KEY=VAL       Query parameter")
   (print "  --header.KEY=VAL      Per-request header")
   (print "  --timeout=N           Timeout in seconds")
@@ -473,7 +478,7 @@
               p.help
               (let [op (. c p.operation)]
                 (if op
-                    (print (or op.fnl/docstring "No documentation available."))
+                    (print (or (. op :cli/help) "No documentation available."))
                     (die (.. "Unknown operation: " p.operation))))
 
               p.operation
@@ -486,7 +491,11 @@
                                  (when (next p.headers) (tset o :headers p.headers))
                                  (when p.timeout (tset o :timeout p.timeout))
                                  (when (next o) o))]
-                  (when op.has-body? (table.insert call-args p.body))
+                  (when op.has-body?
+                    (let [body (if (and (not p.body) (next p.body-params))
+                                   p.body-params
+                                   p.body)]
+                      (table.insert call-args body)))
                   (when req-opts (table.insert call-args req-opts))
                   (let [t0 (socket.gettime)
                         (ok-r resp) (pcall op (table.unpack call-args))

@@ -59,6 +59,7 @@
                                     :timeout (or (?. opts :timeout) client-opts.timeout)
                                     :ssl client-opts.ssl})))]
     (setmetatable {:fnl/docstring (doc.build path method op-spec)
+                   :cli/help (doc.build-cli path method op-spec)
                    :has-body? has-body?
                    :n-path n-path}
                   {:__call (fn [_ ...] (f ...))})))

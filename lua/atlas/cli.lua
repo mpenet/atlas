@@ -104,8 +104,11 @@ local function resolve_profile(name, profiles, _3fseen)
     return p
   end
 end
+local function coerce(s)
+  return (tonumber(s) or s)
+end
 local function parse_args(args)
-  local r = {["path-params"] = {}, query = {}, headers = {}, ssl = {}}
+  local r = {["path-params"] = {}, query = {}, headers = {}, ssl = {}, ["body-params"] = {}}
   local i = 1
   while (i <= #args) do
     do
@@ -119,6 +122,9 @@ local function parse_args(args)
       elseif a:match("^%-%-ssl%.(.-)=(.+)") then
         local k, v = a:match("^%-%-ssl%.(.-)=(.+)")
         r.ssl[k] = v
+      elseif a:match("^%-%-body%.(.-)=(.+)") then
+        local k, v = a:match("^%-%-body%.(.-)=(.+)")
+        r["body-params"][k] = coerce(v)
       elseif a:match("^%-%-body=(.*)") then
         local v = a:match("^%-%-body=(.*)")
         r["body"] = read_body(v)
@@ -172,9 +178,6 @@ local function parse_args(args)
     i = (i + 1)
   end
   return r
-end
-local function coerce(s)
-  return (tonumber(s) or s)
 end
 local function op_3f(v)
   return ((type(v) == "table") and (nil ~= v["has-body?"]))
@@ -546,8 +549,9 @@ local function usage()
   print("Options:")
   print("  --list                List all operations")
   print("  --help                Show operation documentation")
-  print("  --body=JSON           Request body")
-  print("  -d JSON               Request body (alternative)")
+  print("  --body=JSON           Request body (inline JSON, @file, @-)")
+  print("  -d JSON               Alias for --body")
+  print("  --body.KEY=VAL        Build request body from individual fields")
   print("  --query.KEY=VAL       Query parameter")
   print("  --header.KEY=VAL      Per-request header")
   print("  --timeout=N           Timeout in seconds")
@@ -891,7 +895,7 @@ local function run(args)
     elseif p.help then
       local op = c[p.operation]
       if op then
-        return print((op["fnl/docstring"] or "No documentation available."))
+        return print((op["cli/help"] or "No documentation available."))
       else
         return die(("Unknown operation: " .. p.operation))
       end
@@ -951,7 +955,13 @@ local function run(args)
         end
       end
       if op["has-body?"] then
-        table.insert(call_args, p.body)
+        local body
+        if (not p.body and next(p["body-params"])) then
+          body = p["body-params"]
+        else
+          body = p.body
+        end
+        table.insert(call_args, body)
       else
       end
       if req_opts then

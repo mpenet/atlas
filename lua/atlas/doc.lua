@@ -140,13 +140,106 @@ local function body_schema(request_body)
     return nil
   end
 end
-local function build(path, method, op_spec)
+local function build_cli(path, method, op_spec)
   local lines = {}
   local add
   local function _34_(_241)
     return table.insert(lines, _241)
   end
   add = _34_
+  local path_params = params_of_kind(op_spec, "path")
+  local query_params = params_of_kind(op_spec, "query")
+  local has_body_3f = (nil ~= op_spec.requestBody)
+  add(string.format("%s %s", method:upper(), path))
+  if op_spec.summary then
+    add(("\n" .. op_spec.summary))
+  else
+  end
+  if (op_spec.description and (op_spec.description ~= op_spec.summary)) then
+    add(op_spec.description)
+  else
+  end
+  do
+    local parts = {util["camel->kebab"](op_spec.operationId)}
+    for _, p in ipairs(path_params) do
+      table.insert(parts, ("<" .. p.name .. ">"))
+    end
+    if has_body_3f then
+      table.insert(parts, "[-d JSON|@file|@-]")
+    else
+    end
+    if (#query_params > 0) then
+      table.insert(parts, "[--query.KEY=VAL ...]")
+    else
+    end
+    add(string.format("\nUsage: atlas <profile-or-schema> %s", table.concat(parts, " ")))
+  end
+  if (#path_params > 0) then
+    add("\nPath params:")
+    for _, p in ipairs(path_params) do
+      add(string.format("  %-16s %s%s", p.name, param_type(p), param_extras(p, true)))
+    end
+  else
+  end
+  if (#query_params > 0) then
+    add("\nQuery params (--query.KEY=VAL):")
+    for _, p in ipairs(query_params) do
+      add(string.format("  %-16s %s%s", p.name, param_type(p), param_extras(p, p.required)))
+    end
+  else
+  end
+  if op_spec.requestBody then
+    local rb = op_spec.requestBody
+    local bschema = body_schema(rb)
+    local _41_
+    if rb.required then
+      _41_ = "required"
+    else
+      _41_ = "optional"
+    end
+    local function _43_()
+      if rb.description then
+        return (" \226\128\148 " .. rb.description)
+      else
+        return ""
+      end
+    end
+    add(string.format("\nBody: %s%s", _41_, _43_()))
+    add("  Use -d JSON, --body=@file, --body=@- for stdin, or --body.KEY=VAL for individual fields")
+    if bschema then
+      for name, prop in pairs(bschema.properties) do
+        local _44_
+        if bschema.required[name] then
+          _44_ = " [required]"
+        else
+          _44_ = ""
+        end
+        local function _46_()
+          if prop.description then
+            return (" \226\128\148 " .. prop.description)
+          else
+            return ""
+          end
+        end
+        add(string.format("  %-16s %s%s%s", name, (prop.type or "any"), _44_, _46_()))
+      end
+    else
+    end
+  else
+  end
+  add("\nResponses:")
+  for code, resp in pairs((op_spec.responses or {})) do
+    add(string.format("  %-6s %s", tostring(code), (resp.description or "")))
+  end
+  return table.concat(lines, "\n")
+end
+local function build(path, method, op_spec)
+  local lines = {}
+  local add
+  local function _49_(_241)
+    return table.insert(lines, _241)
+  end
+  add = _49_
   local path_params = params_of_kind(op_spec, "path")
   local query_params = params_of_kind(op_spec, "query")
   local has_body_3f = (nil ~= op_spec.requestBody)
@@ -191,36 +284,36 @@ local function build(path, method, op_spec)
   if op_spec.requestBody then
     local rb = op_spec.requestBody
     local bschema = body_schema(rb)
-    local _41_
+    local _56_
     if rb.required then
-      _41_ = "required"
+      _56_ = "required"
     else
-      _41_ = "optional"
+      _56_ = "optional"
     end
-    local function _43_()
+    local function _58_()
       if rb.description then
         return (" \226\128\148 " .. rb.description)
       else
         return ""
       end
     end
-    add(string.format("\nBody: %s%s", _41_, _43_()))
+    add(string.format("\nBody: %s%s", _56_, _58_()))
     if bschema then
       for name, prop in pairs(bschema.properties) do
-        local _44_
+        local _59_
         if bschema.required[name] then
-          _44_ = " [required]"
+          _59_ = " [required]"
         else
-          _44_ = ""
+          _59_ = ""
         end
-        local function _46_()
+        local function _61_()
           if prop.description then
             return (" \226\128\148 " .. prop.description)
           else
             return ""
           end
         end
-        add(string.format("  %-16s %s%s%s", name, (prop.type or "any"), _44_, _46_()))
+        add(string.format("  %-16s %s%s%s", name, (prop.type or "any"), _59_, _61_()))
       end
     else
     end
@@ -232,4 +325,4 @@ local function build(path, method, op_spec)
   end
   return table.concat(lines, "\n")
 end
-return {build = build}
+return {build = build, ["build-cli"] = build_cli}

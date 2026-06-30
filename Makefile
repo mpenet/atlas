@@ -1,8 +1,9 @@
 FENNEL ?= $(shell command -v fnl 2>/dev/null || command -v fennel 2>/dev/null || echo fnl)
 FNL_DIR = fnl
+LUA_DIR = lua
 
 FNL_SOURCES = $(shell find $(FNL_DIR) -name "*.fnl" ! -name "atlas-bin.fnl")
-LUA_TARGETS = $(FNL_SOURCES:$(FNL_DIR)/%.fnl=%.lua)
+LUA_TARGETS = $(FNL_SOURCES:$(FNL_DIR)/%.fnl=$(LUA_DIR)/%.lua)
 
 TEST_FNL = $(wildcard test/*_spec.fnl)
 TEST_LUA = $(TEST_FNL:.fnl=.lua)
@@ -71,12 +72,12 @@ deps:
 
 build: $(LUA_TARGETS)
 
-$(LUA_TARGETS): %.lua: $(FNL_DIR)/%.fnl
+$(LUA_TARGETS): $(LUA_DIR)/%.lua: $(FNL_DIR)/%.fnl
 	@mkdir -p $(dir $@)
 	$(FENNEL) --compile $< > $@
 
 test: build $(TEST_LUA)
-	busted --pattern=_spec test/
+	LUA_PATH="./$(LUA_DIR)/?.lua;./$(LUA_DIR)/?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" busted --pattern=_spec test/
 
 $(TEST_LUA): test/%_spec.lua: test/%_spec.fnl
 	$(FENNEL) --compile $< > $@
@@ -124,7 +125,7 @@ $(NATIVE_BUILD)/.stamp:
 	@touch $@
 
 binary: build native-libs
-	LUA_PATH="./?.lua;./?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" \
+	LUA_PATH="./$(LUA_DIR)/?.lua;./$(LUA_DIR)/?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" \
 	CC_OPTS="$(OPENSSL_LDFLAGS)" \
 	$(FENNEL) --compile-binary fnl/atlas-bin.fnl \
 	  bin/atlas-bin \
@@ -137,5 +138,4 @@ binary: build native-libs
 
 clean:
 	rm -f $(LUA_TARGETS)
-	find atlas -name "*.lua" -delete 2>/dev/null; true
 	rm -rf build bin/atlas-bin fnl/atlas-bin.fnl_binary.c

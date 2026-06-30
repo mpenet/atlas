@@ -1,4 +1,12 @@
 #!/usr/bin/env lua
-local src = debug.getinfo(1, "S").source:match("^@(.+)/[^/]+$") or "."
-package.path = src .. "/../?.lua;" .. src .. "/../?/init.lua;" .. package.path
+local script = debug.getinfo(1, "S").source:match("^@(.+)$") or arg[0]
+local h = io.popen("readlink '" .. script .. "' 2>/dev/null")
+if h then
+  local link = h:read("*l"); h:close()
+  if link and link ~= "" then
+    script = link:match("^/") and link or (script:match("^(.+)/") or ".") .. "/" .. link
+  end
+end
+local src = script:match("^(.+)/[^/]+$") or "."
+package.path = src .. "/../lua/?.lua;" .. src .. "/../lua/?/init.lua;" .. package.path
 require("atlas.cli").main(arg)
