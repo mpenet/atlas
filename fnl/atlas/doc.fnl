@@ -37,11 +37,11 @@
         query-params (params-of-kind op-spec :query)
         has-body? (not= nil op-spec.requestBody)]
     (add (string.format "%s %s" (method:upper) path))
-    (when op-spec.summary
-      (add (.. "\n" op-spec.summary)))
-    (when (and op-spec.description
-               (not= op-spec.description op-spec.summary))
-      (add op-spec.description))
+    (let [s (when (and op-spec.summary (not= op-spec.summary "")) op-spec.summary)
+          d (when (and op-spec.description (not= op-spec.description "")
+                       (not= op-spec.description op-spec.summary)) op-spec.description)]
+      (when s (add (.. "\n" s)))
+      (when d (add d)))
     (let [parts [(util.camel->kebab op-spec.operationId)]]
       (each [_ p (ipairs path-params)]
         (table.insert parts (.. "<" p.name ">")))
@@ -82,11 +82,11 @@
         query-params (params-of-kind op-spec :query)
         has-body? (not= nil op-spec.requestBody)]
     (add (string.format "%s %s" (method:upper) path))
-    (when op-spec.summary
-      (add (.. "\n" op-spec.summary)))
-    (when (and op-spec.description
-               (not= op-spec.description op-spec.summary))
-      (add op-spec.description))
+    (let [s (when (and op-spec.summary (not= op-spec.summary "")) op-spec.summary)
+          d (when (and op-spec.description (not= op-spec.description "")
+                       (not= op-spec.description op-spec.summary)) op-spec.description)]
+      (when s (add (.. "\n" s)))
+      (when d (add d)))
     (let [sig []]
       (each [_ p (ipairs path-params)] (table.insert sig p.name))
       (when has-body? (table.insert sig :body))

@@ -151,13 +151,27 @@ local function build_cli(path, method, op_spec)
   local query_params = params_of_kind(op_spec, "query")
   local has_body_3f = (nil ~= op_spec.requestBody)
   add(string.format("%s %s", method:upper(), path))
-  if op_spec.summary then
-    add(("\n" .. op_spec.summary))
-  else
-  end
-  if (op_spec.description and (op_spec.description ~= op_spec.summary)) then
-    add(op_spec.description)
-  else
+  do
+    local s
+    if (op_spec.summary and (op_spec.summary ~= "")) then
+      s = op_spec.summary
+    else
+      s = nil
+    end
+    local d
+    if (op_spec.description and (op_spec.description ~= "") and (op_spec.description ~= op_spec.summary)) then
+      d = op_spec.description
+    else
+      d = nil
+    end
+    if s then
+      add(("\n" .. s))
+    else
+    end
+    if d then
+      add(d)
+    else
+    end
   end
   do
     local parts = {util["camel->kebab"](op_spec.operationId)}
@@ -191,37 +205,37 @@ local function build_cli(path, method, op_spec)
   if op_spec.requestBody then
     local rb = op_spec.requestBody
     local bschema = body_schema(rb)
-    local _41_
+    local _43_
     if rb.required then
-      _41_ = "required"
+      _43_ = "required"
     else
-      _41_ = "optional"
+      _43_ = "optional"
     end
-    local function _43_()
+    local function _45_()
       if rb.description then
         return (" \226\128\148 " .. rb.description)
       else
         return ""
       end
     end
-    add(string.format("\nBody: %s%s", _41_, _43_()))
+    add(string.format("\nBody: %s%s", _43_, _45_()))
     add("  Use -d JSON, --body=@file, --body=@- for stdin, or --body.KEY=VAL for individual fields")
     if bschema then
       for name, prop in pairs(bschema.properties) do
-        local _44_
+        local _46_
         if bschema.required[name] then
-          _44_ = " [required]"
+          _46_ = " [required]"
         else
-          _44_ = ""
+          _46_ = ""
         end
-        local function _46_()
+        local function _48_()
           if prop.description then
             return (" \226\128\148 " .. prop.description)
           else
             return ""
           end
         end
-        add(string.format("  %-16s %s%s%s", name, (prop.type or "any"), _44_, _46_()))
+        add(string.format("  %-16s %s%s%s", name, (prop.type or "any"), _46_, _48_()))
       end
     else
     end
@@ -236,21 +250,35 @@ end
 local function build(path, method, op_spec)
   local lines = {}
   local add
-  local function _49_(_241)
+  local function _51_(_241)
     return table.insert(lines, _241)
   end
-  add = _49_
+  add = _51_
   local path_params = params_of_kind(op_spec, "path")
   local query_params = params_of_kind(op_spec, "query")
   local has_body_3f = (nil ~= op_spec.requestBody)
   add(string.format("%s %s", method:upper(), path))
-  if op_spec.summary then
-    add(("\n" .. op_spec.summary))
-  else
-  end
-  if (op_spec.description and (op_spec.description ~= op_spec.summary)) then
-    add(op_spec.description)
-  else
+  do
+    local s
+    if (op_spec.summary and (op_spec.summary ~= "")) then
+      s = op_spec.summary
+    else
+      s = nil
+    end
+    local d
+    if (op_spec.description and (op_spec.description ~= "") and (op_spec.description ~= op_spec.summary)) then
+      d = op_spec.description
+    else
+      d = nil
+    end
+    if s then
+      add(("\n" .. s))
+    else
+    end
+    if d then
+      add(d)
+    else
+    end
   end
   do
     local sig = {}
@@ -284,36 +312,36 @@ local function build(path, method, op_spec)
   if op_spec.requestBody then
     local rb = op_spec.requestBody
     local bschema = body_schema(rb)
-    local _56_
+    local _60_
     if rb.required then
-      _56_ = "required"
+      _60_ = "required"
     else
-      _56_ = "optional"
+      _60_ = "optional"
     end
-    local function _58_()
+    local function _62_()
       if rb.description then
         return (" \226\128\148 " .. rb.description)
       else
         return ""
       end
     end
-    add(string.format("\nBody: %s%s", _56_, _58_()))
+    add(string.format("\nBody: %s%s", _60_, _62_()))
     if bschema then
       for name, prop in pairs(bschema.properties) do
-        local _59_
+        local _63_
         if bschema.required[name] then
-          _59_ = " [required]"
+          _63_ = " [required]"
         else
-          _59_ = ""
+          _63_ = ""
         end
-        local function _61_()
+        local function _65_()
           if prop.description then
             return (" \226\128\148 " .. prop.description)
           else
             return ""
           end
         end
-        add(string.format("  %-16s %s%s%s", name, (prop.type or "any"), _59_, _61_()))
+        add(string.format("  %-16s %s%s%s", name, (prop.type or "any"), _63_, _65_()))
       end
     else
     end

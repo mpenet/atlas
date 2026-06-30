@@ -138,29 +138,41 @@ local function make_operation(client_opts, root_schema, path, method, op_spec)
     return client_opts["http-fn"]({method = method:upper(), url = url, query = _16_, body = body, headers = headers, timeout = (_19_ or client_opts.timeout), ssl = client_opts.ssl})
   end
   f = _9_
-  local function _21_(_, ...)
+  local _21_
+  do
+    local s = op_spec0.summary
+    local d = op_spec0.description
+    if (s and (s ~= "")) then
+      _21_ = s
+    elseif (d and (d ~= "")) then
+      _21_ = d
+    else
+      _21_ = nil
+    end
+  end
+  local function _23_(_, ...)
     return f(...)
   end
-  return setmetatable({["fnl/docstring"] = doc.build(path, method, op_spec0), ["cli/help"] = doc["build-cli"](path, method, op_spec0), ["has-body?"] = has_body_3f, ["n-path"] = n_path}, {__call = _21_})
+  return setmetatable({["fnl/docstring"] = doc.build(path, method, op_spec0), ["cli/help"] = doc["build-cli"](path, method, op_spec0), summary = _21_, ["has-body?"] = has_body_3f, ["n-path"] = n_path}, {__call = _23_})
 end
 local function client(schema, _3fopts)
   local source_url
-  local _22_
+  local _24_
   if (type(schema) == "string") then
-    _22_ = schema
+    _24_ = schema
   else
-    _22_ = nil
+    _24_ = nil
   end
-  local or_24_ = _22_
-  if not or_24_ then
-    local t_25_ = _3fopts
-    if (nil ~= t_25_) then
-      t_25_ = t_25_["source-url"]
+  local or_26_ = _24_
+  if not or_26_ then
+    local t_27_ = _3fopts
+    if (nil ~= t_27_) then
+      t_27_ = t_27_["source-url"]
     else
     end
-    or_24_ = t_25_
+    or_26_ = t_27_
   end
-  source_url = or_24_
+  source_url = or_26_
   local schema0
   if (type(schema) == "string") then
     schema0 = load_schema(schema)
@@ -179,70 +191,70 @@ local function client(schema, _3fopts)
     server_url = nil
   end
   local base_url
-  local _30_
+  local _32_
   do
-    local t_29_ = _3fopts
-    if (nil ~= t_29_) then
-      t_29_ = t_29_["base-url"]
+    local t_31_ = _3fopts
+    if (nil ~= t_31_) then
+      t_31_ = t_31_["base-url"]
     else
     end
-    _30_ = t_29_
+    _32_ = t_31_
   end
-  local or_32_ = _30_
-  if not or_32_ then
+  local or_34_ = _32_
+  if not or_34_ then
     if (server_url and server_url:match("^https?://")) then
-      or_32_ = server_url
+      or_34_ = server_url
     else
-      or_32_ = nil
+      or_34_ = nil
     end
   end
-  if not or_32_ then
+  if not or_34_ then
     if (source_url and server_url and server_url:match("^/")) then
       local origin = source_url:match("^(https?://[^/]+)")
-      or_32_ = (origin .. server_url)
+      or_34_ = (origin .. server_url)
     else
-      or_32_ = nil
+      or_34_ = nil
     end
   end
-  base_url = (or_32_ or error("no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts"))
+  base_url = (or_34_ or error("no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts"))
   local client_opts
-  local _37_
+  local _39_
   do
-    local t_36_ = _3fopts
-    if (nil ~= t_36_) then
-      t_36_ = t_36_["http-fn"]
+    local t_38_ = _3fopts
+    if (nil ~= t_38_) then
+      t_38_ = t_38_["http-fn"]
     else
     end
-    _37_ = t_36_
+    _39_ = t_38_
   end
-  local _40_
+  local _42_
   do
-    local t_39_ = _3fopts
-    if (nil ~= t_39_) then
-      t_39_ = t_39_.headers
+    local t_41_ = _3fopts
+    if (nil ~= t_41_) then
+      t_41_ = t_41_.headers
     else
     end
-    _40_ = t_39_
+    _42_ = t_41_
   end
-  local _43_
+  local _45_
   do
-    local t_42_ = _3fopts
-    if (nil ~= t_42_) then
-      t_42_ = t_42_.timeout
+    local t_44_ = _3fopts
+    if (nil ~= t_44_) then
+      t_44_ = t_44_.timeout
     else
     end
-    _43_ = t_42_
+    _45_ = t_44_
   end
-  local _46_
+  local _48_
   do
-    local t_45_ = _3fopts
-    if (nil ~= t_45_) then
-      t_45_ = t_45_.ssl
+    local t_47_ = _3fopts
+    if (nil ~= t_47_) then
+      t_47_ = t_47_.ssl
     else
     end
-    _46_ = t_45_
+    _48_ = t_47_
   end
-  client_opts = {["base-url"] = base_url, ["http-fn"] = (_37_ or http.request), headers = (_40_ or {}), timeout = _43_, ssl = _46_}
+  client_opts = {["base-url"] = base_url, ["http-fn"] = (_39_ or http.request), headers = (_42_ or {}), timeout = _45_, ssl = _48_}
   local client0 = {}
   for path, methods in pairs((schema0.paths or {})) do
     for method, op_spec in pairs(methods) do

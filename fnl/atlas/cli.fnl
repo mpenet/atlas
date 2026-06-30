@@ -134,12 +134,14 @@
   (let [ops []]
     (each [k v (pairs c)]
       (when (op? v)
-        (let [doc (. v :fnl/docstring)
-              summary (when doc (doc:match "^([^\n]+)"))]
-          (table.insert ops {: k : summary}))))
+        (table.insert ops {:k k :summary (. v :summary)})))
     (table.sort ops (fn [a b] (< a.k b.k)))
-    (each [_ op (ipairs ops)]
-      (print (.. op.k (if op.summary (.. "\t" op.summary) ""))))))
+    (let [width (accumulate [w 0 _ op (ipairs ops)]
+                  (math.max w (length op.k)))]
+      (each [_ op (ipairs ops)]
+        (print (if op.summary
+                   (string.format (.. "%-" width "s  %s") op.k op.summary)
+                   op.k))))))
 
 (fn select-path [data path]
   (var cur data)
