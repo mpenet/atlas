@@ -18,7 +18,6 @@ luarocks install atlas-oai
 **CLI — standalone binary** (no Lua required at runtime), download from https://github.com/mpenet/atlas/releases, then:
 
 ```sh
-# 
 install -m 755 atlas-bin /usr/local/bin/atlas
 ```
 
