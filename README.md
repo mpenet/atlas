@@ -87,27 +87,6 @@ Per-request opts:
 | `:headers` | Merged over client-level defaults |
 | `:timeout` | Overrides client-level timeout |
 
-### Docstrings
-
-Every operation carries a docstring inspectable in the REPL:
-
-```
->> (doc client.get-pet-by-id)
-
-GET /pet/{petId}
-
-Find pet by ID.
-
-Usage: (get-pet-by-id petId)
-
-Path params:
-  petId            integer [required] — ID of pet to return
-
-Responses:
-  200    successful operation
-  404    Pet not found
-```
-
 ## CLI
 
 ```
@@ -122,6 +101,18 @@ atlas https://petstore3.swagger.io/api/v3/openapi.json --list
 
 # show documentation for an operation
 atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id --help
+# GET /pet/{petId}
+#
+# Find pet by ID.
+#
+# Usage: atlas <profile-or-schema> get-pet-by-id <petId>
+#
+# Path params:
+#   petId            integer [required] — ID of pet to return
+#
+# Responses:
+#   200    successful operation
+#   404    Pet not found
 
 # call an operation
 atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
@@ -133,6 +124,9 @@ atlas https://petstore3.swagger.io/api/v3/openapi.json find-pets-by-status --que
 atlas https://petstore3.swagger.io/api/v3/openapi.json add-pet -d '{"name":"Rex","status":"available"}'
 atlas https://petstore3.swagger.io/api/v3/openapi.json add-pet --body=@pet.json
 cat pet.json | atlas https://petstore3.swagger.io/api/v3/openapi.json add-pet -d @-
+
+# request body — individual fields (numbers coerced automatically)
+atlas https://petstore3.swagger.io/api/v3/openapi.json add-pet --body.name=Rex --body.status=available
 
 # headers, timeout, verbose output
 atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 \
@@ -158,6 +152,7 @@ HTTP 4xx/5xx responses are printed to stderr and exit with status 1. With `-v` t
 | `--help` | Show documentation for an operation |
 | `--body=JSON\|@file\|@-` | Request body — inline JSON, file path, or stdin |
 | `-d JSON\|@file\|@-` | Alias for `--body` |
+| `--body.KEY=VAL` | Build request body from individual fields (numbers coerced automatically) |
 | `--query.KEY=VAL` | Query parameter |
 | `--header.KEY=VAL` | Per-request header |
 | `--timeout=N` | Timeout in seconds |
