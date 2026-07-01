@@ -174,6 +174,73 @@ local function client_credentials(profile_name, params, ssl)
   end
   return store_token(post_form(params.token_url, form, ssl), profile_name)
 end
+local function device_authorization(profile_name, params, ssl)
+  local form = {client_id = expand_env(params.client_id)}
+  if params.scope then
+    form["scope"] = params.scope
+  else
+  end
+  local resp = post_form((params.device_authorization_url or error("oauth-device-authorization requires device_authorization_url")), form, ssl)
+  assert(((resp.status >= 200) and (resp.status < 300)), ("device authorization request failed: HTTP " .. resp.status))
+  local body
+  if (type(resp.body) == "table") then
+    body = resp.body
+  else
+    local ok, d = pcall(json.decode, resp.body)
+    assert(ok, "device authorization response is not JSON")
+    body = d
+  end
+  local device_code = body.device_code
+  local user_code = body.user_code
+  local verify_uri = (body.verification_uri_complete or body.verification_uri)
+  local expires_in = (body.expires_in or 300)
+  local interval = (body.interval or 5)
+  assert(device_code, "device authorization response missing device_code")
+  assert(user_code, "device authorization response missing user_code")
+  io.stderr:write(("Open this URL to authenticate:\n  " .. verify_uri .. "\n"))
+  io.stderr:write(("User code: " .. user_code .. "\n"))
+  io.stderr:write("Waiting for authorization...")
+  local deadline = (os.time() + expires_in)
+  local poll_interval = interval
+  local token = nil
+  while (not token and (os.time() < deadline)) do
+    socket.sleep(poll_interval)
+    local ok, poll_resp = pcall(post_form, params.token_url, {grant_type = "urn:ietf:params:oauth:grant-type:device_code", device_code = device_code, client_id = expand_env(params.client_id)}, ssl)
+    if not ok then
+    else
+      local pbody
+      if (type(poll_resp.body) == "table") then
+        pbody = poll_resp.body
+      else
+        local ok2, d = pcall(json.decode, poll_resp.body)
+        if ok2 then
+          pbody = d
+        else
+          pbody = nil
+        end
+      end
+      if (pbody and (poll_resp.status >= 200) and (poll_resp.status < 300)) then
+        io.stderr:write("\n")
+        token = store_token(poll_resp, profile_name)
+      else
+        local err = (pbody and pbody.error)
+        if (err == "slow_down") then
+          poll_interval = (poll_interval + 5)
+        elseif (err == "authorization_pending") then
+        elseif (err == "expired_token") then
+          io.stderr:write("\n")
+          error("device code expired")
+        elseif (err == "access_denied") then
+          io.stderr:write("\n")
+          error("device authorization denied by user")
+        else
+        end
+      end
+    end
+  end
+  assert(token, "device authorization timed out")
+  return token
+end
 local function open_browser(url)
   local h = io.popen("uname -s")
   local sys
@@ -315,13 +382,15 @@ local function external_signing_headers(params, req)
 end
 local function authenticate(profile_name, auth_config, ssl)
   local params = auth_config.params
-  local case_32_ = auth_config.name
-  if (case_32_ == "oauth-authorization-code") then
+  local case_39_ = auth_config.name
+  if (case_39_ == "oauth-authorization-code") then
     return authorization_code(profile_name, params, ssl)
-  elseif (case_32_ == "oauth-client-credentials") then
+  elseif (case_39_ == "oauth-client-credentials") then
     return client_credentials(profile_name, params, ssl)
+  elseif (case_39_ == "oauth-device-authorization") then
+    return device_authorization(profile_name, params, ssl)
   else
-    local _ = case_32_
+    local _ = case_39_
     return error(("unsupported auth type: " .. auth_config.name))
   end
 end
@@ -333,12 +402,12 @@ local function ensure_token(profile_name, auth_config, ssl)
     local data
     if (cached and cached.refresh_token) then
       io.stderr:write("Refreshing token...\n")
-      local or_34_ = try_refresh(profile_name, auth_config.params, ssl, cached)
-      if not or_34_ then
+      local or_41_ = try_refresh(profile_name, auth_config.params, ssl, cached)
+      if not or_41_ then
         io.stderr:write("Token refresh failed, re-authenticating...\n")
-        or_34_ = authenticate(profile_name, auth_config, ssl)
+        or_41_ = authenticate(profile_name, auth_config, ssl)
       end
-      data = or_34_
+      data = or_41_
     else
       data = authenticate(profile_name, auth_config, ssl)
     end
@@ -346,34 +415,8 @@ local function ensure_token(profile_name, auth_config, ssl)
   end
 end
 local function get_headers(profile_name, auth_config, ssl)
-  local case_37_ = auth_config.name
-  if (case_37_ == "external-tool") then
-    local _39_
-    do
-      local t_38_ = auth_config
-      if (nil ~= t_38_) then
-        t_38_ = t_38_.params
-      else
-      end
-      if (nil ~= t_38_) then
-        t_38_ = t_38_.output
-      else
-      end
-      _39_ = t_38_
-    end
-    if (_39_ == "bearer-token") then
-      return external_bearer(auth_config.params)
-    else
-      return {}
-    end
-  else
-    local _ = case_37_
-    return {authorization = ("Bearer " .. ensure_token(profile_name, auth_config, ssl))}
-  end
-end
-local function wrap_http_fn(auth_config, base_fn)
-  local and_44_ = (auth_config.name == "external-tool")
-  if and_44_ then
+  local case_44_ = auth_config.name
+  if (case_44_ == "external-tool") then
     local _46_
     do
       local t_45_ = auth_config
@@ -387,29 +430,55 @@ local function wrap_http_fn(auth_config, base_fn)
       end
       _46_ = t_45_
     end
-    and_44_ = (_46_ ~= "bearer-token")
+    if (_46_ == "bearer-token") then
+      return external_bearer(auth_config.params)
+    else
+      return {}
+    end
+  else
+    local _ = case_44_
+    return {authorization = ("Bearer " .. ensure_token(profile_name, auth_config, ssl))}
   end
-  if and_44_ then
+end
+local function wrap_http_fn(auth_config, base_fn)
+  local and_51_ = (auth_config.name == "external-tool")
+  if and_51_ then
+    local _53_
+    do
+      local t_52_ = auth_config
+      if (nil ~= t_52_) then
+        t_52_ = t_52_.params
+      else
+      end
+      if (nil ~= t_52_) then
+        t_52_ = t_52_.output
+      else
+      end
+      _53_ = t_52_
+    end
+    and_51_ = (_53_ ~= "bearer-token")
+  end
+  if and_51_ then
     local params = auth_config.params
-    local function _49_(req)
+    local function _56_(req)
       local extra = external_signing_headers(params, req)
       if extra then
         local headers = (req.headers or {})
         for k, vs in pairs(extra) do
-          local _50_
+          local _57_
           if (type(vs) == "table") then
-            _50_ = vs[1]
+            _57_ = vs[1]
           else
-            _50_ = vs
+            _57_ = vs
           end
-          headers[k] = _50_
+          headers[k] = _57_
         end
         req["headers"] = headers
       else
       end
       return base_fn(req)
     end
-    return _49_
+    return _56_
   else
     return nil
   end

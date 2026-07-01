@@ -167,7 +167,32 @@
                         (do (set cur (. cur (+ 1 (tonumber idx))))
                             (set i j))
                         (do (set cur nil) (set i (+ n 1)))))))
-            (let [(key j) (path:match "^([^%.%[]+)()" i)]
+            (= c "{")
+            (let [(fields-str j) (path:match "^{([^}]+)}()" i)]
+              (if fields-str
+                  (let [fields []
+                        rest (path:sub j)
+                        apply (fn [obj]
+                                (if (= (type obj) :table)
+                                    (let [out {}]
+                                      (each [_ f (ipairs fields)]
+                                        (tset out f (. obj f)))
+                                      (if (> (length rest) 0) (select-path out rest) out))
+                                    obj))]
+                    (each [f (fields-str:gmatch "[^,]+")]
+                      (table.insert fields (f:match "^%s*(.-)%s*$")))
+                    (if (= (type cur) :table)
+                        (let [is-arr (= (type (. cur 1)) :table)]
+                          (if is-arr
+                              (let [result []]
+                                (each [_ v (ipairs cur)]
+                                  (table.insert result (apply v)))
+                                (set cur result))
+                              (set cur (apply cur))))
+                        (set cur nil))
+                    (set i (+ n 1)))
+                  (do (set cur nil) (set i (+ n 1)))))
+            (let [(key j) (path:match "^([^%.%[{]+)()" i)]
               (if key
                   (do (set cur (. cur key)) (set i j))
                   (do (set cur nil) (set i (+ n 1)))))))))
@@ -362,7 +387,7 @@
   (print "  --timeout=N           Timeout in seconds")
   (print "  --base-url=URL        Override base URL")
   (print "  --output=json|raw|status|headers  Output format (default: json)")
-  (print "  --select=PATH         Select nested value (e.g. .items[0].name)")
+  (print "  --select=PATH         Select nested value (e.g. .items[0].name, .items[].{id,name})")
   (print "  --no-color            Disable colored output")
   (print "  -v, --verbose         Show status and response headers")
   (print "  --reload              Re-fetch and re-cache the schema")

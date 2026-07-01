@@ -142,6 +142,65 @@
     (when params.audience (tset form :audience params.audience))
     (store-token (post-form params.token_url form ssl) profile-name)))
 
+;; ---- device authorization ----
+
+(fn device-authorization [profile-name params ssl]
+  (let [form {:client_id (expand-env params.client_id)}]
+    (when params.scope (tset form :scope params.scope))
+    (let [resp (post-form (or params.device_authorization_url
+                              (error "oauth-device-authorization requires device_authorization_url"))
+                          form ssl)]
+      (assert (and (>= resp.status 200) (< resp.status 300))
+              (.. "device authorization request failed: HTTP " resp.status))
+      (let [body (if (= (type resp.body) :table)
+                     resp.body
+                     (let [(ok d) (pcall json.decode resp.body)]
+                       (assert ok "device authorization response is not JSON")
+                       d))
+            device-code body.device_code
+            user-code body.user_code
+            verify-uri (or body.verification_uri_complete body.verification_uri)
+            expires-in (or body.expires_in 300)
+            interval (or body.interval 5)]
+        (assert device-code "device authorization response missing device_code")
+        (assert user-code "device authorization response missing user_code")
+        (io.stderr:write (.. "Open this URL to authenticate:\n  " verify-uri "\n"))
+        (io.stderr:write (.. "User code: " user-code "\n"))
+        (io.stderr:write "Waiting for authorization...")
+        (var deadline (+ (os.time) expires-in))
+        (var poll-interval interval)
+        (var token nil)
+        (while (and (not token) (< (os.time) deadline))
+          (socket.sleep poll-interval)
+          (let [(ok poll-resp) (pcall post-form params.token_url
+                                     {:grant_type "urn:ietf:params:oauth:grant-type:device_code"
+                                      :device_code device-code
+                                      :client_id (expand-env params.client_id)}
+                                     ssl)]
+            (if (not ok)
+                nil
+                (let [pbody (if (= (type poll-resp.body) :table)
+                                poll-resp.body
+                                (let [(ok2 d) (pcall json.decode poll-resp.body)]
+                                  (when ok2 d)))]
+                  (if (and pbody (>= poll-resp.status 200) (< poll-resp.status 300))
+                      (do (io.stderr:write "\n")
+                          (set token (store-token poll-resp profile-name)))
+                      (let [err (and pbody pbody.error)]
+                        (if (= err "slow_down")
+                            (set poll-interval (+ poll-interval 5))
+                            (= err "authorization_pending")
+                            nil
+                            (= err "expired_token")
+                            (do (io.stderr:write "\n")
+                                (error "device code expired"))
+                            (= err "access_denied")
+                            (do (io.stderr:write "\n")
+                                (error "device authorization denied by user"))
+                            nil)))))))
+        (assert token "device authorization timed out")
+        token))))
+
 ;; ---- authorization code (browser) ----
 
 (fn open-browser [url]
@@ -268,6 +327,7 @@
     (match auth-config.name
       "oauth-authorization-code" (authorization-code profile-name params ssl)
       "oauth-client-credentials" (client-credentials profile-name params ssl)
+      "oauth-device-authorization" (device-authorization profile-name params ssl)
       _ (error (.. "unsupported auth type: " auth-config.name)))))
 
 (fn ensure-token [profile-name auth-config ssl]
