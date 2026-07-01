@@ -1,5 +1,8 @@
 ;; fennel --compile-binary cannot follow transitive requires,
 ;; so every dependency must be required directly from the entry point.
+(require :lunajson.decoder)
+(require :lunajson.encoder)
+(require :lunajson.sax)
 (require :lunajson)
 (require :ltn12)
 (require :mime)
