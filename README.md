@@ -1,6 +1,6 @@
 # Atlas
 
-<img width="225" height="225" src="https://github.com/user-attachments/assets/31408610-9fc2-47b1-a493-191d84eade9e" />
+<img  width="225" height="225" src="https://github.com/user-attachments/assets/4e4d83d3-4546-4af7-b8c7-cafa9bc3593b" />
 
 OpenAPI 3.x toolbox.
 
