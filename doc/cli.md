@@ -4,24 +4,41 @@ A standalone OpenAPI 3.x CLI. Point it at a schema or named profile and call ope
 
 ## Installation
 
-**Standalone binary** (no Lua required):
+Two options:
+
+### Option 1 — Standalone binary (recommended)
+
+No Lua runtime required. The binary embeds Lua, luasocket, luasec, and OpenSSL statically.
+
+Download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases), then install it:
 
 ```sh
-# download from https://github.com/mpenet/atlas/releases, then:
 install -m 755 atlas-bin /usr/local/bin/atlas
 ```
 
-**From source:**
+To build the binary from source instead:
 
 ```sh
-make deps     # install luarocks dependencies
-make install  # build and install to /usr/local/bin/atlas
+make deps     # install luarocks dependencies (fennel, lunajson, luasocket, luasec)
+make binary   # produces bin/atlas-bin
+install -m 755 bin/atlas-bin /usr/local/bin/atlas
 ```
 
-**As a LuaRocks package** (requires Lua 5.4, luasocket, luasec in PATH):
+Requires `lua`, `fennel`, `openssl`, and `pkg-config` to build.
+
+### Option 2 — Lua script (requires a Lua runtime)
+
+Installs `atlas` as a Lua script that is run by the system Lua interpreter. Requires Lua 5.4+, luasocket, and luasec to be present at runtime.
 
 ```sh
 luarocks install atlas-oai
+```
+
+Or build and install from source:
+
+```sh
+make deps     # install luarocks dependencies
+make install  # compiles Fennel → Lua and installs bin/atlas to /usr/local/bin
 ```
 
 ## Synopsis

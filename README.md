@@ -4,8 +4,9 @@
 
 OpenAPI 3.x toolbox.
 
-- **Fennel/Lua library** — point it at any schema (local file, URL, or parsed table) and get back a callable client.
 - **Standalone CLI** — similar to Restish, with profiles, OAuth 2.0 (authorization code, client credentials, device flow), mTLS, response selection, and shell completion.
+- **Fennel/Lua library** — point it at any schema (local file, URL, or parsed table) and get back a callable client.
+
 
 ## Documentation
 
@@ -14,26 +15,35 @@ OpenAPI 3.x toolbox.
 
 ## Install
 
-**Lua library:**
+### CLI — option 1: standalone binary (recommended)
 
-```sh
-luarocks install atlas-oai
-```
-
-**CLI — standalone binary** (no Lua required), download from https://github.com/mpenet/atlas/releases, then:
+No Lua runtime required. Download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases), then:
 
 ```sh
 install -m 755 atlas-bin /usr/local/bin/atlas
 ```
 
-**Build from source:**
+### CLI — option 2: build from source
 
 ```sh
 make deps     # install luarocks dependencies
-make install  # build and install bin/atlas to /usr/local/bin
+make install  # compile Fennel → Lua and install bin/atlas to /usr/local/bin
+```
+
+### Lua library
+
+```sh
+luarocks install atlas-oai
 ```
 
 ## Quick examples
+
+```sh
+# CLI
+atlas https://petstore3.swagger.io/api/v3/openapi.json --list
+atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
+atlas myapi find-pets-by-status --query.status=available --select=.pets[].{id,name}
+```
 
 ```fennel
 ;; library
@@ -43,12 +53,7 @@ make install  # build and install bin/atlas to /usr/local/bin
 (c.add-pet {:name "Rex" :status "available"})
 ```
 
-```sh
-# CLI
-atlas https://petstore3.swagger.io/api/v3/openapi.json --list
-atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
-atlas myapi find-pets-by-status --query.status=available --select=.pets[].{id,name}
-```
+
 
 ## Building from source
 
