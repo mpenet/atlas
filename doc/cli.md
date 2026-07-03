@@ -65,7 +65,7 @@ atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 -v
 | `--header.KEY=VAL` | Per-request header (repeatable) |
 | `--timeout=N` | Timeout in seconds |
 | `--base-url=URL` | Override the base URL from the schema |
-| `--output=FORMAT` | Output format: `json` (default), `raw`, `status`, `headers` |
+| `--output=FORMAT` | Output format: `json` (default), `yaml`, `raw`, `status`, `headers` |
 | `--select=PATH` | Extract a value from the response — see [Response selection](#response-selection) |
 | `--no-color` | Disable colored JSON output |
 | `-v`, `--verbose` | Print status line and response headers before the body |
@@ -132,6 +132,7 @@ When `--select` matches multiple values (via `[]`), all matches are printed one 
 | `--output` | Description |
 |-----------|-------------|
 | `json` | Pretty-printed JSON with color (default) |
+| `yaml` | Pretty-printed YAML |
 | `raw` | `tostring()` of the body — useful for plain-text responses |
 | `status` | HTTP status code only |
 | `headers` | Response headers only, one per line (`key: value`) |
@@ -179,6 +180,27 @@ atlas petstore get-pet-by-id 42
 atlas myapi add-pet -d '{"name":"Rex"}'
 ```
 
+### Global config fields
+
+Top-level fields in `config.json` apply to all invocations as defaults:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `no-color` | bool | Disable colored output globally |
+| `output` | string | Default output format (`json`, `yaml`, `raw`, `status`, `headers`) |
+| `verbose` | bool | Always print status line and response headers |
+| `timeout` | number | Default timeout in seconds |
+
+```json
+{
+  "no-color": true,
+  "output": "yaml",
+  "verbose": false,
+  "timeout": 30,
+  "profiles": { ... }
+}
+```
+
 ### Profile fields
 
 | Field | Type | Description |
@@ -188,10 +210,16 @@ atlas myapi add-pet -d '{"name":"Rex"}'
 | `headers` | object | Default headers for every request |
 | `timeout` | number | Default timeout in seconds |
 | `cache-ttl` | number | Schema cache TTL override for this profile |
+| `no-color` | bool | Disable colored output for this profile |
+| `output` | string | Default output format for this profile |
+| `verbose` | bool | Always print status line and response headers |
+| `timeout` | number | Default timeout in seconds |
 | `auth` | object | Authentication configuration — see [Authentication](#authentication) |
 | `tls` | object | mTLS configuration — see [mTLS](#mtls) |
 | `ssl` | object | Raw luasec options merged with `tls` |
 | `extends` | string | Inherit from another profile |
+
+Resolution order for `no-color`, `output`, `verbose`, and `timeout`: CLI flag → profile → global config.
 
 ### Profile inheritance
 

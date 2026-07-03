@@ -225,6 +225,11 @@
             :status  (print resp.status)
             :headers (each [k v (pairs (or resp.headers {}))]
                        (print (.. k ": " v)))
+            :yaml    (if body
+                         (let [rendered (pretty-mod.yaml body 0 (not no-color))]
+                           (print (if (rendered:match "^\n") (rendered:sub 2) rendered)))
+                         (when (not verbose)
+                           (io.stderr:write (.. "HTTP " resp.status "\n"))))
             _ (if body
                   (print (pretty-mod.pretty body 0 (not no-color)))
                   (when (not verbose)
@@ -314,7 +319,7 @@
   (print "complete -c atlas -l no-color  -d 'Disable colored output'")
   (print "complete -c atlas -s v -l verbose -d 'Show status and response headers'")
   (print "complete -c atlas -l reload    -d 'Re-fetch and re-cache the schema'")
-  (print "complete -c atlas -l output    -r -d 'Output format' -a 'json raw status headers'")
+  (print "complete -c atlas -l output    -r -d 'Output format' -a 'json yaml raw status headers'")
   (print "complete -c atlas -l select    -r -d 'Select nested value (.items[0].name)'")
   (print "complete -c atlas -l timeout   -r -d 'Timeout in seconds'")
   (print "complete -c atlas -l cache-ttl -r -d 'Schema cache TTL in seconds'")
@@ -386,7 +391,7 @@
   (print "  --header.KEY=VAL      Per-request header")
   (print "  --timeout=N           Timeout in seconds")
   (print "  --base-url=URL        Override base URL")
-  (print "  --output=json|raw|status|headers  Output format (default: json)")
+  (print "  --output=json|yaml|raw|status|headers  Output format (default: json)")
   (print "  --select=PATH         Select nested value (e.g. .items[0].name, .items[].{id,name})")
   (print "  --no-color            Disable colored output")
   (print "  -v, --verbose         Show status and response headers")
@@ -470,6 +475,10 @@
                         (resolve-profile p.schema profiles {}))
               raw-schema (or (?. profile :schema) p.schema)
               ttl (or p.cache-ttl (?. profile :cache-ttl) 3600)
+              no-color (or p.no-color (?. profile :no-color) (?. config :no-color))
+              output (or p.output (?. profile :output) (?. config :output))
+              verbose (or p.verbose (?. profile :verbose) (?. config :verbose))
+              timeout (or p.timeout (?. profile :timeout) (?. config :timeout))
               ssl (merge-ssl profile p.ssl)
               auth-cfg (let [a (?. profile :auth)]
                          (when (and a a.name (not= a.name "")) a))
@@ -481,7 +490,7 @@
                         (load-schema-cached raw-schema ttl p.reload ssl auth-headers)
                         raw-schema)
               opts {:headers (collect [k v (pairs (or (?. profile :headers) {}))] k v)
-                    :timeout (or p.timeout (?. profile :timeout))
+                    :timeout timeout
                     :ssl ssl}]
           (when auth-headers
             (each [k v (pairs auth-headers)]
@@ -516,7 +525,7 @@
                       req-opts (let [o {}]
                                  (when (next p.query) (tset o :query p.query))
                                  (when (next p.headers) (tset o :headers p.headers))
-                                 (when p.timeout (tset o :timeout p.timeout))
+                                 (when timeout (tset o :timeout timeout))
                                  (when (next o) o))]
                   (when op.has-body?
                     (let [body (if (and (not p.body) (next p.body-params))
@@ -528,7 +537,7 @@
                         (ok-r resp) (pcall op (table.unpack call-args))
                         elapsed (- (socket.gettime) t0)]
                     (if ok-r
-                        (print-resp resp p.output p.no-color p.verbose p.select elapsed)
+                        (print-resp resp output no-color verbose p.select elapsed)
                         (die (.. "request failed: " (tostring resp)))))))
 
               (die "No operation specified. Use --list to see available operations.")))))))

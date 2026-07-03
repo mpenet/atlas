@@ -50,4 +50,57 @@
       :nil (c :null "null" uc)
       _ (tostring v))))
 
-{: pretty}
+(fn yaml-needs-quotes? [s]
+  ;; quote strings that look like YAML scalars or contain special chars
+  (or (= s "")
+      (s:match "^[0-9]")
+      (s:match "^[-~|>!&*%%@`#,{}%[%]:]")
+      (s:match "[\n\r\t]")
+      (s:match ":[ \t]")
+      (s:match " #")
+      (s:match "^%s")
+      (s:match "%s$")
+      (= s "true") (= s "false") (= s "null")
+      (= s "~") (= s ".inf") (= s "-.inf") (= s ".nan")))
+
+(fn yaml-escape [s]
+  (-> s
+      (: :gsub "\\" "\\\\")
+      (: :gsub "\"" "\\\"")
+      (: :gsub "\n" "\\n")
+      (: :gsub "\r" "\\r")
+      (: :gsub "\t" "\\t")))
+
+(fn yaml [v ?indent ?use-color]
+  (let [ind (or ?indent 0)
+        uc (not= ?use-color false)
+        pad (string.rep "  " ind)]
+    (match (type v)
+      :table
+      (if (= (next v) nil)
+          (c :punct "{}" uc)
+          (array? v)
+          (let [lines []]
+            (each [_ x (ipairs v)]
+              (let [rendered (yaml x (+ ind 1) uc)]
+                (if (rendered:match "^\n")
+                    (table.insert lines (.. pad (c :punct "-" uc) " " (rendered:gsub "^\n%s*" "")))
+                    (table.insert lines (.. pad (c :punct "-" uc) " " rendered)))))
+            (.. "\n" (table.concat lines "\n")))
+          (let [lines []]
+            (each [k x (pairs v)]
+              (let [key (tostring k)
+                    rendered (yaml x (+ ind 1) uc)]
+                (if (rendered:match "^\n")
+                    (table.insert lines (.. pad (c :key key uc) (c :punct ":" uc) rendered))
+                    (table.insert lines (.. pad (c :key key uc) (c :punct ":" uc) " " rendered)))))
+            (.. "\n" (table.concat lines "\n"))))
+      :string (let [s (if (yaml-needs-quotes? v)
+                         (.. "\"" (yaml-escape v) "\"")
+                         v)]
+                (c :string s uc))
+      :number (c :number (tostring v) uc)
+      :boolean (c :bool (tostring v) uc)
+      _ (c :null "null" uc))))
+
+{: pretty : yaml}
