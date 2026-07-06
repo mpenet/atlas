@@ -47,8 +47,8 @@
                 body (when (> (length raw) 0)
                        (let [(ok val) (pcall json.decode raw)]
                          (if ok val raw)))]
-            {:status code
+            {:status  code
              :headers resp-headers
-             :body body}))))))
+             :body    body}))))))
 
 {: request}

@@ -4,3 +4,5 @@ luarocks.lock
 /bin/anis-bin
 /bin/atlas-bin
 /test/*_spec.lua
+**.lua
+/tmp

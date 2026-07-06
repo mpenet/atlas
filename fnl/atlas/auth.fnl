@@ -309,11 +309,17 @@
     {:authorization (.. "Bearer " out)}))
 
 (fn external-signing-headers [params req]
-  (let [body (when (not params.omitbody) (or req.body ""))
+  (let [body (when (not params.omitbody)
+               (or req.raw-body
+                   (when (= (type req.body) :string) req.body)
+                   (when req.body
+                     (let [(ok s) (pcall json.encode req.body)]
+                       (when ok s)))
+                   ""))
         payload (json.encode {:method (or req.method "GET")
                               :uri req.url
                               :headers (or req.headers {})
-                              :body body})
+                              :body (or body "")})
         raw (run-external params payload)]
     (when (and raw (> (length raw) 0))
       (let [(ok result) (pcall json.decode raw)]
@@ -359,6 +365,12 @@
              (not= (?. auth-config :params :output) "bearer-token"))
     (let [params auth-config.params]
       (fn [req]
+        ;; pre-encode body so signing and wire use identical bytes
+        (when (and req.body (not req.raw-body))
+          (let [(ok s) (pcall json.encode req.body)]
+            (when ok
+              (tset req :raw-body s)
+              (tset req :body nil))))
         (let [extra (external-signing-headers params req)]
           (when extra
             (let [headers (or req.headers {})]

@@ -5,6 +5,7 @@
 OpenAPI 3.x toolbox.
 
 - **Standalone CLI** — similar to Restish, with profiles, OAuth 2.0 (authorization code, client credentials, device flow), mTLS, response selection, and shell completion.
+- **Arazzo workflow execution** — run multi-step API sequences from [Arazzo 1.0](https://spec.openapis.org/arazzo/latest.html) documents with full runtime expression support, conditional branching, polling loops, and profile-based auth.
 - **Fennel/Lua library** — point it at any schema (local file, URL, or parsed table) and get back a callable client.
 
 
@@ -43,6 +44,12 @@ luarocks install atlas-oai
 atlas https://petstore3.swagger.io/api/v3/openapi.json --list
 atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
 atlas myapi find-pets-by-status --query.status=available --select=.pets[].{id,name}
+
+# Arazzo — multi-step workflow
+atlas arazzo myapi create-and-wait \
+  --body.name=myresource \
+  --body.size=10 \
+  -v
 ```
 
 ```fennel

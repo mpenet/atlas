@@ -45,6 +45,7 @@ make install  # compiles Fennel → Lua and installs bin/atlas to /usr/local/bin
 
 ```
 atlas <schema-or-profile> [operation] [path-params...] [options]
+atlas arazzo <name-or-file> <workflow-id> [-i KEY=VAL | --input.KEY=VAL | --inputs=JSON] [options]
 atlas profile <list|show> [name]
 atlas auth <profile> [--logout]
 atlas completion <fish|bash|zsh>
@@ -77,7 +78,7 @@ atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 -v
 | `--help` | Show documentation for an operation (or list all if no operation given) |
 | `--body=JSON\|@file\|@-` | Request body — inline JSON, file path, or stdin |
 | `-d JSON\|@file\|@-` | Alias for `--body` |
-| `--body.KEY=VAL` | Set individual body fields (numbers coerced automatically) |
+| `--body.KEY=VAL` | Set individual body fields — supports deep dot paths: `--body.a.b.c=1` |
 | `--query.KEY=VAL` | Query parameter (repeatable) |
 | `--header.KEY=VAL` | Per-request header (repeatable) |
 | `--timeout=N` | Timeout in seconds |
@@ -85,7 +86,7 @@ atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 -v
 | `--output=FORMAT` | Output format: `json` (default), `yaml`, `raw`, `status`, `headers` |
 | `--select=PATH` | Extract a value from the response — see [Response selection](#response-selection) |
 | `--no-color` | Disable colored JSON output |
-| `-v`, `--verbose` | Print status line and response headers before the body |
+| `-v`, `--verbose` | Print request details and response headers; for Arazzo, enables live step progress |
 | `--reload` | Bypass the schema cache and re-fetch |
 | `--cache-ttl=N` | Schema cache TTL in seconds (default: 3600) |
 
@@ -105,9 +106,12 @@ cat pet.json | atlas myapi add-pet -d @-
 
 # individual fields (numbers coerced automatically)
 atlas myapi add-pet --body.name=Rex --body.status=available --body.age=3
+
+# nested fields — dot-separated path, intermediate objects created and merged
+atlas myapi create-vm --body.instance-type.id=abc123 --body.disk-size=10
 ```
 
-`--body.KEY=VAL` and `--body=…` are mutually exclusive. If both are given, `--body=…` wins.
+`--body.KEY=VAL` flags are deep-merged: `--body.a.b=1 --body.a.c=2` produces `{"a":{"b":1,"c":2}}`. `--body=…` and `--body.KEY=VAL` are mutually exclusive; `--body=…` wins if both are given.
 
 ## Response selection
 
@@ -158,9 +162,14 @@ HTTP 4xx/5xx responses are always printed to stderr and exit with status 1.
 
 ## Verbose mode
 
-`-v` / `--verbose` prints the status line and all response headers before the body:
+`-v` / `--verbose` enables full request and response detail across both regular calls and Arazzo workflows:
+
+- **Regular calls**: logs `> METHOD URL`, request headers, and body to stderr before the response; then prints the status line and response headers.
+- **Arazzo**: enables live step progress on stderr (see [Arazzo output modes](#output-modes-1)) and logs each HTTP request as it is made.
 
 ```
+> GET https://api.example.com/pets/42
+> accept: application/json
 HTTP 200  0.124s
 content-type: application/json
 ...
@@ -492,6 +501,182 @@ Completion provides:
 - Operation names as the second argument (fetched live from the schema via `--complete-ops`)
 - Subcommand names for `profile` and `auth`
 - Shell names for `completion`
+
+## Arazzo workflow execution
+
+Atlas executes [Arazzo 1.0](https://spec.openapis.org/arazzo/latest.html) workflow documents — multi-step API sequences with conditional branching, output passing between steps, polling loops, and criterion-based success checks. This is particularly useful for APIs where mutations are asynchronous: an Arazzo workflow can call the mutating operation and then poll a status endpoint until the operation completes, returning the final result — all in a single command.
+
+### Usage
+
+```sh
+atlas arazzo <name-or-file> [workflow-id] [path-params...] [options]
+```
+
+- `<name-or-file>` — a name from `~/.config/atlas/config.json` (see below), a local file path, or an `http(s)://` URL.
+- If `workflow-id` is omitted, all available workflows are listed.
+- The Arazzo document's `sourceDescriptions` of type `openapi` are loaded automatically as API clients.
+
+### Configuration
+
+Add an `"arazzo"` section to `~/.config/atlas/config.json` to name Arazzo files and attach defaults:
+
+```json
+{
+  "arazzo": {
+    "myapi": {
+      "file": "./workflows/myapi.arazzo.json",
+      "profile": "myapi-prod",
+      "inputs": {
+        "region": "eu-west-1"
+      }
+    }
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `file` | Path or URL of the Arazzo document |
+| `profile` | Atlas profile to use for authentication and TLS (see [Profiles](#profiles)) |
+| `inputs` | Default workflow inputs, overridden by CLI flags |
+
+This composes directly with existing profiles: the named profile's auth (OAuth, mTLS, external-tool signing) and TLS settings are applied automatically to every API call made by the workflow. Override at runtime with `--profile=NAME`.
+
+```sh
+# use the profile configured in the arazzo entry
+atlas arazzo myapi create-resource --body.name=foo
+
+# override the profile for this invocation
+atlas arazzo myapi create-resource --body.name=foo --profile=myapi-staging
+```
+
+### Path parameters
+
+Path parameters declared in a workflow are passed as positional arguments after the workflow ID, in the order they appear in the workflow's step parameters:
+
+```sh
+# workflow with one path param (e.g. id)
+atlas arazzo myapi get-resource <uuid>
+
+# multiple path params
+atlas arazzo myapi update-resource <resource-id> <version-id>
+```
+
+Named `-i` flags still work as an override:
+
+```sh
+atlas arazzo myapi get-resource <uuid> -i id=override
+```
+
+### Request body
+
+For operations with a request body, pass it with the same flags as regular CLI calls:
+
+```sh
+# inline JSON
+atlas arazzo myapi create-resource -d '{"name":"foo","size":10}'
+
+# individual fields — supports deep dot-notation, fields are merged
+atlas arazzo myapi create-resource --body.name=foo --body.size=10
+
+# nested fields (e.g. reference types with an id)
+atlas arazzo myapi create-vm \
+  --body.instance-type.id=abc123 \
+  --body.template.id=def456 \
+  --body.disk-size=50
+```
+
+### Workflow inputs
+
+Additional named inputs (not path params or body) use:
+
+```sh
+# short flag
+atlas arazzo myapi my-workflow -i timeout=30 -i region=eu
+
+# long flag
+atlas arazzo myapi my-workflow --input.timeout=30
+
+# JSON blob (all inputs at once)
+atlas arazzo myapi my-workflow --inputs='{"timeout":30,"region":"eu"}'
+# or from a file
+atlas arazzo myapi my-workflow --inputs=@inputs.json
+```
+
+Merge priority (highest last): config `inputs` → `--inputs` blob → individual `-i`/`--input.*` flags.
+
+### Output modes
+
+| Mode | Description |
+|------|-------------|
+| `final` | Workflow outputs only (default) |
+| `steps` | Each step's response body, then final outputs |
+| `progress` | Live step tracking on stderr as steps execute, then final outputs |
+| `full` | Like `steps` but also shows operation reference and request body per step |
+
+```sh
+atlas arazzo myapi create-resource --body.name=foo --arazzo-output=progress
+```
+
+`-v` / `--verbose` is equivalent to `progress` mode and additionally logs every HTTP request (method, URL, headers, body) to stderr. Step outputs (declared in the Arazzo document) are printed after each step using the `--output` format.
+
+Progress output uses color (suppressed by `--no-color`):
+- `→ stepId` — step is running (dim)
+- `✓ stepId  0.312s  HTTP 200  state=success` — step succeeded (green)
+- `✗ workflow failed  1.024s` — workflow failed (red)
+
+### Runtime expressions
+
+| Expression | Resolves to |
+|------------|-------------|
+| `$inputs.KEY` | Workflow input |
+| `$statusCode` | HTTP status of current response |
+| `$response.body#/ptr` | JSON Pointer into response body |
+| `$response.header.NAME` | Response header |
+| `$request.body#/ptr` | JSON Pointer into request body |
+| `$steps.ID.outputs.KEY` | Named output from a previous step |
+| `$steps.ID.response.body#/ptr` | Response body from a previous step |
+| `$url` | Request URL |
+| `{$expr}` | Template string substitution |
+
+### Success criteria
+
+Steps use `successCriteria` to determine pass/fail. Supported criterion types:
+
+- **Simple** — boolean expression: `$statusCode == 200`, `$response.body#/state == "success"`
+- **Regex** — pattern match: `{"type":"regex","context":"$statusCode","condition":"^2"}`
+
+On failure, `onFailure` actions run; on success, `onSuccess` actions. Supported action types: `end`, `goto` (by `stepId` or `workflowId`). `goto` targeting the same step sleeps 2 seconds before retrying (configurable via `retryAfter` on the action). Goto loops are detected and aborted after 50 iterations.
+
+### Sub-workflows
+
+A step with `workflowId` instead of `operationId`/`operationPath` runs another workflow as a nested step. Inputs are passed via the step's `parameters`.
+
+### Examples
+
+```sh
+# list all workflows in a named file
+atlas arazzo myapi
+
+# run a workflow, show progress
+atlas arazzo myapi create-resource \
+  --body.name=foo \
+  --body.size=10 \
+  -v
+
+# async operation — workflow polls until complete, returns result
+atlas arazzo myapi create-vm \
+  --body.instance-type.id=abc123 \
+  --body.template.id=def456 \
+  --body.disk-size=50 \
+  --output=yaml \
+  -v
+
+# load from URL, override profile
+atlas arazzo https://example.com/workflows.json deploy-service \
+  --body.image=myapp:latest \
+  --profile=prod
+```
 
 ## Exit codes
 

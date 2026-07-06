@@ -1,4 +1,5 @@
 (local atlas (require :atlas))
+(local arazzo (require :atlas.arazzo))
 (local auth (require :atlas.auth))
 (local cache (require :atlas.cache))
 (local http-mod (require :atlas.http))
@@ -56,8 +57,34 @@
 (fn coerce [s]
   (or (tonumber s) s))
 
+(fn wrap-log-request [http-fn]
+  (fn [req]
+    (io.stderr:write (.. "> " (or req.method "?") " " (or req.url "?") "\n"))
+    (when req.body
+      (io.stderr:write (.. "> body: "
+                           (if (= (type req.body) :table)
+                               (json.encode req.body)
+                               (tostring req.body))
+                           "\n")))
+    (when (and req.headers (next req.headers))
+      (each [k v (pairs req.headers)]
+        (io.stderr:write (.. "> " k ": " (tostring v) "\n"))))
+    (http-fn req)))
+
+(fn set-nested [t path v]
+  (let [keys []]
+    (each [k (path:gmatch "[^.]+")]
+      (table.insert keys k))
+    (var cur t)
+    (for [i 1 (- (length keys) 1)]
+      (let [k (. keys i)]
+        (when (not (. cur k)) (tset cur k {}))
+        (set cur (. cur k))))
+    (tset cur (. keys (length keys)) v)))
+
 (fn parse-args [args]
-  (let [r {:path-params [] :query {} :headers {} :ssl {} :body-params {}}]
+  (let [r {:path-params [] :query {} :headers {} :ssl {} :body-params {}
+           :arazzo-inputs {}}]
     (var i 1)
     (while (<= i (length args))
       (let [a (. args i)]
@@ -76,7 +103,7 @@
 
           (a:match "^%-%-body%.(.-)=(.+)")
           (let [(k v) (a:match "^%-%-body%.(.-)=(.+)")]
-            (tset r.body-params k (coerce v)))
+            (set-nested r.body-params k (coerce v)))
 
           (a:match "^%-%-body=(.*)")
           (let [(v) (a:match "^%-%-body=(.*)")]
@@ -119,6 +146,33 @@
           (a:match "^%-%-select=(.+)")
           (let [(v) (a:match "^%-%-select=(.+)")]
             (tset r :select v))
+
+          (a:match "^%-%-input%.(.-)=(.+)")
+          (let [(k v) (a:match "^%-%-input%.(.-)=(.+)")]
+            (tset r.arazzo-inputs k (coerce v)))
+
+          (= a :-i)
+          (do (set i (+ i 1))
+              (let [kv (. args i)
+                    (k v) (kv:match "^(.-)=(.+)")]
+                (assert k (.. "invalid -i argument (expected KEY=VAL): " (tostring kv)))
+                (tset r.arazzo-inputs k (coerce v))))
+
+          (a:match "^%-i(.-)=(.+)")
+          (let [(k v) (a:match "^%-i(.-)=(.+)")]
+            (tset r.arazzo-inputs k (coerce v)))
+
+          (a:match "^%-%-inputs=(.*)")
+          (let [(v) (a:match "^%-%-inputs=(.*)")]
+            (tset r :arazzo-inputs-blob (read-body v)))
+
+          (a:match "^%-%-arazzo%-output=(.+)")
+          (let [(v) (a:match "^%-%-arazzo%-output=(.+)")]
+            (tset r :arazzo-output v))
+
+          (a:match "^%-%-profile=(.+)")
+          (let [(v) (a:match "^%-%-profile=(.+)")]
+            (tset r :profile v))
 
           (not (a:match "^%-"))
           (if (not r.schema) (tset r :schema a)
@@ -379,6 +433,7 @@
   (print "Usage: atlas <schema-or-profile> [operation] [path-params...] [options]")
   (print "       atlas profile <list|show> [name]")
   (print "       atlas auth <profile> [--logout]")
+  (print "       atlas arazzo <name-or-file> <workflow-id> [path-params...] [options]")
   (print "       atlas completion <fish|bash|zsh>")
   (print "")
   (print "Options:")
@@ -400,6 +455,12 @@
   (print "")
   (print "Auth options (for 'atlas auth <profile>'):")
   (print "  --logout              Clear cached token")
+  (print "")
+  (print "Arazzo options (for 'atlas arazzo <name-or-file> <workflow-id>'):")
+  (print "  -i KEY=VAL            Workflow input (short form)")
+  (print "  --input.KEY=VAL       Workflow input (long form)")
+  (print "  --inputs=JSON         All inputs as a JSON object (or @file)")
+  (print "  --arazzo-output=MODE  final (default), steps, progress, full")
   (print "")
   (print "Config: ~/.config/atlas/config.json"))
 
@@ -443,6 +504,172 @@
                       (print (.. "Authenticated: " profile-name))
                       (die (tostring result))))))))))
 
+(fn print-arazzo-result [result mode output no-color]
+  (let [fmt (or output :json)
+        render (fn [v]
+                 (match fmt
+                   :yaml (let [s (pretty-mod.yaml v 0 (not no-color))]
+                           (if (s:match "^\n") (s:sub 2) s))
+                   _     (pretty-mod.pretty v 0 (not no-color))))]
+    (match (or mode :final)
+      :final
+      (when (next (or result.outputs {}))
+        (print (render result.outputs)))
+
+      :steps
+      (do
+        (let [ordered (icollect [id _ (pairs result.steps)] id)]
+          (table.sort ordered)
+          (each [_ step-id (ipairs ordered)]
+            (let [step (. result.steps step-id)]
+              (print (.. "--- " step-id " ---"))
+              (when step.response
+                (print (render step.response.body))))))
+        (when (next (or result.outputs {}))
+          (print "--- outputs ---")
+          (print (render result.outputs))))
+
+      :progress
+      ;; progress is printed live via on-step; print outputs at end
+      (when (next (or result.outputs {}))
+        (print (render result.outputs)))
+
+      :full
+      (do
+        (let [ordered (icollect [id _ (pairs result.steps)] id)]
+          (table.sort ordered)
+          (each [_ step-id (ipairs ordered)]
+            (let [step (. result.steps step-id)]
+              (print (.. "--- " step-id " request ---"))
+              (when step.op-ref (print (.. "operation: " step.op-ref)))
+              (when (and step.request step.request.body)
+                (print (render step.request.body)))
+              (print (.. "--- " step-id " response"
+                         (if (and step.response step.response.status)
+                             (.. " HTTP " step.response.status) "")
+                         " ---"))
+              (when step.response (print (render step.response.body))))))
+        (when (next (or result.outputs {}))
+          (print "--- outputs ---")
+          (print (render result.outputs)))))))
+
+(fn list-arazzo-workflows [doc]
+  (let [wfs (or doc.workflows [])]
+    (when (= (length wfs) 0)
+      (print "(no workflows)"))
+    (let [width (accumulate [w 0 _ wf (ipairs wfs)]
+                  (math.max w (length wf.workflowId)))]
+      (each [_ wf (ipairs wfs)]
+        (print (if wf.summary
+                   (string.format (.. "%-" width "s  %s") wf.workflowId wf.summary)
+                   wf.workflowId))))))
+
+(fn workflow-path-param-names [wf]
+  "Return ordered list of input names that are path params in any step."
+  (let [seen {} names []]
+    (each [_ step (ipairs (or wf.steps []))]
+      (each [_ param (ipairs (or step.parameters []))]
+        (when (= param.in :path)
+          (let [input-name (and (= (type param.value) :string)
+                                (param.value:match "^%$inputs%.(.+)$"))]
+            (when (and input-name (not (. seen input-name)))
+              (tset seen input-name true)
+              (table.insert names input-name))))))
+    names))
+
+(fn run-arazzo [p]
+  (let [name-or-file p.operation
+        workflow-id  (. p.path-params 1)]
+    (assert name-or-file "Usage: atlas arazzo <name-or-file> [<workflow-id>] [-i KEY=VAL ...] [--inputs=JSON]")
+    (let [config   (load-config)
+          named    (?. config :arazzo name-or-file)
+          file     (if named named.file name-or-file)
+          profiles (or (?. config :profiles) {})
+          profile-name (or p.profile (?. named :profile))
+          profile  (when (and profile-name (. profiles profile-name))
+                     (resolve-profile profile-name profiles {}))
+          (ok doc) (pcall arazzo.load-doc file)]
+      (assert ok (tostring doc))
+      (if (not workflow-id)
+          (list-arazzo-workflows doc)
+          (let [wf       (accumulate [found nil _ w (ipairs (or doc.workflows []))]
+                           (if (= w.workflowId workflow-id) w found))
+                pp-names (if wf (workflow-path-param-names wf) [])
+                inputs   (let [base (collect [k v (pairs (or (?. named :inputs) {}))] k v)]
+                           ;; positional args -> path params
+                           (each [j name (ipairs pp-names)]
+                             (let [v (. p.path-params (+ j 1))]
+                               (when v (tset base name v))))
+                           (each [k v (pairs (or p.arazzo-inputs-blob {}))]
+                             (tset base k v))
+                           (each [k v (pairs p.arazzo-inputs)]
+                             (tset base k v))
+                           ;; body-params merge flat into inputs so $inputs.key works
+                           (each [k v (pairs (or p.body-params {}))]
+                             (tset base k v))
+                           (when (and p.body (= (type p.body) :table))
+                             (each [k v (pairs p.body)]
+                               (tset base k v)))
+                           base)
+                mode     (or p.arazzo-output (if p.verbose :progress :final))
+                no-color (or p.no-color (?. config :no-color))
+                output   (or p.output (?. config :output))
+                ssl      (merge-ssl profile p.ssl)
+                auth-cfg (let [a (?. profile :auth)]
+                           (when (and a a.name (not= a.name "")) a))
+                run-opts (let [o {:on-step nil
+                                  :timeout (or p.timeout (?. profile :timeout))
+                                  :ssl     ssl}]
+                           (let [base-fn (if p.verbose
+                                             (wrap-log-request http-mod.request)
+                                             http-mod.request)
+                                 wrapped (when auth-cfg (auth.wrap-http-fn auth-cfg base-fn))]
+                             (tset o :http-fn (or wrapped (when p.verbose base-fn))))
+                           (when (?. profile :base-url)
+                             (tset o :base-url (?. profile :base-url)))
+                           o)
+                use-color (not no-color)
+                dim    (fn [s] (if use-color (.. "\27[2m" s "\27[0m") s))
+                green  (fn [s] (if use-color (.. "\27[32m" s "\27[0m") s))
+                red    (fn [s] (if use-color (.. "\27[31m" s "\27[0m") s))
+                on-step  (when (or (= mode :progress) (= mode :full))
+                           (let [fmt    (or output :json)
+                                 render (fn [v]
+                                          (match fmt
+                                            :yaml (let [s (pretty-mod.yaml v 0 use-color)]
+                                                    (if (s:match "^\n") (s:sub 2) s))
+                                            _ (pretty-mod.pretty v 0 use-color)))]
+                             (fn [info]
+                               (match info.status
+                                 :running (io.stderr:write (.. (dim "→") " " info.step "\n"))
+                                 :done
+                                 (do
+                                   (io.stderr:write
+                                     (.. (green "✓") " " info.step
+                                         (if info.elapsed
+                                             (string.format "  %.3fs" info.elapsed) "")
+                                         (if (and info.response info.response.status)
+                                             (.. "  HTTP " info.response.status) "")
+                                         "\n"))
+                                   (when (and info.outputs (next info.outputs))
+                                     (io.stderr:write (.. (render info.outputs) "\n"))))))))]
+            (tset run-opts :on-step on-step)
+            (let [t0      (socket.gettime)
+                  clients (arazzo.build-clients doc run-opts)
+                  (ok result) (pcall arazzo.run-workflow doc workflow-id inputs clients run-opts)
+                  elapsed (- (socket.gettime) t0)]
+              (when (or (= mode :progress) (= mode :full))
+                (if ok
+                    (io.stderr:write
+                      (.. (green "✓") " workflow " workflow-id
+                          (string.format "  %.3fs" elapsed) "\n"))
+                    (io.stderr:write
+                      (.. (red "✗") " workflow " workflow-id " failed"
+                          (string.format "  %.3fs" elapsed) "\n"))))
+              (if ok
+                  (print-arazzo-result result mode output no-color)
+                  (die (tostring result)))))))))
+
 (fn load-schema-cached [url ttl reload? ssl headers]
   (let [cached (when (not reload?) (cache.get url ttl))]
     (if cached
@@ -469,6 +696,8 @@
         (run-profile p.operation (. p.path-params 1) (load-config))
         (= p.schema :auth)
         (run-auth p.operation p (load-config))
+        (= p.schema :arazzo)
+        (run-arazzo p)
         (let [config (load-config)
               profiles (or (?. config :profiles) {})
               profile (when (. profiles p.schema)
@@ -495,9 +724,11 @@
           (when auth-headers
             (each [k v (pairs auth-headers)]
               (tset opts.headers k v)))
-          (when auth-cfg
-            (let [wrapped (auth.wrap-http-fn auth-cfg http-mod.request)]
-              (when wrapped (tset opts :http-fn wrapped))))
+          (let [base-fn (if p.verbose
+                            (wrap-log-request http-mod.request)
+                            http-mod.request)
+                wrapped (when auth-cfg (auth.wrap-http-fn auth-cfg base-fn))]
+            (tset opts :http-fn (or wrapped (when p.verbose base-fn))))
           (when (or p.base-url (?. profile :base-url))
             (tset opts :base-url (or p.base-url (?. profile :base-url))))
           (when (= (type schema) :table)
