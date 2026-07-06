@@ -20,9 +20,9 @@
 (require :atlas.pretty)
 (require :atlas.cache)
 (require :atlas.auth)
+(require :atlas)
 (require :atlas.arazzo.expr)
 (require :atlas.arazzo)
-(require :atlas)
 (require :atlas.cli)
 
 (local cli (require :atlas.cli))

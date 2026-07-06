@@ -139,6 +139,7 @@
           (a:match "^%-%-cache%-ttl=(.+)")
           (let [(v) (a:match "^%-%-cache%-ttl=(.+)")]
             (tset r :cache-ttl (tonumber v)))
+
           (a:match "^%-%-complete%-ops=(.+)")
           (let [(v) (a:match "^%-%-complete%-ops=(.+)")]
             (tset r :complete-ops v))
@@ -175,7 +176,8 @@
             (tset r :profile v))
 
           (not (a:match "^%-"))
-          (if (not r.schema) (tset r :schema a)
+          (if (not r.cmd)    (tset r :cmd a)
+              (not r.schema) (tset r :schema a)
               (not r.operation) (tset r :operation a)
               (table.insert r.path-params a))))
       (set i (+ i 1)))
@@ -347,11 +349,18 @@
   (print "    echo $n")
   (print "end")
   (print "")
-  (print "# ── first positional ─────────────────────────────────────────────────────────")
-  (print "complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a '(atlas profile list 2>/dev/null | cut -f1)' -d Profile")
+  (print "# ── first positional: subcommand ─────────────────────────────────────────────")
+  (print "complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a op         -d 'Run an API operation'")
+  (print "complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a az         -d 'Run an Arazzo workflow'")
   (print "complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a profile    -d 'Manage profiles'")
   (print "complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a auth       -d 'Authenticate a profile'")
   (print "complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a completion -d 'Print shell completion script'")
+  (print "")
+  (print "# ── op <profile>: second positional ──────────────────────────────────────────")
+  (print "complete -c atlas -n '__fish_seen_subcommand_from op; and test (__atlas_num_args) -eq 1' -a '(atlas profile list 2>/dev/null | cut -f1)' -d Profile")
+  (print "")
+  (print "# ── op <profile> <operation>: third positional ───────────────────────────────")
+  (print "complete -c atlas -n '__fish_seen_subcommand_from op; and test (__atlas_num_args) -eq 2' -a '(atlas op --complete-ops=(commandline -opc)[3] 2>/dev/null)'")
   (print "")
   (print "# ── profile subcommands ──────────────────────────────────────────────────────")
   (print "complete -c atlas -n '__fish_seen_subcommand_from profile; and test (__atlas_num_args) -eq 1' -a list -d 'List profiles'")
@@ -363,9 +372,6 @@
   (print "")
   (print "# ── completion <shell> ───────────────────────────────────────────────────────")
   (print "complete -c atlas -n '__fish_seen_subcommand_from completion; and test (__atlas_num_args) -eq 1' -a 'fish bash zsh'")
-  (print "")
-  (print "# ── operation names (second positional, non-special first arg) ───────────────")
-  (print "complete -c atlas -n 'not __fish_seen_subcommand_from profile auth completion; and test (__atlas_num_args) -eq 1' -a '(atlas --complete-ops=(commandline -opc)[2] 2>/dev/null)'")
   (print "")
   (print "# ── flags ────────────────────────────────────────────────────────────────────")
   (print "complete -c atlas -l list      -d 'List all operations'")
@@ -386,20 +392,24 @@
   (print "# atlas bash completion — add to ~/.bashrc: source <(atlas completion bash)")
   (print "_atlas_complete() {")
   (print "  local cur=\"${COMP_WORDS[COMP_CWORD]}\"")
-  (print "  local first=\"${COMP_WORDS[1]}\"")
+  (print "  local cmd=\"${COMP_WORDS[1]}\"")
   (print "  local second=\"${COMP_WORDS[2]}\"")
   (print "  if [ $COMP_CWORD -eq 1 ]; then")
-  (print "    local profiles=$(atlas profile list 2>/dev/null | cut -f1)")
-  (print "    COMPREPLY=($(compgen -W \"$profiles profile auth completion\" -- \"$cur\"))")
+  (print "    COMPREPLY=($(compgen -W 'op az profile auth completion' -- \"$cur\"))")
   (print "  elif [ $COMP_CWORD -eq 2 ]; then")
-  (print "    case \"$first\" in")
+  (print "    case \"$cmd\" in")
+  (print "      op)         COMPREPLY=($(compgen -W \"$(atlas profile list 2>/dev/null | cut -f1)\" -- \"$cur\")) ;;")
   (print "      profile)    COMPREPLY=($(compgen -W 'list show' -- \"$cur\")) ;;")
   (print "      auth)       COMPREPLY=($(compgen -W \"$(atlas profile list 2>/dev/null | cut -f1)\" -- \"$cur\")) ;;")
   (print "      completion) COMPREPLY=($(compgen -W 'fish bash zsh' -- \"$cur\")) ;;")
-  (print "      *)          COMPREPLY=($(compgen -W \"$(atlas --complete-ops=$first 2>/dev/null)\" -- \"$cur\")) ;;")
   (print "    esac")
-  (print "  elif [ $COMP_CWORD -eq 3 ] && [ \"$first\" = 'profile' ] && [ \"$second\" = 'show' ]; then")
-  (print "    COMPREPLY=($(compgen -W \"$(atlas profile list 2>/dev/null | cut -f1)\" -- \"$cur\"))")
+  (print "  elif [ $COMP_CWORD -eq 3 ]; then")
+  (print "    case \"$cmd\" in")
+  (print "      op)      COMPREPLY=($(compgen -W \"$(atlas op --complete-ops=$second 2>/dev/null)\" -- \"$cur\")) ;;")
+  (print "      profile) if [ \"$second\" = 'show' ]; then")
+  (print "                 COMPREPLY=($(compgen -W \"$(atlas profile list 2>/dev/null | cut -f1)\" -- \"$cur\"))")
+  (print "               fi ;;")
+  (print "    esac")
   (print "  fi")
   (print "}")
   (print "complete -F _atlas_complete atlas"))
@@ -408,35 +418,40 @@
   (print "# atlas zsh completion — add to fpath or source directly")
   (print "#compdef atlas")
   (print "_atlas() {")
-  (print "  local state first=${words[2]}")
-  (print "  _arguments '1:schema-or-profile:->first' '2:arg:->second' '3:name:->third'")
+  (print "  local state cmd=${words[2]} second=${words[3]}")
+  (print "  _arguments '1:command:->cmd' '2:arg:->second' '3:arg:->third'")
   (print "  case $state in")
-  (print "    first)")
-  (print "      local profiles=($(atlas profile list 2>/dev/null | cut -f1))")
-  (print "      compadd $profiles profile auth completion ;;")
+  (print "    cmd)")
+  (print "      compadd op az profile auth completion ;;")
   (print "    second)")
-  (print "      case $first in")
+  (print "      case $cmd in")
+  (print "        op)         compadd $(atlas profile list 2>/dev/null | cut -f1) ;;")
   (print "        profile)    compadd list show ;;")
   (print "        auth)       compadd $(atlas profile list 2>/dev/null | cut -f1) ;;")
   (print "        completion) compadd fish bash zsh ;;")
-  (print "        *)          compadd $(atlas --complete-ops=$first 2>/dev/null) ;;")
   (print "      esac ;;")
   (print "    third)")
-  (print "      if [ \"${words[2]}\" = 'profile' ] && [ \"${words[3]}\" = 'show' ]; then")
-  (print "        compadd $(atlas profile list 2>/dev/null | cut -f1)")
-  (print "      fi ;;")
+  (print "      case $cmd in")
+  (print "        op) compadd $(atlas op --complete-ops=$second 2>/dev/null) ;;")
+  (print "        profile) if [ \"$second\" = 'show' ]; then")
+  (print "                   compadd $(atlas profile list 2>/dev/null | cut -f1)")
+  (print "                 fi ;;")
+  (print "      esac ;;")
   (print "  esac")
   (print "}")
   (print "_atlas"))
 
 (fn usage []
-  (print "Usage: atlas <schema-or-profile> [operation] [path-params...] [options]")
-  (print "       atlas profile <list|show> [name]")
-  (print "       atlas auth <profile> [--logout]")
-  (print "       atlas arazzo <name-or-file> <workflow-id> [path-params...] [options]")
-  (print "       atlas completion <fish|bash|zsh>")
+  (print "Usage: atlas <command> [args...] [options]")
   (print "")
-  (print "Options:")
+  (print "Commands:")
+  (print "  op  <profile-or-schema> [operation] [path-params...]  Run an API operation")
+  (print "  az  <name-or-file> [workflow-id] [path-params...]     Run an Arazzo workflow")
+  (print "  profile <list|show> [name]                            Manage profiles")
+  (print "  auth    <profile> [--logout]                          Authenticate a profile")
+  (print "  completion <fish|bash|zsh>                            Print shell completion")
+  (print "")
+  (print "Options (op):")
   (print "  --list                List all operations")
   (print "  --help                Show operation documentation")
   (print "  --body=JSON           Request body (inline JSON, @file, @-)")
@@ -453,10 +468,7 @@
   (print "  --reload              Re-fetch and re-cache the schema")
   (print "  --cache-ttl=N         Schema cache TTL in seconds (default: 3600)")
   (print "")
-  (print "Auth options (for 'atlas auth <profile>'):")
-  (print "  --logout              Clear cached token")
-  (print "")
-  (print "Arazzo options (for 'atlas arazzo <name-or-file> <workflow-id>'):")
+  (print "Options (az):")
   (print "  -i KEY=VAL            Workflow input (short form)")
   (print "  --input.KEY=VAL       Workflow input (long form)")
   (print "  --inputs=JSON         All inputs as a JSON object (or @file)")
@@ -530,7 +542,6 @@
           (print (render result.outputs))))
 
       :progress
-      ;; progress is printed live via on-step; print outputs at end
       (when (next (or result.outputs {}))
         (print (render result.outputs)))
 
@@ -578,9 +589,10 @@
     names))
 
 (fn run-arazzo [p]
-  (let [name-or-file p.operation
-        workflow-id  (. p.path-params 1)]
-    (assert name-or-file "Usage: atlas arazzo <name-or-file> [<workflow-id>] [-i KEY=VAL ...] [--inputs=JSON]")
+  ;; p.schema = name-or-file, p.operation = workflow-id, p.path-params = extra positionals
+  (let [name-or-file p.schema
+        workflow-id  p.operation]
+    (assert name-or-file "Usage: atlas az <name-or-file> [<workflow-id>] [-i KEY=VAL ...] [--inputs=JSON]")
     (let [config   (load-config)
           named    (?. config :arazzo name-or-file)
           file     (if named named.file name-or-file)
@@ -596,15 +608,13 @@
                            (if (= w.workflowId workflow-id) w found))
                 pp-names (if wf (workflow-path-param-names wf) [])
                 inputs   (let [base (collect [k v (pairs (or (?. named :inputs) {}))] k v)]
-                           ;; positional args -> path params
                            (each [j name (ipairs pp-names)]
-                             (let [v (. p.path-params (+ j 1))]
+                             (let [v (. p.path-params j)]
                                (when v (tset base name v))))
                            (each [k v (pairs (or p.arazzo-inputs-blob {}))]
                              (tset base k v))
                            (each [k v (pairs p.arazzo-inputs)]
                              (tset base k v))
-                           ;; body-params merge flat into inputs so $inputs.key works
                            (each [k v (pairs (or p.body-params {}))]
                              (tset base k v))
                            (when (and p.body (= (type p.body) :table))
@@ -678,100 +688,113 @@
           (cache.put url schema)
           schema))))
 
+(fn run-op [p]
+  (let [config (load-config)
+        profiles (or (?. config :profiles) {})
+        profile (when (and p.schema (. profiles p.schema))
+                  (resolve-profile p.schema profiles {}))
+        raw-schema (or (?. profile :schema) p.schema)
+        ttl (or p.cache-ttl (?. profile :cache-ttl) 3600)
+        no-color (or p.no-color (?. profile :no-color) (?. config :no-color))
+        output (or p.output (?. profile :output) (?. config :output))
+        verbose (or p.verbose (?. profile :verbose) (?. config :verbose))
+        timeout (or p.timeout (?. profile :timeout) (?. config :timeout))
+        ssl (merge-ssl profile p.ssl)
+        auth-cfg (let [a (?. profile :auth)]
+                   (when (and a a.name (not= a.name "")) a))
+        auth-headers (when auth-cfg
+                       (let [(ok h) (pcall auth.get-headers p.schema auth-cfg ssl)]
+                         (if ok h (die (.. "authentication failed: " (tostring h))))))
+        schema (if (and (= (type raw-schema) :string)
+                        (raw-schema:match "^https?://"))
+                  (load-schema-cached raw-schema ttl p.reload ssl auth-headers)
+                  raw-schema)
+        opts {:headers (collect [k v (pairs (or (?. profile :headers) {}))] k v)
+              :timeout timeout
+              :ssl ssl}]
+    (when auth-headers
+      (each [k v (pairs auth-headers)]
+        (tset opts.headers k v)))
+    (let [base-fn (if verbose
+                      (wrap-log-request http-mod.request)
+                      http-mod.request)
+          wrapped (when auth-cfg (auth.wrap-http-fn auth-cfg base-fn))]
+      (tset opts :http-fn (or wrapped (when verbose base-fn))))
+    (when (or p.base-url (?. profile :base-url))
+      (tset opts :base-url (or p.base-url (?. profile :base-url))))
+    (when (= (type schema) :table)
+      (tset opts :source-url raw-schema))
+    (let [(ok-c c) (pcall atlas.client schema opts)]
+      (when (not ok-c) (die (.. "failed to build client: " (tostring c))))
+      (if
+        p.list
+        (list-ops c)
+
+        (and p.help (not p.operation))
+        (list-ops c)
+
+        p.help
+        (let [op (. c p.operation)]
+          (if op
+              (print (or (. op :cli/help) "No documentation available."))
+              (die (.. "Unknown operation: " p.operation))))
+
+        p.operation
+        (let [op (. c p.operation)]
+          (when (not op) (die (.. "Unknown operation: " p.operation)))
+          (let [path-args (icollect [_ v (ipairs p.path-params)] (coerce v))
+                call-args (icollect [_ v (ipairs path-args)] v)
+                req-opts (let [o {}]
+                           (when (next p.query) (tset o :query p.query))
+                           (when (next p.headers) (tset o :headers p.headers))
+                           (when timeout (tset o :timeout timeout))
+                           (when (next o) o))]
+            (when op.has-body?
+              (let [body (if (and (not p.body) (next p.body-params))
+                             p.body-params
+                             p.body)]
+                (table.insert call-args body)))
+            (when req-opts (table.insert call-args req-opts))
+            (let [t0 (socket.gettime)
+                  (ok-r resp) (pcall op (table.unpack call-args))
+                  elapsed (- (socket.gettime) t0)]
+              (if ok-r
+                  (print-resp resp output no-color verbose p.select elapsed)
+                  (die (.. "request failed: " (tostring resp)))))))
+
+        (die "No operation specified. Use --list to see available operations.")))))
+
 (fn run [args]
   (let [p (parse-args args)]
-    (when (not p.schema)
+    (when (not p.cmd)
       (usage)
       (os.exit 0))
     (when p.complete-ops
       (complete-ops p.complete-ops)
       (os.exit 0))
-    (if (= p.schema :completion)
-        (match p.operation
-          :fish (completion-fish)
-          :bash (completion-bash)
-          :zsh (completion-zsh)
-          _ (die "Usage: atlas completion <fish|bash|zsh>"))
-        (= p.schema :profile)
-        (run-profile p.operation (. p.path-params 1) (load-config))
-        (= p.schema :auth)
-        (run-auth p.operation p (load-config))
-        (= p.schema :arazzo)
-        (run-arazzo p)
-        (let [config (load-config)
-              profiles (or (?. config :profiles) {})
-              profile (when (. profiles p.schema)
-                        (resolve-profile p.schema profiles {}))
-              raw-schema (or (?. profile :schema) p.schema)
-              ttl (or p.cache-ttl (?. profile :cache-ttl) 3600)
-              no-color (or p.no-color (?. profile :no-color) (?. config :no-color))
-              output (or p.output (?. profile :output) (?. config :output))
-              verbose (or p.verbose (?. profile :verbose) (?. config :verbose))
-              timeout (or p.timeout (?. profile :timeout) (?. config :timeout))
-              ssl (merge-ssl profile p.ssl)
-              auth-cfg (let [a (?. profile :auth)]
-                         (when (and a a.name (not= a.name "")) a))
-              auth-headers (when auth-cfg
-                             (let [(ok h) (pcall auth.get-headers p.schema auth-cfg ssl)]
-                               (if ok h (die (.. "authentication failed: " (tostring h))))))
-              schema (if (and (= (type raw-schema) :string)
-                              (raw-schema:match "^https?://"))
-                        (load-schema-cached raw-schema ttl p.reload ssl auth-headers)
-                        raw-schema)
-              opts {:headers (collect [k v (pairs (or (?. profile :headers) {}))] k v)
-                    :timeout timeout
-                    :ssl ssl}]
-          (when auth-headers
-            (each [k v (pairs auth-headers)]
-              (tset opts.headers k v)))
-          (let [base-fn (if p.verbose
-                            (wrap-log-request http-mod.request)
-                            http-mod.request)
-                wrapped (when auth-cfg (auth.wrap-http-fn auth-cfg base-fn))]
-            (tset opts :http-fn (or wrapped (when p.verbose base-fn))))
-          (when (or p.base-url (?. profile :base-url))
-            (tset opts :base-url (or p.base-url (?. profile :base-url))))
-          (when (= (type schema) :table)
-            (tset opts :source-url raw-schema))
-          (let [(ok-c c) (pcall atlas.client schema opts)]
-            (when (not ok-c) (die (.. "failed to build client: " (tostring c))))
-            (if
-              p.list
-              (list-ops c)
+    (match p.cmd
+      :completion
+      (match p.schema
+        :fish (completion-fish)
+        :bash (completion-bash)
+        :zsh  (completion-zsh)
+        _ (die "Usage: atlas completion <fish|bash|zsh>"))
 
-              (and p.help (not p.operation))
-              (list-ops c)
+      :profile
+      (run-profile p.schema p.operation (load-config))
 
-              p.help
-              (let [op (. c p.operation)]
-                (if op
-                    (print (or (. op :cli/help) "No documentation available."))
-                    (die (.. "Unknown operation: " p.operation))))
+      :auth
+      (run-auth p.schema p (load-config))
 
-              p.operation
-              (let [op (. c p.operation)]
-                (when (not op) (die (.. "Unknown operation: " p.operation)))
-                (let [path-args (icollect [_ v (ipairs p.path-params)] (coerce v))
-                      call-args (icollect [_ v (ipairs path-args)] v)
-                      req-opts (let [o {}]
-                                 (when (next p.query) (tset o :query p.query))
-                                 (when (next p.headers) (tset o :headers p.headers))
-                                 (when timeout (tset o :timeout timeout))
-                                 (when (next o) o))]
-                  (when op.has-body?
-                    (let [body (if (and (not p.body) (next p.body-params))
-                                   p.body-params
-                                   p.body)]
-                      (table.insert call-args body)))
-                  (when req-opts (table.insert call-args req-opts))
-                  (let [t0 (socket.gettime)
-                        (ok-r resp) (pcall op (table.unpack call-args))
-                        elapsed (- (socket.gettime) t0)]
-                    (if ok-r
-                        (print-resp resp output no-color verbose p.select elapsed)
-                        (die (.. "request failed: " (tostring resp)))))))
+      (where (or :az :arazzo))
+      (run-arazzo p)
 
-              (die "No operation specified. Use --list to see available operations.")))))))
+      :op
+      (run-op p)
+
+      _
+      (die (.. "Unknown command: " (tostring p.cmd)
+               "\nUsage: atlas <op|az|profile|auth|completion> ...")))))
 
 (fn main [args]
   (let [(ok err) (pcall run args)]

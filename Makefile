@@ -82,8 +82,8 @@ test: build $(TEST_LUA)
 $(TEST_LUA): test/%_spec.lua: test/%_spec.fnl
 	$(FENNEL) --compile $< > $@
 
-install: build
-	install -m 755 bin/atlas /usr/local/bin/atlas
+install: binary
+	install -m 755 bin/atlas-bin /usr/local/bin/atlas
 
 # ---- standalone binary ----
 

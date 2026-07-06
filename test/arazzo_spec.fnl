@@ -290,6 +290,368 @@
           (arazzo.run-workflow doc "wf" {} clients {:on-step on-step})
           (assert.are.same [:running :done] events))))))
 
+;; ---- run-workflow: $response.body (no pointer) ----
+
+(describe "run-workflow $response.body"
+  (fn []
+    (it "captures full response body as step output"
+      (fn []
+        (let [body {:id 42 :name "alice"}
+              clients {:api (make-client {:op (fn [] (ok-resp body))})}
+              doc {:arazzo "1.0.0"
+                   :info {}
+                   :workflows
+                   [{:workflowId "wf"
+                     :steps [{:stepId "s1"
+                              :operationId "op"
+                              :successCriteria [{:condition "$statusCode == 200"}]
+                              :outputs {:data "$response.body"}}]
+                     :outputs {:result "$steps.s1.outputs.data"}}]}
+              result (arazzo.run-workflow doc "wf" {} clients {})]
+          (assert.are.same body result.outputs.result))))
+
+    (it "passes full body through requestBody payload table"
+      (fn []
+        (let [received []
+              op (fn [b] (table.insert received b) (ok-resp {}))
+              clients {:api (make-client {:op op})}
+              doc {:arazzo "1.0.0"
+                   :info {}
+                   :workflows
+                   [{:workflowId "wf"
+                     :steps [{:stepId "s1"
+                              :operationId "op"
+                              :requestBody {:payload {:name "$inputs.name"
+                                                      :role "$inputs.role"}}
+                              :successCriteria [{:condition "$statusCode == 200"}]}]
+                     :outputs {}}]}]
+          (arazzo.run-workflow doc "wf" {:name "bob" :role "admin"} clients {})
+          (assert.are.same {:name "bob" :role "admin"} (. received 1)))))
+
+    (it "propagates full body between steps via $steps.id.response.body"
+      (fn []
+        (let [first-body {:token "xyz"}
+              received []
+              clients {:api (make-client
+                              {:login (fn [] (ok-resp first-body))
+                               :use   (fn [b] (table.insert received b) (ok-resp {}))})}
+              doc {:arazzo "1.0.0"
+                   :info {}
+                   :workflows
+                   [{:workflowId "wf"
+                     :steps
+                     [{:stepId "login"
+                       :operationId "login"
+                       :successCriteria [{:condition "$statusCode == 200"}]}
+                      {:stepId "use"
+                       :operationId "use"
+                       :requestBody {:payload "$steps.login.response.body"}
+                       :successCriteria [{:condition "$statusCode == 200"}]}]
+                     :outputs {}}]}]
+          (arazzo.run-workflow doc "wf" {} clients {})
+          (assert.are.same first-body (. received 1)))))))
+
+;; ---- run-workflow: multiple successCriteria (AND) ----
+
+(describe "run-workflow multiple successCriteria"
+  (fn []
+    (it "passes when all criteria match"
+      (fn []
+        (let [clients {:api (make-client {:op (fn [] (ok-resp {:state "done"}))})}
+              doc {:arazzo "1.0.0"
+                   :info {}
+                   :workflows
+                   [{:workflowId "wf"
+                     :steps [{:stepId "s1"
+                              :operationId "op"
+                              :successCriteria [{:condition "$statusCode == 200"}
+                                               {:condition "$response.body#/state == \"done\""}]}]
+                     :outputs {}}]}
+              result (arazzo.run-workflow doc "wf" {} clients {})]
+          (assert.are.same {} result.outputs))))
+
+    (it "fails when second criterion does not match"
+      (fn []
+        (let [clients {:api (make-client {:op (fn [] (ok-resp {:state "pending"}))})}
+              doc {:arazzo "1.0.0"
+                   :info {}
+                   :workflows
+                   [{:workflowId "wf"
+                     :steps [{:stepId "s1"
+                              :operationId "op"
+                              :successCriteria [{:condition "$statusCode == 200"}
+                                               {:condition "$response.body#/state == \"done\""}]
+                              :onFailure [{:type :end}]}]
+                     :outputs {}}]}
+              result (arazzo.run-workflow doc "wf" {} clients {})]
+          (assert.are.same {} result.outputs))))))
+
+;; ---- run-workflow: onSuccess criteria-gated action ----
+
+(describe "run-workflow onSuccess criteria"
+  (fn []
+    (it "only fires action whose criteria match"
+      (fn []
+        ;; two onSuccess actions; only the matching one should fire
+        (let [call-log []
+              make-op (fn [id] (fn [] (table.insert call-log id) (ok-resp {:v 1})))
+              clients {:api (make-client {:op1 (make-op :s1)
+                                          :op2 (make-op :s2)
+                                          :op3 (make-op :s3)})}
+              doc {:arazzo "1.0.0"
+                   :info {}
+                   :workflows
+                   [{:workflowId "wf"
+                     :steps
+                     [{:stepId "s1" :operationId "op1"
+                       :successCriteria [{:condition "$statusCode == 200"}]
+                       :onSuccess [{:type :goto :stepId "s2"
+                                    :criteria [{:condition "$response.body#/v == 99"}]}
+                                   {:type :goto :stepId "s3"
+                                    :criteria [{:condition "$response.body#/v == 1"}]}]}
+                      {:stepId "s2" :operationId "op2"
+                       :successCriteria [{:condition "$statusCode == 200"}]}
+                      {:stepId "s3" :operationId "op3"
+                       :successCriteria [{:condition "$statusCode == 200"}]}]
+                     :outputs {}}]}]
+          (arazzo.run-workflow doc "wf" {} clients {})
+          (assert.are.same [:s1 :s3] call-log))))))
+
+;; ---- run-workflow: onFailure goto (poll pattern) ----
+
+(describe "run-workflow onFailure goto"
+  (fn []
+    (it "retries until success criterion met"
+      (fn []
+        (let [calls (counter)
+              ;; returns pending twice then done
+              op (fn []
+                   (calls.inc)
+                   (if (< (calls.val) 3)
+                       (ok-resp {:state "pending"})
+                       (ok-resp {:state "done"})))
+              clients {:api (make-client {:op op})}
+              doc {:arazzo "1.0.0"
+                   :info {}
+                   :workflows
+                   [{:workflowId "wf"
+                     :steps [{:stepId "poll"
+                              :operationId "op"
+                              :successCriteria [{:condition "$statusCode == 200"}
+                                               {:condition "$response.body#/state == \"done\""}]
+                              :onFailure [{:type :goto :stepId "poll"}]
+                              :outputs {:state "$response.body#/state"}}]
+                     :outputs {:state "$steps.poll.outputs.state"}}]}
+              result (arazzo.run-workflow doc "wf" {} clients {})]
+          (assert.are.equal 3 (calls.val))
+          (assert.are.equal "done" result.outputs.state))))))
+
+;; ---- expr: json-pointer ----
+
+(describe "json-pointer"
+  (fn []
+    (it "resolves nested path"
+      (fn []
+        (assert.are.equal "bar"
+          (expr.json-pointer {:a {:b "bar"}} "/a/b"))))
+
+    (it "resolves array index (0-based)"
+      (fn []
+        (assert.are.equal "second"
+          (expr.json-pointer ["first" "second"] "/1"))))
+
+    (it "decodes ~1 as slash"
+      (fn []
+        (assert.are.equal 42
+          (expr.json-pointer {"a/b" 42} "/a~1b"))))
+
+    (it "decodes ~0 as tilde"
+      (fn []
+        (assert.are.equal "yes"
+          (expr.json-pointer {"a~b" "yes"} "/a~0b"))))
+
+    (it "returns nil for missing key"
+      (fn []
+        (assert.is_nil (expr.json-pointer {:a 1} "/z"))))
+
+    (it "returns nil for nil obj"
+      (fn []
+        (assert.is_nil (expr.json-pointer nil "/a"))))))
+
+;; ---- expr: resolve-expr ----
+
+(describe "resolve-expr"
+  (fn []
+    (let [ctx {:inputs {:x "hello" :n 7}
+               :steps  {:s1 {:outputs {:k "v"}
+                             :response {:status 201 :headers {:x-id "abc"} :body {:msg "hi"}}
+                             :request  {:body {:q "search"} :headers {}}}}
+               :workflows {}
+               :response {:status 200 :headers {:content-type "application/json"}
+                          :body {:result "ok"}}
+               :request  {:body {:payload "data"} :headers {}}}]
+
+      (it "resolves $inputs.x"
+        (fn [] (assert.are.equal "hello" (expr.resolve-expr ctx "$inputs.x"))))
+
+      (it "resolves $statusCode"
+        (fn [] (assert.are.equal 200 (expr.resolve-expr ctx "$statusCode"))))
+
+      (it "resolves $response.body (no pointer) as full table"
+        (fn [] (assert.are.same {:result "ok"} (expr.resolve-expr ctx "$response.body"))))
+
+      (it "resolves $response.body#/result"
+        (fn [] (assert.are.equal "ok" (expr.resolve-expr ctx "$response.body#/result"))))
+
+      (it "resolves $response.header.content-type"
+        (fn [] (assert.are.equal "application/json"
+                 (expr.resolve-expr ctx "$response.header.content-type"))))
+
+      (it "resolves $steps.s1.outputs.k"
+        (fn [] (assert.are.equal "v" (expr.resolve-expr ctx "$steps.s1.outputs.k"))))
+
+      (it "resolves $steps.s1.response.body (no pointer)"
+        (fn [] (assert.are.same {:msg "hi"} (expr.resolve-expr ctx "$steps.s1.response.body"))))
+
+      (it "resolves $steps.s1.response.body#/msg"
+        (fn [] (assert.are.equal "hi" (expr.resolve-expr ctx "$steps.s1.response.body#/msg"))))
+
+      (it "resolves $steps.s1.response.header.x-id"
+        (fn [] (assert.are.equal "abc" (expr.resolve-expr ctx "$steps.s1.response.header.x-id"))))
+
+      (it "resolves $request.body (no pointer) as full table"
+        (fn [] (assert.are.same {:payload "data"} (expr.resolve-expr ctx "$request.body"))))
+
+      (it "resolves $steps.s1.request.body#/q"
+        (fn [] (assert.are.equal "search" (expr.resolve-expr ctx "$steps.s1.request.body#/q"))))
+
+      (it "errors on non-expression string"
+        (fn [] (assert.has.error
+                 (fn [] (expr.resolve-expr ctx "notanexpr"))))))))
+
+;; ---- expr: eval-template ----
+
+(describe "eval-template"
+  (fn []
+    (let [ctx {:inputs {:env "prod" :v 3}
+               :steps {} :workflows {}
+               :response nil :request nil}]
+      (it "substitutes single expression"
+        (fn []
+          (assert.are.equal "env=prod"
+            (expr.eval-template ctx "env={$inputs.env}"))))
+
+      (it "substitutes multiple expressions"
+        (fn []
+          (assert.are.equal "prod-3"
+            (expr.eval-template ctx "{$inputs.env}-{$inputs.v}"))))
+
+      (it "leaves non-expression text unchanged"
+        (fn []
+          (assert.are.equal "hello world"
+            (expr.eval-template ctx "hello world"))))
+
+      (it "replaces unknown expr with empty string"
+        (fn []
+          (assert.are.equal "val="
+            (expr.eval-template ctx "val={$inputs.missing}")))))))
+
+;; ---- expr: eval-criterion simple ----
+
+(describe "eval-criterion simple"
+  (fn []
+    (let [ctx {:inputs {} :steps {} :workflows {}
+               :response {:status 404 :headers {} :body {:count 5}}
+               :request nil}]
+      (it "== passes"
+        (fn [] (assert.is_true  (expr.eval-criterion ctx {:condition "$statusCode == 404"}))))
+
+      (it "== fails"
+        (fn [] (assert.is_false (expr.eval-criterion ctx {:condition "$statusCode == 200"}))))
+
+      (it "!= passes"
+        (fn [] (assert.is_true  (expr.eval-criterion ctx {:condition "$statusCode != 200"}))))
+
+      (it "!= fails"
+        (fn [] (assert.is_false (expr.eval-criterion ctx {:condition "$statusCode != 404"}))))
+
+      (it "> passes"
+        (fn [] (assert.is_true  (expr.eval-criterion ctx {:condition "$response.body#/count > 4"}))))
+
+      (it "> fails"
+        (fn [] (assert.is_false (expr.eval-criterion ctx {:condition "$response.body#/count > 5"}))))
+
+      (it ">= passes on equal"
+        (fn [] (assert.is_true  (expr.eval-criterion ctx {:condition "$response.body#/count >= 5"}))))
+
+      (it "< passes"
+        (fn [] (assert.is_true  (expr.eval-criterion ctx {:condition "$response.body#/count < 10"}))))
+
+      (it "<= passes on equal"
+        (fn [] (assert.is_true  (expr.eval-criterion ctx {:condition "$response.body#/count <= 5"}))))
+
+      (it "|| short-circuits on first true"
+        (fn [] (assert.is_true  (expr.eval-criterion ctx {:condition "$statusCode == 200 || $statusCode == 404"}))))
+
+      (it "&& requires both true"
+        (fn [] (assert.is_false (expr.eval-criterion ctx {:condition "$statusCode == 404 && $statusCode == 200"}))))
+
+      (it "string literal comparison"
+        (fn []
+          (let [ctx2 {:inputs {} :steps {} :workflows {}
+                      :response {:status 200 :headers {} :body {:state "active"}}
+                      :request nil}]
+            (assert.is_true (expr.eval-criterion ctx2 {:condition "$response.body#/state == \"active\""}))))))))
+
+;; ---- expr: $find ----
+
+(describe "expr $find"
+  (fn []
+    (let [ctx {:inputs {:name "bob"}
+               :steps {} :workflows {}
+               :response {:status 200 :headers {}
+                          :body {:users [{:id "1" :name "alice"}
+                                         {:id "2" :name "bob"}
+                                         {:id "3" :name "carol"}]}}
+               :request nil}]
+
+      (it "returns matching item when return-field omitted"
+        (fn []
+          (assert.are.same {:id "2" :name "bob"}
+            (expr.resolve-expr ctx "$find($response.body#/users, name, $inputs.name)"))))
+
+      (it "returns specific field when return-field given"
+        (fn []
+          (assert.are.equal "2"
+            (expr.resolve-expr ctx "$find($response.body#/users, name, $inputs.name, id)"))))
+
+      (it "returns nil when no match"
+        (fn []
+          (let [ctx2 {:inputs {:name "nobody"}
+                      :steps {} :workflows {}
+                      :response {:status 200 :headers {}
+                                 :body {:users [{:id "1" :name "alice"}]}}
+                      :request nil}]
+            (assert.is_nil
+              (expr.resolve-expr ctx2 "$find($response.body#/users, name, $inputs.name, id)")))))
+
+      (it "works as step output expression"
+        (fn []
+          (let [clients {:api (make-client
+                                {:list-users (fn []
+                                               (ok-resp {:users [{:id "u1" :name "alice"}
+                                                                  {:id "u2" :name "bob"}]}))})}
+                doc {:arazzo "1.0.0" :info {}
+                     :workflows
+                     [{:workflowId "find-user"
+                       :steps [{:stepId "list"
+                                :operationId "list-users"
+                                :successCriteria [{:condition "$statusCode == 200"}]
+                                :outputs {:id "$find($response.body#/users, name, $inputs.name, id)"}}]
+                       :outputs {:id "$steps.list.outputs.id"}}]}
+                result (arazzo.run-workflow doc "find-user" {:name "bob"} clients {})]
+            (assert.are.equal "u2" result.outputs.id)))))))
+
 ;; ---- expr: $workflows output ----
 
 (describe "expr $workflows"

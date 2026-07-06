@@ -27,10 +27,29 @@
   "Resolve a single $... runtime expression to a value."
   (let [e (expr:match "^%$(.+)")]
     (when (not e) (error (.. "not a runtime expression: " expr)))
-    (let [parts []]
-      (each [p (e:gmatch "[^%.#]+")]
-        (table.insert parts p))
-      (match (. parts 1)
+    (let [find-body (e:match "^find%((.+)%)$")]
+      (if find-body
+          ;; $find(array-expr, match-field, match-value[, return-field])
+          (let [args     (icollect [a (find-body:gmatch "[^,]+")] (a:match "^%s*(.-)%s*$"))
+                arr-expr (. args 1)
+                mfield   (. args 2)
+                mval-raw (. args 3)
+                rfield   (. args 4)
+                arr      (resolve-expr ctx arr-expr)
+                mval     (if (and mval-raw (mval-raw:match "^%$"))
+                             (resolve-expr ctx mval-raw)
+                             mval-raw)]
+            (when (= (type arr) :table)
+              (var found nil)
+              (each [_ item (ipairs arr) &until found]
+                (when (= (tostring (or (. item mfield) ""))
+                         (tostring (or mval "")))
+                  (set found item)))
+              (if (and found rfield) (. found rfield) found)))
+          (let [parts []]
+            (each [p (e:gmatch "[^%.#]+")]
+              (table.insert parts p))
+            (match (. parts 1)
         :inputs
         (. ctx.inputs (. parts 2))
 
@@ -46,14 +65,18 @@
         :response
         (match (. parts 2)
           :body   (let [ptr (expr:match "#(.+)$")]
-                    (json-pointer (?. ctx :response :body) (or ptr "")))
+                    (if ptr
+                        (json-pointer (?. ctx :response :body) ptr)
+                        (?. ctx :response :body)))
           :header (let [h (. parts 3)]
                     (?. ctx :response :headers h)))
 
         :request
         (match (. parts 2)
           :body   (let [ptr (expr:match "#(.+)$")]
-                    (json-pointer (?. ctx :request :body) (or ptr "")))
+                    (if ptr
+                        (json-pointer (?. ctx :request :body) ptr)
+                        (?. ctx :request :body)))
           :header (let [h (. parts 3)]
                     (?. ctx :request :headers h)))
 
@@ -65,12 +88,16 @@
             :response
             (match (. parts 4)
               :body   (let [ptr (expr:match "#(.+)$")]
-                        (json-pointer (?. ctx :steps step-id :response :body) (or ptr "")))
+                        (if ptr
+                            (json-pointer (?. ctx :steps step-id :response :body) ptr)
+                            (?. ctx :steps step-id :response :body)))
               :header (. (or (?. ctx :steps step-id :response :headers) {}) (. parts 5)))
             :request
             (match (. parts 4)
               :body   (let [ptr (expr:match "#(.+)$")]
-                        (json-pointer (?. ctx :steps step-id :request :body) (or ptr "")))
+                        (if ptr
+                            (json-pointer (?. ctx :steps step-id :request :body) ptr)
+                            (?. ctx :steps step-id :request :body)))
               :header (. (or (?. ctx :steps step-id :request :headers) {}) (. parts 5)))
             _ nil))
 
@@ -86,7 +113,7 @@
           ;; return a sentinel table so the caller can look up the client
           {:__source src-name :__operationId op-id})
 
-        _ nil))))
+        _ nil))))))
 
 ;; ---- template substitution ----
 
