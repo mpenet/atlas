@@ -28,7 +28,7 @@ install -m 755 atlas-bin /usr/local/bin/atlas
 
 ```sh
 make deps     # install luarocks dependencies
-make install  # compile Fennel → Lua and install bin/atlas to /usr/local/bin
+make install  # build standalone binary and install to /usr/local/bin
 ```
 
 ### Lua library
@@ -41,12 +41,12 @@ luarocks install atlas-oai
 
 ```sh
 # CLI
-atlas https://petstore3.swagger.io/api/v3/openapi.json --list
-atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
-atlas myapi find-pets-by-status --query.status=available --select=.pets[].{id,name}
+atlas op https://petstore3.swagger.io/api/v3/openapi.json --list
+atlas op https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
+atlas op myapi find-pets-by-status --query.status=available --select=.pets[].{id,name}
 
 # Arazzo — multi-step workflow
-atlas arazzo myapi create-and-wait \
+atlas az myapi create-and-wait \
   --body.name=myresource \
   --body.size=10 \
   -v
@@ -68,7 +68,7 @@ atlas arazzo myapi create-and-wait \
 make deps     # lunajson, luasocket, luasec, fennel, busted
 make build    # compile Fennel → Lua
 make test     # run test suite
-make install  # install bin/atlas to /usr/local/bin
+make install  # build standalone binary and install to /usr/local/bin
 make binary   # build standalone binary → bin/atlas-bin
 ```
 

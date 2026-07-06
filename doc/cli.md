@@ -38,14 +38,15 @@ Or build and install from source:
 
 ```sh
 make deps     # install luarocks dependencies
-make install  # compiles Fennel → Lua and installs bin/atlas to /usr/local/bin
+make install  # builds standalone binary and installs to /usr/local/bin
 ```
 
 ## Synopsis
 
 ```
-atlas <schema-or-profile> [operation] [path-params...] [options]
-atlas arazzo <name-or-file> <workflow-id> [-i KEY=VAL | --input.KEY=VAL | --inputs=JSON] [options]
+atlas op  <schema-or-profile> [operation] [path-params...] [options]
+atlas az  <name-or-file> [workflow-id] [path-params...] [options]
+atlas arazzo <name-or-file> [workflow-id] [path-params...] [options]   # alias for az
 atlas profile <list|show> [name]
 atlas auth <profile> [--logout]
 atlas completion <fish|bash|zsh>
@@ -55,19 +56,19 @@ atlas completion <fish|bash|zsh>
 
 ```sh
 # list all operations
-atlas https://petstore3.swagger.io/api/v3/openapi.json --list
+atlas op https://petstore3.swagger.io/api/v3/openapi.json --list
 
 # show documentation for an operation
-atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id --help
+atlas op https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id --help
 
 # call an operation
-atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
+atlas op https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
 
 # query parameters
-atlas https://petstore3.swagger.io/api/v3/openapi.json find-pets-by-status --query.status=available
+atlas op https://petstore3.swagger.io/api/v3/openapi.json find-pets-by-status --query.status=available
 
 # verbose — print status line and response headers
-atlas https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 -v
+atlas op https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 -v
 ```
 
 ## Options reference
@@ -96,19 +97,19 @@ Three ways to supply a body:
 
 ```sh
 # inline JSON
-atlas myapi add-pet -d '{"name":"Rex","status":"available"}'
+atlas op myapi add-pet -d '{"name":"Rex","status":"available"}'
 
 # from a file
-atlas myapi add-pet --body=@pet.json
+atlas op myapi add-pet --body=@pet.json
 
 # from stdin
-cat pet.json | atlas myapi add-pet -d @-
+cat pet.json | atlas op myapi add-pet -d @-
 
 # individual fields (numbers coerced automatically)
-atlas myapi add-pet --body.name=Rex --body.status=available --body.age=3
+atlas op myapi add-pet --body.name=Rex --body.status=available --body.age=3
 
 # nested fields — dot-separated path, intermediate objects created and merged
-atlas myapi create-vm --body.instance-type.id=abc123 --body.disk-size=10
+atlas op myapi create-vm --body.instance-type.id=abc123 --body.disk-size=10
 ```
 
 `--body.KEY=VAL` flags are deep-merged: `--body.a.b=1 --body.a.c=2` produces `{"a":{"b":1,"c":2}}`. `--body=…` and `--body.KEY=VAL` are mutually exclusive; `--body=…` wins if both are given.
@@ -128,22 +129,22 @@ Examples:
 
 ```sh
 # scalar field
-atlas myapi get-inventory --select=.available
+atlas op myapi get-inventory --select=.available
 
 # nested field
-atlas myapi get-pet-by-id 42 --select=.category.name
+atlas op myapi get-pet-by-id 42 --select=.category.name
 
 # first element of an array
-atlas myapi find-pets-by-status --select=.pets[0].name
+atlas op myapi find-pets-by-status --select=.pets[0].name
 
 # all names in an array
-atlas myapi find-pets-by-status --select=.pets[].name
+atlas op myapi find-pets-by-status --select=.pets[].name
 
 # pick fields from each object in an array
-atlas myapi find-pets-by-status --select=.pets[].{id,name,status}
+atlas op myapi find-pets-by-status --select=.pets[].{id,name,status}
 
 # chained
-atlas myapi find-pets-by-status --select=.pets[].category.name
+atlas op myapi find-pets-by-status --select=.pets[].category.name
 ```
 
 When `--select` matches multiple values (via `[]`), all matches are printed one per line. If the path does not match, nothing is printed and exit status is 0.
@@ -201,9 +202,9 @@ Save named configurations in `~/.config/atlas/config.json`:
 Use a profile name instead of a schema URL:
 
 ```sh
-atlas petstore --list
-atlas petstore get-pet-by-id 42
-atlas myapi add-pet -d '{"name":"Rex"}'
+atlas op petstore --list
+atlas op petstore get-pet-by-id 42
+atlas op myapi add-pet -d '{"name":"Rex"}'
 ```
 
 ### Global config fields
@@ -475,10 +476,10 @@ Schemas fetched from URLs are cached in `~/.cache/atlas/schemas/` with a 1-hour 
 
 ```sh
 # force re-fetch
-atlas myapi --reload --list
+atlas op myapi --reload --list
 
 # set TTL to 5 minutes for this invocation
-atlas myapi --cache-ttl=300 get-pet-by-id 42
+atlas op myapi --cache-ttl=300 get-pet-by-id 42
 ```
 
 Set `cache-ttl` in the profile to persist a non-default TTL.
@@ -497,9 +498,10 @@ atlas completion zsh > "${fpath[1]}/_atlas"
 ```
 
 Completion provides:
-- Profile names as the first argument (fetched from config)
-- Operation names as the second argument (fetched live from the schema via `--complete-ops`)
-- Subcommand names for `profile` and `auth`
+- Subcommand names (`op`, `az`, `profile`, `auth`, `completion`) as the first argument
+- Profile names as the second argument after `op` or `auth`
+- Operation names as the third argument after `op <profile>` (fetched live via `--complete-ops`)
+- Subcommand names for `profile`
 - Shell names for `completion`
 
 ## Arazzo workflow execution
@@ -509,8 +511,10 @@ Atlas executes [Arazzo 1.0](https://spec.openapis.org/arazzo/latest.html) workfl
 ### Usage
 
 ```sh
-atlas arazzo <name-or-file> [workflow-id] [path-params...] [options]
+atlas az <name-or-file> [workflow-id] [path-params...] [options]
 ```
+
+`atlas arazzo` is an alias for `atlas az`.
 
 - `<name-or-file>` — a name from `~/.config/atlas/config.json` (see below), a local file path, or an `http(s)://` URL.
 - If `workflow-id` is omitted, all available workflows are listed.
@@ -544,10 +548,10 @@ This composes directly with existing profiles: the named profile's auth (OAuth, 
 
 ```sh
 # use the profile configured in the arazzo entry
-atlas arazzo myapi create-resource --body.name=foo
+atlas az myapi create-resource --body.name=foo
 
 # override the profile for this invocation
-atlas arazzo myapi create-resource --body.name=foo --profile=myapi-staging
+atlas az myapi create-resource --body.name=foo --profile=myapi-staging
 ```
 
 ### Path parameters
@@ -556,16 +560,16 @@ Path parameters declared in a workflow are passed as positional arguments after 
 
 ```sh
 # workflow with one path param (e.g. id)
-atlas arazzo myapi get-resource <uuid>
+atlas az myapi get-resource <uuid>
 
 # multiple path params
-atlas arazzo myapi update-resource <resource-id> <version-id>
+atlas az myapi update-resource <resource-id> <version-id>
 ```
 
 Named `-i` flags still work as an override:
 
 ```sh
-atlas arazzo myapi get-resource <uuid> -i id=override
+atlas az myapi get-resource <uuid> -i id=override
 ```
 
 ### Request body
@@ -574,13 +578,13 @@ For operations with a request body, pass it with the same flags as regular CLI c
 
 ```sh
 # inline JSON
-atlas arazzo myapi create-resource -d '{"name":"foo","size":10}'
+atlas az myapi create-resource -d '{"name":"foo","size":10}'
 
 # individual fields — supports deep dot-notation, fields are merged
-atlas arazzo myapi create-resource --body.name=foo --body.size=10
+atlas az myapi create-resource --body.name=foo --body.size=10
 
 # nested fields (e.g. reference types with an id)
-atlas arazzo myapi create-vm \
+atlas az myapi create-vm \
   --body.instance-type.id=abc123 \
   --body.template.id=def456 \
   --body.disk-size=50
@@ -592,15 +596,15 @@ Additional named inputs (not path params or body) use:
 
 ```sh
 # short flag
-atlas arazzo myapi my-workflow -i timeout=30 -i region=eu
+atlas az myapi my-workflow -i timeout=30 -i region=eu
 
 # long flag
-atlas arazzo myapi my-workflow --input.timeout=30
+atlas az myapi my-workflow --input.timeout=30
 
 # JSON blob (all inputs at once)
-atlas arazzo myapi my-workflow --inputs='{"timeout":30,"region":"eu"}'
+atlas az myapi my-workflow --inputs='{"timeout":30,"region":"eu"}'
 # or from a file
-atlas arazzo myapi my-workflow --inputs=@inputs.json
+atlas az myapi my-workflow --inputs=@inputs.json
 ```
 
 Merge priority (highest last): config `inputs` → `--inputs` blob → individual `-i`/`--input.*` flags.
@@ -615,7 +619,7 @@ Merge priority (highest last): config `inputs` → `--inputs` blob → individua
 | `full` | Like `steps` but also shows operation reference and request body per step |
 
 ```sh
-atlas arazzo myapi create-resource --body.name=foo --arazzo-output=progress
+atlas az myapi create-resource --body.name=foo --arazzo-output=progress
 ```
 
 `-v` / `--verbose` is equivalent to `progress` mode and additionally logs every HTTP request (method, URL, headers, body) to stderr. Step outputs (declared in the Arazzo document) are printed after each step using the `--output` format.
@@ -656,16 +660,16 @@ A step with `workflowId` instead of `operationId`/`operationPath` runs another w
 
 ```sh
 # list all workflows in a named file
-atlas arazzo myapi
+atlas az myapi
 
 # run a workflow, show progress
-atlas arazzo myapi create-resource \
+atlas az myapi create-resource \
   --body.name=foo \
   --body.size=10 \
   -v
 
 # async operation — workflow polls until complete, returns result
-atlas arazzo myapi create-vm \
+atlas az myapi create-vm \
   --body.instance-type.id=abc123 \
   --body.template.id=def456 \
   --body.disk-size=50 \
@@ -673,7 +677,7 @@ atlas arazzo myapi create-vm \
   -v
 
 # load from URL, override profile
-atlas arazzo https://example.com/workflows.json deploy-service \
+atlas az https://example.com/workflows.json deploy-service \
   --body.image=myapp:latest \
   --profile=prod
 ```
