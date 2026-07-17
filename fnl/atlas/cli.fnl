@@ -592,7 +592,16 @@
   ;; p.schema = name-or-file, p.operation = workflow-id, p.path-params = extra positionals
   (let [name-or-file p.schema
         workflow-id  p.operation]
-    (assert name-or-file "Usage: atlas az <name-or-file> [<workflow-id>] [-i KEY=VAL ...] [--inputs=JSON]")
+    (when (not name-or-file)
+      (let [config (load-config)
+            named  (or (?. config :arazzo) {})]
+        (io.stderr:write "Usage: atlas az <name-or-file> <workflow-id> [-i KEY=VAL ...]\n\n")
+        (if (next named)
+            (do (io.stderr:write "Configured Arazzo contexts:\n")
+                (each [n v (pairs named)]
+                  (io.stderr:write (.. "  " n "\t" (or v.file "") "\n"))))
+            (io.stderr:write "No Arazzo contexts configured in ~/.config/atlas/config.json\n")))
+      (os.exit 1))
     (let [config   (load-config)
           named    (?. config :arazzo name-or-file)
           file     (if named named.file name-or-file)
@@ -689,6 +698,16 @@
           schema))))
 
 (fn run-op [p]
+  (when (not p.schema)
+    (let [config   (load-config)
+          profiles (or (?. config :profiles) {})]
+      (io.stderr:write "Usage: atlas op <profile-or-schema> [operation] [args...]\n\n")
+      (if (next profiles)
+          (do (io.stderr:write "Configured profiles:\n")
+              (each [n v (pairs profiles)]
+                (io.stderr:write (.. "  " n "\t" (or v.schema "(no schema)") "\n"))))
+          (io.stderr:write "No profiles configured in ~/.config/atlas/config.json\n")))
+    (os.exit 1))
   (let [config (load-config)
         profiles (or (?. config :profiles) {})
         profile (when (and p.schema (. profiles p.schema))
@@ -762,7 +781,7 @@
                   (print-resp resp output no-color verbose p.select elapsed)
                   (die (.. "request failed: " (tostring resp)))))))
 
-        (die "No operation specified. Use --list to see available operations.")))))
+        (list-ops c)))))
 
 (fn run [args]
   (let [p (parse-args args)]
