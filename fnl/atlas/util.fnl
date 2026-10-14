@@ -25,13 +25,17 @@ are unescaped, numeric segments index arrays 0-based."
     (s:lower)))
 
 (fn operation-name [method path op-spec]
-  "Kebab-case name of an operation: its operationId, or method and path words
-when it has none (get /pets/{petId} → get-pets-pet-id)."
-  (if op-spec.operationId (camel->kebab op-spec.operationId)
-      (let [words [(method:lower)]]
-        (each [word (path:gmatch "[%w_]+")]
-          (table.insert words (camel->kebab word)))
-        (table.concat words "-"))))
+  "Name of an operation: its operationId, or its method and path when it has
+none (get /pets/{petId} → get-pets-pet-id), in lowercase words joined by
+dashes (getPetById → get-pet-by-id, projects/list_cards → projects-list-cards)."
+  (let [words (if op-spec.operationId
+                  (camel->kebab (tostring op-spec.operationId))
+                  (table.concat (icollect [word (path:gmatch "%w+")]
+                                  (camel->kebab word))
+                                "-"))
+        name (if op-spec.operationId words (.. (method:lower) "-" words))]
+    (pick-values 1 (: (: (name:lower) :gsub "[^%w]+" "-") :gsub "^%-*(.-)%-*$"
+                      "%1"))))
 
 (fn extract-path-params [template]
   (icollect [p (template:gmatch "{([^}]+)}")] p))

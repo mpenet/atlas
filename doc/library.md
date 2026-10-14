@@ -187,7 +187,7 @@ All `$ref`s are resolved when the client is built, so parameters, request bodies
 
 - Local refs (`#/components/schemas/Pet`), with JSON-pointer escapes (`~1`, `~0`) and percent-escapes decoded.
 - Refs into other documents (`common.yaml#/Pet`, `https://…/shared.json#/Error`), resolved relative to the document that contains them. Each document is loaded once; this needs the schema's location, i.e. passing a path or URL to `atlas.client` (or `:source-url` with a parsed table).
-- A reference back into its own chain (a recursive schema) becomes an empty schema, so resolution terminates.
+- Every ref to the same place resolves to the same table, so a recursive schema is a cyclic table: for `Node` with a `next` property referring to `Node`, `node.properties.next` is `node`. Resolution is linear in the size of the spec. Code that walks `op.spec` or `op.body-schema` must not assume a tree (and must not serialise them as is).
 - A ref that points nowhere raises an error naming the ref, rather than silently dropping what it described.
 
 ## `atlas.servers`

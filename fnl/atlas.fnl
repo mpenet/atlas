@@ -125,6 +125,29 @@ then the body when the operation has one, then an opts table."
                      :patch true
                      :trace true})
 
+(fn schema-operations [schema deref]
+  "The schema's operations as [{:path :path-item :method :op-spec}], in path
+then method order, so that naming them is deterministic."
+  (let [paths (doto (icollect [path (pairs (or schema.paths {}))]
+                      path)
+                (table.sort))
+        entries []]
+    (each [_ path (ipairs paths)]
+      (let [item (. schema.paths path)
+            path-item (if (. item "$ref") (deref item) item)
+            methods (doto (icollect [method op-spec (pairs path-item)]
+                            (when (and (. http-methods method)
+                                       (= (type op-spec) :table))
+                              method))
+                      (table.sort))]
+        (each [_ method (ipairs methods)]
+          (table.insert entries
+                        {: path
+                         : path-item
+                         : method
+                         :op-spec (. path-item method)}))))
+    entries))
+
 (fn sorted [items]
   (doto (icollect [_ x (ipairs items)] x)
     table.sort))
@@ -198,17 +221,29 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
                      :http-fn (or (?. ?opts :http-fn) http.request)
                      :ssl (?. ?opts :ssl)
                      :timeout (?. ?opts :timeout)}
-        client {}]
-    (each [path item (pairs (or schema.paths {}))]
-      (let [path-item (if (. item "$ref") (deref item) item)]
-        (each [method op-spec (pairs path-item)]
-          (when (and (. http-methods method) (= (type op-spec) :table))
-            (let [name (util.operation-name method path op-spec)]
-              ;; a derived name never shadows an operationId
-              (when (or op-spec.operationId (= nil (. client name)))
-                (tset client name
-                      (make-operation client-opts deref name path path-item
-                                      method op-spec))))))))
+        client {}
+        entries (schema-operations schema deref)
+        add (fn [name {: path : path-item : method : op-spec}]
+              (tset client name
+                    (make-operation client-opts deref name path path-item
+                                    method op-spec)))
+        unnamed (icollect [_ entry (ipairs entries)]
+                  (let [name (when entry.op-spec.operationId
+                               (util.operation-name entry.method entry.path
+                                                    entry.op-spec))]
+                    (if (and name (= nil (. client name)))
+                        (add name entry)
+                        entry)))]
+    ;; operations without an operationId, or whose name was taken, are named
+    ;; after their method and path
+    (each [_ entry (ipairs unnamed)]
+      (let [base (util.operation-name entry.method entry.path {})]
+        (var name base)
+        (var n 1)
+        (while (not= nil (. client name))
+          (set n (+ n 1))
+          (set name (.. base "-" n)))
+        (add name entry)))
     client))
 
 {:version "1.0.0-beta1"

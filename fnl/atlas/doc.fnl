@@ -33,6 +33,10 @@
       (table.insert parts (.. "— " p.description)))
     (if (> (length parts) 0) (.. " " (table.concat parts " ")) "")))
 
+(fn sorted-keys [t]
+  (doto (icollect [k (pairs t)] (tostring k))
+    (table.sort)))
+
 (fn body-schema [request-body]
   (let [content request-body.content
         media-type (negotiate.pick-media-type content)
@@ -78,15 +82,18 @@ params heading and an optional body hint, which differ between CLI and library."
                             (if rb.description (.. " — " rb.description) "")))
         (when style.body-hint (add style.body-hint))
         (when bschema
-          (each [name prop (pairs bschema.properties)]
+          (each [_ name (ipairs (sorted-keys bschema.properties))]
+            (local prop (. bschema.properties name))
             (add (string.format "  %-16s %s%s%s" name (or prop.type :any)
                                 (if (. bschema.required name) " [required]" "")
                                 (if prop.description
                                     (.. " — " prop.description)
                                     "")))))))
     (add "\nResponses:")
-    (each [code resp (pairs (or op-spec.responses {}))]
-      (add (string.format "  %-6s %s" (tostring code) (or resp.description ""))))
+    (let [responses (or op-spec.responses {})]
+      (each [_ code (ipairs (sorted-keys responses))]
+        (add (string.format "  %-6s %s" code
+                            (or (. responses code :description) "")))))
     (table.concat lines "\n")))
 
 (fn invoke-usage [name op-spec path-params query-params]

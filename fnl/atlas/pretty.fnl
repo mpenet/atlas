@@ -116,8 +116,8 @@
   "k as a mapping key that reads back as the same string; canonical integers
 such as response codes stay bare."
   (if (and (k:match "^%d+$") (= k (tostring (math.tointeger (tonumber k))))) k
-      (yaml-needs-quotes? k) (.. "\"" (yaml-escape k) "\"")
-      k))
+      ;; a plain << key is a merge
+      (or (= k "<<") (yaml-needs-quotes? k)) (.. "\"" (yaml-escape k) "\"") k))
 
 (fn yaml [v ?indent ?use-color]
   (let [ind (or ?indent 0)

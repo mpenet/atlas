@@ -1147,4 +1147,10 @@
                     (assert.is_nil (cli.select-path data ".meta.{count"))
                     (assert.is_nil (cli.select-path data ".meta.count[]"))
                     (assert.is_nil (cli.select-path data ".meta.count[0]"))
-                    (assert.is_nil (cli.select-path data ".meta.count.x")))))))
+                    (assert.is_nil (cli.select-path data ".meta.count.x"))
+                    (assert.is_nil (cli.select-path data ".meta.count.{a}"))
+                    (assert.is_nil (cli.select-path false "{a}[0]"))))
+              (it "picks fields only from the objects of a mixed array"
+                  (fn []
+                    (assert.are.same [{:a 1}]
+                                     (cli.select-path [{:a 1 :b 2} 3 "x"] "{a}")))))))

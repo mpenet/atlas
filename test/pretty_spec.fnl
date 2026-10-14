@@ -92,4 +92,11 @@
                            "- x" 5
                            "plain" 6
                            "007" 7}]
-                    (assert.are.same v (ayaml.parse (yaml v 0 false))))))))
+                    (assert.are.same v (ayaml.parse (yaml v 0 false))))))
+            (it "quotes a key that YAML would read as a merge"
+                (fn []
+                  (let [v {"<<" {:a 1} :b 2}]
+                    (assert.are.same v
+                                     ((. (require :atlas.yaml) :parse) (yaml v
+                                                                             0
+                                                                             false))))))))

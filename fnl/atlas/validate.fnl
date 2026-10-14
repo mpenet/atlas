@@ -84,9 +84,18 @@
                     (string.format "%s: greater than %s" path
                                    (tostring schema.maximum))))))
 
+;; ?active: the schemas already being applied to v through allOf/anyOf/oneOf,
+;; so a schema composed (directly or not) of itself is applied once
 (set check-value
-     (fn [schema v path errors]
-       (let [types (allowed-types schema)]
+     (fn [schema v path errors ?active]
+       (let [types (allowed-types schema)
+             active (doto (collect [k (pairs (or ?active {}))]
+                            k
+                            true)
+                      (tset schema true))
+             compose (fn [sub sub-errors]
+                       (when (not (. active sub))
+                         (check-value sub v path sub-errors active)))]
          (if (and (> (length types) 0)
                   (not (accumulate [ok false _ t (ipairs types) &until ok]
                          (type-matches? t v))))
@@ -105,13 +114,13 @@
                                                         ", ")))
              (do
                (each [_ sub (ipairs (or schema.allOf []))]
-                 (check-value sub v path errors))
+                 (compose sub errors))
                (let [alternatives (or schema.anyOf schema.oneOf)]
                  (when (and alternatives
                             (not (accumulate [ok false _ sub (ipairs alternatives)
                                               &until ok]
                                    (let [sub-errors []]
-                                     (check-value sub v path sub-errors)
+                                     (compose sub sub-errors)
                                      (= 0 (length sub-errors))))))
                    (table.insert errors
                                  (.. path

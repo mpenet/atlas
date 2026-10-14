@@ -118,3 +118,33 @@
                                             :maximum "18446744073709551615"
                                             :minLength "x"}
                                            5))))))
+
+(describe "recursive schemas"
+          (fn []
+            (local refs (require :atlas.refs))
+
+            (fn resolved [schemas name]
+              ((refs.resolver {:components {: schemas}}) {:$ref (.. "#/components/schemas/"
+                                                                    name)}))
+
+            (it "validates nested data all the way down"
+                (fn []
+                  (let [node (resolved {:Node {:type "object"
+                                               :properties {:name {:type "string"}
+                                                            :next {:$ref "#/components/schemas/Node"}}}}
+                                       :Node)]
+                    (assert.are.same ["value.next.next.name: expected string, got integer"]
+                                     (validate.check node
+                                                     {:name "a"
+                                                      :next {:name "b"
+                                                             :next {:name 3}}})))))
+            (it "terminates on schemas composed of themselves"
+                (fn []
+                  (let [a (resolved {:A {:allOf [{:$ref "#/components/schemas/B"}]
+                                         :anyOf [{:$ref "#/components/schemas/A"}]}
+                                     :B {:allOf [{:$ref "#/components/schemas/A"}]
+                                         :type "object"}}
+                                    :A)]
+                    (assert.are.same [] (validate.check a {}))
+                    (assert.are.same ["value: expected object, got string"]
+                                     (validate.check a "x")))))))

@@ -60,7 +60,8 @@
                (collect [_ f (ipairs fields)] f (. obj f)))]
     (when (= (type value) :table)
       (if (= (type (. value 1)) :table)
-          (icollect [_ obj (ipairs value)] (pick obj))
+          (icollect [_ obj (ipairs value)]
+            (when (= (type obj) :table) (pick obj)))
           (pick value)))))
 
 (fn select-path [data path]
@@ -76,7 +77,7 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
           (select-path (. data (+ 1 (tonumber index))) rest)))
       (path:match "^{")
       (let [(fields rest) (path:match "^{([^}]+)}(.*)$")]
-        (when fields
+        (when (and fields (= (type data) :table))
           (let [picked (pick-fields data
                                     (icollect [f (fields:gmatch "[^,]+")]
                                       (f:match "^%s*(.-)%s*$")))]

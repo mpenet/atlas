@@ -8,3 +8,4 @@ luarocks.lock
 /tmp
 !test/fixtures/*.lua
 *.so
+!test/corpus/*.lua

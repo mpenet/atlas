@@ -40,6 +40,21 @@
                     (assert.are.equal "/" c.post.path)
                     ;; operationIds win over derived names
                     (assert.are.equal "/other" c.get-list-pets.path))))
+            (it "gives operationIds that normalise alike distinct names, the same way every time"
+                (fn []
+                  (for [_ 1 5]
+                    (let [c (atlas.client (schema {"/a" {:get {:operationId "getPet"
+                                                               :responses {}}}
+                                                   "/b" {:get {:operationId "get_pet"
+                                                               :responses {}}}
+                                                   "/c" {:get {:operationId "get-pet"
+                                                               :responses {}}}})
+                                          {:http-fn (mock-http)})]
+                      ;; the first by path keeps the name, the others fall
+                      ;; back to their method and path
+                      (assert.are.equal "/a" c.get-pet.path)
+                      (assert.are.equal "/b" c.get-b.path)
+                      (assert.are.equal "/c" c.get-c.path)))))
             (it "calls correct method and URL"
                 (fn []
                   (let [(http calls) (mock-http)

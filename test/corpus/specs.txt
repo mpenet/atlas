@@ -1,0 +1,15 @@
+# name URL — public OpenAPI 3 descriptions exercised by `make corpus`
+petstore3.json https://petstore3.swagger.io/api/v3/openapi.json
+spotify.yaml https://raw.githubusercontent.com/sonallux/spotify-web-api/main/fixed-spotify-open-api.yml
+k8s-apps.json https://raw.githubusercontent.com/kubernetes/kubernetes/master/api/openapi-spec/v3/apis__apps__v1_openapi.json
+exoscale.json https://openapi-v2.exoscale.com/source.json
+box.json https://raw.githubusercontent.com/box/box-openapi/main/openapi.json
+twilio.json https://raw.githubusercontent.com/twilio/twilio-oai/main/spec/json/twilio_api_v2010.json
+jira.json https://developer.atlassian.com/cloud/jira/platform/swagger-v3.v3.json
+asana.yaml https://raw.githubusercontent.com/Asana/openapi/master/defs/asana_oas.yaml
+digitalocean.yaml https://api-engineering.nyc3.digitaloceanspaces.com/spec-ci/DigitalOcean-public.v2.yaml
+openai.yaml https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml
+gitlab.yaml https://gitlab.com/gitlab-org/gitlab/-/raw/master/doc/api/openapi/openapi_v3.yaml
+stripe.json https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json
+github.json https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json
+cloudflare.json https://raw.githubusercontent.com/cloudflare/api-schemas/main/openapi.json

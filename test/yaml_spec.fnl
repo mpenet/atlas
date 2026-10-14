@@ -166,3 +166,32 @@
             (it "returns nil for an empty document"
                 (fn []
                   (assert.is_nil (yaml.parse ""))))))
+
+(describe "yaml.parse memory safety"
+          (fn []
+            (local yaml (require :atlas.yaml))
+            (it "keeps the text alive while libyaml reads it"
+                (fn []
+                  ;; every thousand instructions, also while parsing: a full
+                  ;; collection, then fresh strings that would overwrite text
+                  ;; freed while libyaml still reads it
+                  (local churn [])
+                  (debug.sethook #(do
+                                    (collectgarbage :collect)
+                                    (for [j 1 8]
+                                      (tset churn j (string.rep "\1" (+ 300 j)))))
+                                 "" 1000)
+                  (let [(ok err) (pcall #(for [i 1 15]
+                                           ;; nothing but the parser refers
+                                           ;; to the text
+                                           (let [doc (yaml.parse (string.rep (.. "key"
+                                                                                 i
+                                                                                 ": value-"
+                                                                                 i
+                                                                                 "\n")
+                                                                             20))]
+                                             (assert (= (.. "value-" i)
+                                                        (. doc (.. "key" i)))
+                                                     (.. "parse " i)))))]
+                    (debug.sethook)
+                    (assert.is_true ok err))))))

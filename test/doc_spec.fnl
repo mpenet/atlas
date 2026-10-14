@@ -116,6 +116,40 @@
                                   :enum [true false]
                                   :default false}}})
 
+(describe "doc.build ordering"
+          (fn []
+            (it "lists body properties and responses in a stable order"
+                (fn []
+                  (let [op {:requestBody {:content {"application/json" {:schema {:properties (collect [_ k (ipairs ["zeta"
+                                                                                                                    "alpha"
+                                                                                                                    "mid"
+                                                                                                                    "beta"
+                                                                                                                    "omega"])]
+                                                                                               k
+                                                                                               {:type "string"})}}}}
+                            :responses {"500" {:description "e"}
+                                        "200" {:description "ok"}
+                                        "404" {:description "nf"}
+                                        "default" {:description "d"}}}
+                        text (build "/x" "post" op)
+                        order (fn [words]
+                                (icollect [_ w (ipairs words)]
+                                  (text:find (.. "\n  " w " ") 1 true)))
+                        increasing (fn [positions]
+                                     (accumulate [ok true i p (ipairs positions)]
+                                       (and ok p
+                                            (or (= i 1)
+                                                (> p (. positions (- i 1)))))))]
+                    (assert.is_true (increasing (order ["alpha"
+                                                        "beta"
+                                                        "mid"
+                                                        "omega"
+                                                        "zeta"])))
+                    (assert.is_true (increasing (order ["200"
+                                                        "404"
+                                                        "500"
+                                                        "default"]))))))))
+
 (describe "doc.build-workflow"
           (fn []
             (let [text (build-workflow workflow inputs ["id"])]

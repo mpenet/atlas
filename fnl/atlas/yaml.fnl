@@ -42,7 +42,8 @@ the core schema; quoted scalars are strings. Nulls are nil."
           (if (not= nil n) n s)))))
 
 ;; The loader works on a parser table:
-;; {:next-event libyaml-iterator :event current-event :anchors {name {:value v}}}
+;; {:next-event libyaml-iterator :event current-event :anchors {name {:value v}}
+;;  :text source}
 
 (fn advance [parser]
   (let [(ok e) (pcall parser.next-event)]
@@ -116,9 +117,12 @@ stays \"010\"."
            :SEQUENCE_START (load-sequence parser)
            other (error (.. "YAML parse error: unexpected " other) 0)))))
 
-(fn load-events [next-event]
-  "Build the first document from a libyaml event iterator."
-  (let [parser {: next-event :anchors {}}]
+(fn load-events [text]
+  "Build the first document of text."
+  ;; libyaml reads text through a bare pointer and lyaml does not keep it
+  ;; alive: the parser table holds it until loading ends, or the collector
+  ;; could free it mid-parse
+  (let [parser {:next-event (libyaml.parser text) :anchors {} : text}]
     (advance parser)
     (when (= (. (advance parser) :type) :DOCUMENT_START)
       (advance parser)
@@ -127,7 +131,7 @@ stays \"010\"."
 (fn parse [content]
   "Parse YAML text into Lua values with JSON semantics: maps get string keys,
 nulls become nil, plain scalars follow the YAML 1.2 core schema."
-  (load-events (libyaml.parser content)))
+  (load-events content))
 
 (fn decode [content]
   "Try JSON first (faster, stricter); fall back to YAML on parse failure."

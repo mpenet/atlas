@@ -2,6 +2,27 @@
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
 (local util (require :atlas.util))
 
+(describe "operation-name"
+          (fn []
+            (it "turns any operationId into a lowercase dash-separated name"
+                (fn []
+                  (each [id expected (pairs {"getPetById" "get-pet-by-id"
+                                             "GetAccounts" "get-accounts"
+                                             "projects/update-item-for-org" "projects-update-item-for-org"
+                                             "get_folders_id#get_shared_link" "get-folders-id-get-shared-link"
+                                             "post_metadata_taxonomies_id_id_levels:trim" "post-metadata-taxonomies-id-id-levels-trim"
+                                             "bookmarks-(-deprecated)-get" "bookmarks-deprecated-get"
+                                             "__private.op__" "private-op"
+                                             "list-pets" "list-pets"})]
+                    (assert.are.equal expected
+                                      (util.operation-name "get" "/x"
+                                                           {:operationId id})))))
+            (it "names operations without an id after method and path"
+                (fn []
+                  (assert.are.equal "get-pets-pet-id-toys"
+                                    (util.operation-name "GET"
+                                                         "/pets/{petId}/toys" {}))))))
+
 (describe "camel->kebab"
           (fn []
             (it "simple camelCase"

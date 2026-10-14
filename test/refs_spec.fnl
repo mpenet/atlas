@@ -34,11 +34,69 @@
                   (assert.are.same {:a 1}
                                    (deref {:list [{:a 0} {:a 1}]}
                                           {:$ref "#/list/1"}))))
-            (it "turns cycles into empty schemas instead of looping"
+            (it "keeps recursive schemas as cycles"
                 (fn []
                   (let [root {:components {:schemas {:Node {:properties {:next {:$ref "#/components/schemas/Node"}}}}}}
                         node (deref root {:$ref "#/components/schemas/Node"})]
-                    (assert.are.same {} node.properties.next))))
+                    (assert.are.equal node node.properties.next))))
+            (it "keeps mutually recursive schemas as cycles"
+                (fn []
+                  (let [root {:components {:schemas {:A {:properties {:b {:$ref "#/components/schemas/B"}}}
+                                                     :B {:properties {:a {:$ref "#/components/schemas/A"}}}}}}
+                        a (deref root {:$ref "#/components/schemas/A"})]
+                    (assert.are.equal a a.properties.b.properties.a))))
+            (it "resolves a ref to a ref to the same schema"
+                (fn []
+                  (let [root {:components {:schemas {:Alias {:$ref "#/components/schemas/Pet"}
+                                                     :Pet {:properties {:self {:$ref "#/components/schemas/Alias"}}}}}}
+                        v (deref root
+                                 {:alias {:$ref "#/components/schemas/Alias"}
+                                  :pet {:$ref "#/components/schemas/Pet"}})]
+                    (assert.are.equal v.pet v.alias)
+                    (assert.are.equal v.pet v.pet.properties.self))))
+            (it "rejects refs that only point at each other"
+                (fn []
+                  (let [root {:components {:schemas {:A {:$ref "#/components/schemas/B"}
+                                                     :B {:$ref "#/components/schemas/A"}}}}
+                        (ok err) (pcall deref root
+                                        {:$ref "#/components/schemas/A"})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "circular $ref" 1
+                                         true)))))
+            (it "expands each reference once and shares the result"
+                (fn []
+                  (let [root {:components {:schemas {:Meta {:properties {:name {:type "string"}}}}}}
+                        meta {:$ref "#/components/schemas/Meta"}
+                        v (deref root {:a meta :b meta})]
+                    (assert.are.same {:properties {:name {:type "string"}}} v.a)
+                    (assert.are.equal v.a v.b))))
+            (it "resolves schemas that reach a shared schema along many paths"
+                (fn []
+                  ;; S1 refers to S2 twice, S2 to S3 twice...: copying every
+                  ;; path would take 2^40 steps
+                  (let [schemas {:S41 {:type "string"}}
+                        _ (for [i 1 40]
+                            (let [next {:$ref (.. "#/components/schemas/S"
+                                                  (+ i 1))}]
+                              (tset schemas (.. "S" i)
+                                    {:properties {:l next :r next}})))
+                        v (deref {:components {: schemas}}
+                                 {:$ref "#/components/schemas/S1"})]
+                    (var node v)
+                    (for [_ 1 40]
+                      (set node node.properties.r))
+                    (assert.are.same {:type "string"} node))))
+            (it "shares recursive schemas between their uses"
+                (fn []
+                  (let [root {:components {:schemas {:Node {:properties {:next {:$ref "#/components/schemas/Node"}
+                                                                         :meta {:$ref "#/components/schemas/Meta"}}}
+                                                     :Meta {:type "object"}}}}
+                        v (deref root
+                                 {:x {:$ref "#/components/schemas/Node"}
+                                  :y {:$ref "#/components/schemas/Node"}})]
+                    (assert.are.equal v.x v.y)
+                    (assert.are.equal v.x v.x.properties.next)
+                    (assert.are.same {:type "object"} v.y.properties.meta))))
             (it "raises for refs that resolve to nothing"
                 (fn []
                   (let [(ok err) (pcall deref {:components {}}

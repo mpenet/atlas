@@ -32,7 +32,10 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - **Breaking (library):** operations take a request table, `op.invoke {:path :query :headers :body :timeout}`; positional calls remain a shorthand.
 - **Breaking (library):** `atlas.load-schema` and the `:load-schema` client option take `{:ssl :headers}` instead of positional arguments.
 - **Breaking (library):** the operation field `:has-body?` is now `:has-body`; `:n-path` is gone (use `(length op.path-params)`).
+- **Breaking (library):** every `$ref` to the same place resolves to the same table, so recursive schemas are cyclic tables (`node.properties.next` is `node`) instead of being cut to `{}`. Code that walks `op.spec` or `op.body-schema` must not assume a tree, and should not serialise them as is. This makes resolution linear for any spec (it was exponential on heavily recursive ones such as Stripe's) and lets validation check recursive data at every depth.
 - **Breaking:** Arazzo runs fail when a source description cannot be loaded, and a plain `operationId` defined by several sources is an error; qualify it as `$sourceDescriptions.NAME.ID`.
+- Operation names are lowercase words joined by dashes whatever the operationId's style: `projects/list-cards`, `get_folders_id#get_shared_link` and `bookmarks-(-deprecated)` become `projects-list-cards`, `get-folders-id-get-shared-link` and `bookmarks-deprecated`. When two operationIds yield the same name, the first by path keeps it and the others are named after their method and path, the same way on every run.
+- Building a client is linear in the size of the spec: Stripe's went from not finishing to 0.07 s, Kubernetes' from 1 s to 0.01 s.
 - The `ssl` options are `cafile`, `capath`, `certificate`, `key` and `verify`; other luasec options are no longer used.
 - The binaries link OpenSSL, libyaml, zlib and libcurl statically; the Linux binary no longer needs libssl or libyaml installed.
 - YAML is read with YAML 1.2 core schema semantics; mapping keys keep their source text.
@@ -43,6 +46,11 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 
 - Base URLs ending in `/` no longer produce `//` in request paths.
 - A schema URL answering with an HTML page is reported as such instead of being read as a file path.
+- YAML documents could be misread or rejected at random ("control characters are not allowed") when the garbage collector freed the text while libyaml was still reading it.
+- An operationId defined twice (Cloudflare has one) no longer hides one of the two operations.
+- `--output yaml` quotes a key named `<<` instead of writing a merge key.
+- `--select` no longer crashes when picking fields (`{a,b}`) from a scalar or from an array mixing objects and scalars.
+- Help lists body properties and responses in a stable order.
 - Arazzo sub-workflow steps honour success criteria, actions and outputs; `dependsOn` runs first; cycles are detected.
 - Many more; see the commit history.
 

@@ -83,7 +83,7 @@ else
 endif
 CURL_MODULE = $(LUA_DIR)/atlas/curl.so
 
-.PHONY: build binary check-binary check-binary-tls check-globals check-manifests clean deps fmt fmt-check install native-libs test
+.PHONY: build binary check-binary check-binary-tls corpus check-globals check-manifests clean deps fmt fmt-check install native-libs test
 .DELETE_ON_ERROR:
 
 deps:
@@ -209,6 +209,19 @@ ifeq ($(UNAME_S),Darwin)
 else
 	@! ldd bin/atlas-bin | grep -vE 'linux-vdso|ld-linux|/lib(c|m|dl|pthread|rt)\.so' || (echo "non-system libraries linked above" && false)
 endif
+
+# Over the network: real-world specs (test/corpus/specs.txt) must load and
+# every operation must build, render help and pass the request checks.
+CORPUS_DIR = build/corpus
+corpus: build
+	@mkdir -p $(CORPUS_DIR)
+	@grep -v '^#' test/corpus/specs.txt | while read -r name url; do \
+	  [ -s $(CORPUS_DIR)/$$name ] || curl -fsSL --max-time 300 -o $(CORPUS_DIR)/$$name "$$url" || { echo "cannot download $$name"; exit 1; }; \
+	done
+	cd $(CORPUS_DIR) && \
+	LUA_PATH="$(CURDIR)/$(LUA_DIR)/?.lua;$(CURDIR)/$(LUA_DIR)/?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" \
+	LUA_CPATH="$(CURDIR)/$(LUA_DIR)/?.so;$(shell luarocks path --lr-cpath 2>/dev/null);;" \
+	lua $(CURDIR)/test/corpus/check.lua $$(grep -v '^#' $(CURDIR)/test/corpus/specs.txt | cut -d' ' -f1)
 
 # Over the network: the binary must fetch a schema over verified HTTPS and
 # refuse a server whose certificate does not verify.
