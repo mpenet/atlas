@@ -19,7 +19,8 @@
       s))
 
 (fn decode-structured [raw]
-  (let [(ok parsed) (pcall yaml.decode raw)]
+  ;; null members are kept: the body is sent as given
+  (let [(ok parsed) (pcall yaml.decode raw true)]
     (assert (and ok (not= nil parsed))
             (.. "invalid body (expected JSON or YAML): " (tostring parsed)))
     parsed))
@@ -128,7 +129,7 @@ query names are warnings. Header names match case-insensitively."
           (not (op.content-type:match "json")))
       []
       (let [(ok value) (if (= (type body) :string)
-                           (pcall json.decode body validate.null)
+                           (pcall json.decode body true)
                            (values true body))]
         (if ok (validate.check op.body-schema value :body) []))))
 

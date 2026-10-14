@@ -361,7 +361,9 @@ Response bodies are decoded with `atlas.json`, which keeps arrays apart from obj
 (json.array? (. resp.body :tags))
 ```
 
-`json.decode` and `json.encode` are available for your own JSON handling.
+JSON `null` is `json.null`, a value of its own: in arrays it keeps its place (`[1,null,3]` has three elements), and in response bodies a `null` member is kept (`{"a": null}` gives `{:a json.null}`), so a body prints and re-encodes as it was received. Test for it with `(= x json.null)`; it is truthy, like any table. `json.decode` leaves null members out unless its second argument is true; arrays always keep theirs.
+
+`json.decode` and `json.encode` are available for your own JSON handling; `json.encode` sorts object keys, writes integers exactly and decimals in their shortest exact form.
 
 ## Error handling
 

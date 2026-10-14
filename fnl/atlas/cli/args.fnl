@@ -20,6 +20,8 @@
        ;; :arg          placeholder for the value in usage (default N or VALUE)
        ;; :shown        how usage displays it, when the default form doesn't fit
        ;; :scope        :op, :az, :auth or :any
+       ;; :also         other commands that accept it, though usage lists it
+       ;;               under :scope
        ;; :family       a --PREFIX.NAME=VALUE family, listed for usage/completion only
        [{:names ["--list"] :key :list :scope :op :help "List all operations"}
         {:names ["--help"]
@@ -132,10 +134,12 @@
         {:names ["--dry-run"]
          :key :dry-run
          :scope :op
+         :also [:az :profile]
          :help "Print the request instead of sending it"}
         {:names ["--curl"]
          :key :curl
          :scope :op
+         :also [:az]
          :help "Print an equivalent curl command instead of sending"}
         {:names ["--cache-ttl"]
          :key :cache-ttl
@@ -232,6 +236,32 @@ returns (kind key value); kind is a value of field-prefixes."
     :inputs (decode-structured (read-body raw))
     _ raw))
 
+(local command-scopes {:op :op
+                       :az :az
+                       :arazzo :az
+                       :auth :auth
+                       :profile :profile})
+
+;; the scope of each --PREFIX.NAME=VALUE family
+(local field-scopes {:query :op
+                     :header :op
+                     :input :az
+                     :body :any
+                     :server :any
+                     :ssl :any})
+
+(fn check-scopes [cmd used]
+  "Raise for an option that doesn't apply to command cmd; used is a list of
+[name scope also]."
+  (let [scope (. command-scopes (or cmd ""))]
+    (when scope
+      (each [_ [name opt-scope also] (ipairs used)]
+        (when (not (or (= opt-scope :any) (= opt-scope scope)
+                       (accumulate [ok false _ s (ipairs (or also [])) &until ok]
+                         (= s scope))))
+          (error (.. name " doesn't apply to " cmd " (it is for " opt-scope ")")
+                 0))))))
+
 (fn parse-args [args]
   (let [r {:path-params []
            :query {}
@@ -245,6 +275,7 @@ returns (kind key value); kind is a value of field-prefixes."
                          (not r.schema) (tset r :schema a)
                          (not r.operation) (tset r :operation a)
                          (table.insert r.path-params a)))
+        used []
         input-pair (fn [kv]
                      (let [(k v) (kv:match "^(.-)=(.*)$")]
                        (assert k (.. "invalid -i argument (expected KEY=VAL): "
@@ -254,16 +285,23 @@ returns (kind key value); kind is a value of field-prefixes."
     (var options-done false)
     (while (<= i (length args))
       (let [a (. args i)]
-        (if options-done (positional a)
-            (= a "--") (set options-done true)
-            (not (a:match "^%-")) (positional a)
-            (field-arg a) (add-field r (field-arg a)) ;; -iKEY=VAL, glued
-            (a:match "^%-i.+=") (input-pair (a:sub 3))
+        (if options-done (positional a) (= a "--") (set options-done true)
+            (not (a:match "^%-")) (positional a) (field-arg a)
+            (let [(kind k v) (field-arg a)]
+              (table.insert used
+                            [(a:match "^(%-%-?[%w-]+%.?)")
+                             (. field-scopes kind)])
+              (add-field r kind k v)) ;; -iKEY=VAL, glued
+            (a:match "^%-i.+=")
+            (do
+              (table.insert used ["-i" :az])
+              (input-pair (a:sub 3)))
             (let [(name inline) (if (a:find "=" 1 true)
                                     (a:match "^([^=]+)=(.*)$")
                                     a)
                   opt (or (. option-by-name name)
                           (error (.. "unknown option: " a) 0))]
+              (table.insert used [name opt.scope opt.also])
               (if (not opt.value)
                   (if inline
                       (error (.. name " takes no value") 0)
@@ -277,6 +315,7 @@ returns (kind key value); kind is a value of field-prefixes."
                         (input-pair raw)
                         (tset r opt.key (option-value name opt raw))))))))
       (set i (+ i 1)))
+    (check-scopes r.cmd used)
     r))
 
 {: field-prefixes : field-arg : parse-args : options : option-by-name}

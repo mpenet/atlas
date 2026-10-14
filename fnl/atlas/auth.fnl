@@ -78,17 +78,22 @@
                    :ssl (or ssl {})})))
 
 (fn json-body [resp]
-  "Response body as a table, decoding it if the transport left it a string."
-  (if (= (type resp.body) :table)
-      resp.body
-      (let [(ok decoded) (pcall json.decode (or resp.body ""))]
-        (when (and ok (= (type decoded) :table))
-          decoded))))
+  "Response body as a table, null fields left out (a null token or expiry
+means none): decoded from the raw text when there is one."
+  (let [text (if (= (type resp.raw) :string) resp.raw
+                 (= (type resp.body) :string) resp.body)]
+    (if text
+        (let [(ok decoded) (pcall json.decode text)]
+          (when (and ok (= (type decoded) :table))
+            decoded))
+        (when (= (type resp.body) :table)
+          resp.body))))
 
 (fn store-token [resp profile-name ?previous]
   (assert (util.success? resp.status)
-          (let [detail (when (= (type resp.body) :table)
-                         (or resp.body.error_description resp.body.error ""))]
+          (let [body (json-body resp)
+                detail (when body
+                         (tostring (or body.error_description body.error "")))]
             (.. "token request failed: HTTP " resp.status
                 (if (and detail (> (length detail) 0)) (.. " — " detail) ""))))
   (let [body (assert (json-body resp)

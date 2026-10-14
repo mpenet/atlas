@@ -80,11 +80,11 @@
         (print (pretty-mod.pretty p 0 (colors-wanted?)))
         (die (.. "Profile not found: " (tostring name))))))
 
-(fn read-json-file [path]
+(fn read-json-file [path ?keep-null]
   (let [f (or (io.open path :r) (die (.. "cannot open " path)))
         text (f:read :*a)]
     (f:close)
-    (let [(ok value) (pcall json.decode text)]
+    (let [(ok value) (pcall json.decode text ?keep-null)]
       (if ok value (die (.. "not valid JSON: " path))))))
 
 (fn write-config [path config]
@@ -112,7 +112,12 @@ profiles are kept. --dry-run prints the converted profiles instead."
                                                 true)))
                  (die "no Restish config found; pass its path: atlas profile import-restish FILE"))
         (profiles warnings) (restish.convert (read-json-file path))
-        config (collect [k v (pairs env.config)] k v)
+        ;; rewrite the file as it is, nulls included, not the runtime view
+        config (match (io.open env.config-path :r)
+                 f (do
+                     (f:close)
+                     (read-json-file env.config-path true))
+                 _ (collect [k v (pairs env.config)] k v))
         existing (or config.profiles {})
         names (sorted-names profiles)]
     (io.stderr:write (.. "reading " path "\n"))
@@ -321,9 +326,7 @@ invalid body unless --no-validate."
                         p.operation (length op.path-params)
                         (if (= 1 (length op.path-params)) "" "s")
                         (table.concat op.path-params ", ")
-                        (length p.path-params) (table.concat p.path-params " "))))
-  (when (next p.input-fields)
-    (die "workflow inputs (-i, --i.) only apply to az")))
+                        (length p.path-params) (table.concat p.path-params " ")))))
 
 (fn send-op [op p opts profile config]
   (check-arguments op p)

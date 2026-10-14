@@ -71,7 +71,8 @@
     (if (= k "") "k" k)))
 
 (fn gen-value [depth]
-  (match (math.random 1 (if (> depth 2) 4 6))
+  (match (math.random (if (> depth 0) 0 1) (if (> depth 2) 4 6))
+    0 json.null
     1 (= 1 (math.random 0 1))
     2 (math.random -1000000 1000000)
     3 (/ (math.random -4000 4000) 4)
@@ -115,7 +116,8 @@
                              (assert (same-json? v
                                                  (json.decode (pretty.pretty v
                                                                              0
-                                                                             false)))
+                                                                             false)
+                                                              true))
                                      "differs after printing and parsing")))))
             (it "YAML output parses to the same value"
                 (fn []
@@ -123,14 +125,16 @@
                            (fn [v]
                              (assert (same-json? v
                                                  (yaml.parse (pretty.yaml v 0
-                                                                          false)))
+                                                                          false)
+                                                             true))
                                      "differs after printing and parsing")))))
             (it "JSON encoding decodes to the same value"
                 (fn []
                   (for-all #(gen-value 0)
                            (fn [v]
                              (assert (same-json? v
-                                                 (json.decode (json.encode v)))
+                                                 (json.decode (json.encode v)
+                                                              true))
                                      "differs after encoding and decoding")))))
             (it "URL encoding decodes to the same string"
                 (fn []

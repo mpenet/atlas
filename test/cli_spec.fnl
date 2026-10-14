@@ -20,7 +20,8 @@
                     (assert.are.same ["007" "1e3"] p.path-params))))
             (it "accepts empty values"
                 (fn []
-                  (let [p (cli.parse-args ["op"
+                  ;; a command without option scopes, to parse every family
+                  (let [p (cli.parse-args ["any"
                                            "api"
                                            "x"
                                            "--query.q="
@@ -650,14 +651,14 @@
           (fn []
             (it "accepts --q. --h. --b. --i. like their long forms"
                 (fn []
-                  (let [short (cli.parse-args ["op"
+                  (let [short (cli.parse-args ["any"
                                                "a"
                                                "x"
                                                "--q.status=ok"
                                                "--h.x-trace=t"
                                                "--b.pet.name=Rex"
                                                "--i.zone=z"])
-                        long (cli.parse-args ["op"
+                        long (cli.parse-args ["any"
                                               "a"
                                               "x"
                                               "--query.status=ok"

@@ -105,3 +105,45 @@
                                                 {:content-type "application/json"}
                                                 "{\"tags\":[]}")]
                     (assert.is_true (json.array? r.body.tags)))))))
+
+(describe "JSON null"
+          (fn []
+            (local expr (require :atlas.arazzo.expr))
+            (it "keeps its place in arrays"
+                (fn []
+                  (let [v (json.decode "[1,null,3]")]
+                    (assert.are.equal 3 (length v))
+                    (assert.are.equal json.null (. v 2))
+                    (assert.are.equal "[1,null,3]" (json.encode v))
+                    (assert.are.equal "[\n  1,\n  null,\n  3\n]"
+                                      (pretty.pretty v 0 false)))))
+            (it "drops object members by default, keeps them on request"
+                (fn []
+                  (assert.are.same {:b 1} (json.decode "{\"a\":null,\"b\":1}"))
+                  (let [v (json.decode "{\"a\":null,\"b\":1}" true)]
+                    (assert.are.equal json.null v.a)
+                    (assert.are.equal "{\"a\":null,\"b\":1}" (json.encode v))
+                    (assert.are.equal "{\n  \"a\": null,\n  \"b\": 1\n}"
+                                      (pretty.pretty v 0 false)))))
+            (it "stays in place in YAML sequences, and in mappings on request"
+                (fn []
+                  (let [v (yaml.parse "s: [null, a]\nm: null\n")]
+                    (assert.are.equal json.null (. v.s 1))
+                    (assert.are.equal 2 (length v.s))
+                    (assert.is_nil v.m))
+                  (assert.are.equal json.null
+                                    (. (yaml.parse "m: null\n" true) :m))))
+            (it "survives in response bodies"
+                (fn []
+                  (let [r (http.decode-response 200
+                                                {:content-type "application/json"}
+                                                "{\"a\":null}")]
+                    (assert.are.equal json.null r.body.a))))
+            (it "is the null of validation and of conditions"
+                (fn []
+                  (assert.are.equal json.null validate.null)
+                  (assert.are.same []
+                                   (validate.check {:enum [json.null "a"]} "a"))
+                  (assert.is_true (expr.eval-criterion {:response {:body (json.decode "{\"a\":null}"
+                                                                                      true)}}
+                                                       {:condition "$response.body#/a == null"}))))))

@@ -57,7 +57,7 @@
         uc (not= use-color false)
         pad (string.rep "  " ind)
         pad+ (string.rep "  " (+ ind 1))]
-    (match (type v)
+    (match (if (= v json.null) :nil (type v))
       :table (if (= (next v) nil)
                  (c :punct (if (json.array? v) "[]" "{}") uc)
                  (array? v)
@@ -133,7 +133,7 @@ such as response codes stay bare."
   (let [ind (or ?indent 0)
         uc (not= ?use-color false)
         pad (string.rep "  " ind)]
-    (match (type v)
+    (match (if (= v json.null) :nil (type v))
       :table (if (= (next v) nil)
                  (c :punct (if (json.array? v) "[]" "{}") uc)
                  (array? v)

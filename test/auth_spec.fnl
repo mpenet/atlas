@@ -150,6 +150,27 @@
                       (assert.is_truthy (body:find (.. "client_secret="
                                                        (util.url-encode (os.getenv :HOME)))
                                                    1 true))))))
+            (it "ignores null fields of a token response"
+                (fn []
+                  (let [http-json (require :atlas.json)
+                        body "{\"access_token\":\"tok\",\"refresh_token\":null,\"expires_in\":null}"
+                        (http) (seq-mock {:status 200
+                                          :headers {}
+                                          :body (http-json.decode body true)
+                                          :raw body})
+                        auth (reload-auth http)
+                        profile (tmp-profile)]
+                    (auth.authenticate profile
+                                       {:name "oauth-client-credentials"
+                                        :params {:token_url "https://a/token"
+                                                 :client_id "c"
+                                                 :client_secret "s"}}
+                                       {})
+                    (let [saved (auth.load-token profile)]
+                      (clean-token profile)
+                      (assert.are.equal "tok" saved.access_token)
+                      (assert.is_nil saved.refresh_token)
+                      (assert.is_nil saved.expires_at)))))
             (it "reuses a stored token while it is valid"
                 (fn []
                   (let [(http calls) (seq-mock)

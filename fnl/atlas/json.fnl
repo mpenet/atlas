@@ -5,13 +5,17 @@
 ;; marks a table as a JSON array, so that it encodes as one even when empty
 (local array-mt {})
 
+;; JSON null where Lua's nil can't stand for it: in arrays, and in objects
+;; when the data is shown or sent as is
+(local null (setmetatable {} {:__tostring #"null"}))
+
 (fn array [t]
   "t marked as a JSON array, so that it encodes as one even when empty."
   (setmetatable t array-mt))
 
 (fn array? [v]
   "Whether v is a JSON array: marked as one, or a table with a first element."
-  (and (= (type v) :table)
+  (and (= (type v) :table) (not= v null)
        (or (= (getmetatable v) array-mt) (not= nil (rawget v 1)))))
 
 (fn mark-arrays [v]
@@ -24,10 +28,21 @@
       (mark-arrays x)))
   v)
 
-(fn decode [text ?null]
-  "Value of JSON text; JSON null decodes to ?null (default nil, which drops
-null object members)."
-  (mark-arrays (lunajson.decode text nil ?null true)))
+(fn drop-null-members [v]
+  "v without the object members whose value is null, at any depth."
+  (when (and (= (type v) :table) (not= v null))
+    (let [array (array? v)]
+      (each [k x (pairs v)]
+        (if (and (= x null) (not array))
+            (tset v k nil)
+            (drop-null-members x)))))
+  v)
+
+(fn decode [text ?keep-null]
+  "Value of JSON text. null in an array is json.null, so elements keep their
+place; a null object member is json.null when ?keep-null, else left out."
+  (let [v (mark-arrays (lunajson.decode text nil null true))]
+    (if ?keep-null v (drop-null-members v))))
 
 (local escapes {"\"" "\\\""
                 "\\" "\\\\"
@@ -57,7 +72,8 @@ null object members)."
         (if (s:find "[%.eEn]") s (.. s ".0")))))
 
 (fn encode-value [v out active]
-  (match (type v)
+  (match (if (= v null) :null (type v))
+    :null (table.insert out "null")
     :nil (table.insert out "null")
     :boolean (table.insert out (tostring v))
     :number (table.insert out (encode-number v))
@@ -96,4 +112,4 @@ shortest exact form, and empty tables as {} unless marked as arrays."
     (encode-value v out {})
     (table.concat out)))
 
-{: decode : encode : array : array?}
+{: decode : encode : array : array? : null}

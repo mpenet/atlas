@@ -6,9 +6,8 @@
   (and (= (type v) :number) (= v (math.floor v)) (not= v math.huge)
        (not= v (- math.huge))))
 
-(local null
-       ;; stands for an explicit JSON null, which decoding would otherwise drop
-       (setmetatable {} {:__tostring #"null"}))
+;; an explicit JSON null, as decoding with null kept gives it
+(local null json.null)
 
 (fn json-type [v]
   "JSON type name of a decoded value; an empty table is an array only when

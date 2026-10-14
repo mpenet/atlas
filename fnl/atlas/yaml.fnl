@@ -93,7 +93,8 @@ stays \"010\"."
                     (advance parser)
                     (load-node parser))]
         (if (and merge? (= (type value) :table)) (merge-into m value)
-            (not= nil value) (tset m key value))))
+            (not= nil value) (tset m key value)
+            parser.keep-null (tset m key json.null))))
     m))
 
 (fn load-sequence [parser]
@@ -101,7 +102,8 @@ stays \"010\"."
     (var n 0)
     (while (not= (. (advance parser) :type) :SEQUENCE_END)
       (set n (+ n 1))
-      (tset s n (load-node parser)))
+      ;; null keeps its place in a sequence
+      (tset s n (match (load-node parser) nil json.null v v)))
     s))
 
 (set load-node
@@ -117,25 +119,30 @@ stays \"010\"."
            :SEQUENCE_START (load-sequence parser)
            other (error (.. "YAML parse error: unexpected " other) 0)))))
 
-(fn load-events [text]
+(fn load-events [text ?keep-null]
   "Build the first document of text."
   ;; libyaml reads text through a bare pointer and lyaml does not keep it
   ;; alive: the parser table holds it until loading ends, or the collector
   ;; could free it mid-parse
-  (let [parser {:next-event (libyaml.parser text) :anchors {} : text}]
+  (let [parser {:next-event (libyaml.parser text)
+                :anchors {}
+                : text
+                :keep-null ?keep-null}]
     (advance parser)
     (when (= (. (advance parser) :type) :DOCUMENT_START)
       (advance parser)
       (load-node parser))))
 
-(fn parse [content]
+(fn parse [content ?keep-null]
   "Parse YAML text into Lua values with JSON semantics: maps get string keys,
-nulls become nil, plain scalars follow the YAML 1.2 core schema."
-  (load-events content))
+plain scalars follow the YAML 1.2 core schema, null in a sequence is
+json.null and a null mapping value is left out (json.null when ?keep-null)."
+  (load-events content ?keep-null))
 
-(fn decode [content]
-  "Try JSON first (faster, stricter); fall back to YAML on parse failure."
-  (let [(ok parsed) (pcall json.decode content)]
-    (if ok parsed (parse content))))
+(fn decode [content ?keep-null]
+  "Try JSON first (faster, stricter); fall back to YAML on parse failure.
+?keep-null as for json.decode and parse."
+  (let [(ok parsed) (pcall json.decode content ?keep-null)]
+    (if ok parsed (parse content ?keep-null))))
 
 {: parse : decode}

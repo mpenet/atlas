@@ -349,6 +349,26 @@
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "a\ts.json\nb\t(broken: Profile not found: nope)\nc\tt.json"
                                       r.out))))
+            (it "rejects options that don't apply to the command"
+                (fn []
+                  (let [r (atlas-run ["op"
+                                      "p"
+                                      "get-pet"
+                                      "3"
+                                      "--profile"
+                                      "yaml"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.are.equal "--profile doesn't apply to op (it is for az)\n"
+                                      r.err)
+                    (assert.are.equal 0 (length r.requests)))
+                  (let [r (atlas-run ["az" "flows" "fetchPet" "--select" ".a"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.are.equal "--select doesn't apply to az (it is for op)\n"
+                                      r.err))
+                  (let [r (atlas-run ["op" "p" "get-pet" "3" "--logout"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.are.equal "--logout doesn't apply to op (it is for auth)\n"
+                                      r.err))))
             (it "explains bad option values"
                 (fn []
                   (let [r (atlas-run ["op" "p" "get-pet" "3" "--output=yml"])]
@@ -563,7 +583,7 @@
                 (fn []
                   (let [r (atlas-run ["op" "p" "list-pets" "-i" "a=1"])]
                     (assert.are.equal 1 r.code)
-                    (assert.is_truthy (r.err:find "workflow inputs (-i, --i.) only apply to az"
+                    (assert.is_truthy (r.err:find "doesn't apply to op (it is for az)"
                                                   1 true)))))))
 
 (describe "atlas profile import-restish"
@@ -634,6 +654,20 @@
                       (assert.is_truthy (r.out:find "imported 3 profiles" 1
                                                     true))
                       (assert.is_not_nil (io.open (.. target ".bak"))))))
+              (it "keeps the config's null values when rewriting it"
+                  (fn []
+                    (let [f (io.open target :w)]
+                      (f:write "{\"arazzo\": {\"x\": {\"file\": \"f\", \"inputs\": {\"nul\": null}}}}")
+                      (f:close))
+                    (let [r (run-import ["profile"
+                                         "import-restish"
+                                         "test/fixtures/restish-v1.json"]
+                                        {:arazzo {:x {:file "f"}}})
+                          f (io.open target)
+                          text (f:read :*a)]
+                      (f:close)
+                      (assert.are.equal 0 r.code)
+                      (assert.is_truthy (text:find "\"nul\": null" 1 true)))))
               (it "fails clearly for a missing file"
                   (fn []
                     (let [r (run-import ["profile"

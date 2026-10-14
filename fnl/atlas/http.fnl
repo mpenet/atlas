@@ -74,7 +74,8 @@ determines one (multipart boundaries)."
   (let [content-type (util.header headers "content-type")
         body (when (> (length raw) 0)
                (if (or (json-type? content-type) (= nil content-type))
-                   (let [(ok val) (pcall json.decode raw)]
+                   ;; nulls are kept: the body is shown as received
+                   (let [(ok val) (pcall json.decode raw true)]
                      (if ok val raw))
                    raw))]
     {:status status :headers headers :body body :raw raw}))

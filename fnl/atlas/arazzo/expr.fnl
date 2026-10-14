@@ -147,7 +147,7 @@ Text that only starts with $ (\"$5\") is not an expression and stays as is."
 ;;   value := '(' or ')' | $expr | 'str' | "str" | number | true | false | null | word
 ;; Runtime expressions are resolved to values and never re-parsed.
 
-(local null {})
+(local null json.null)
 
 (local operators ["==" "!=" "<=" ">=" "&&" "||" "<" ">" "!" "(" ")"])
 
