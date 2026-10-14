@@ -1,0 +1,27 @@
+{
+  "apis": {
+    "billing": {
+      "base_url": "https://billing.example.com",
+      "spec_url": "https://billing.example.com/openapi.yaml",
+      "operation_base": "/api",
+      "server_variables": {"region": "eu"},
+      "url_overrides": {"https://old.example.com": "https://new.example.com"},
+      "profiles": {
+        "default": {
+          "headers": ["X-Team: core", "X-Trace: on"],
+          "query": ["debug=1"],
+          "client_cert": "/certs/c.pem",
+          "client_key": "/certs/c.key",
+          "ca_cert": "/certs/ca.pem",
+          "auth": {"type": "oauth-authorization-code",
+                   "params": {"client_id": "cli", "issuer_url": "https://idp.example.com", "scopes": "openid"}}
+        },
+        "ci": {"base_url": "https://ci.example.com", "auth_ref": "shared-bot"},
+        "multi": {"credentials": {"x": {"auth": {"type": "bearer", "params": {"token": "env:T"}}}}}
+      }
+    }
+  },
+  "auth_profiles": {
+    "shared-bot": {"type": "bearer", "params": {"token": "env:BOT_TOKEN"}}
+  }
+}

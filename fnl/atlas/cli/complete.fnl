@@ -38,6 +38,7 @@
   (print "  op  <profile-or-schema> [operation] [path-params...]  Run an API operation")
   (print "  az  <name-or-file> [workflow-id] [path-params...]     Run an Arazzo workflow")
   (print "  profile <list|show> [name]                            Manage profiles")
+  (print "  profile import-restish [FILE] [--dry-run]             Add profiles from a Restish config")
   (print "  auth    <profile> [--logout]                          Authenticate a profile")
   (print "  completion <fish|bash|zsh>                            Print shell completion")
   (each [_ [title scope] (ipairs [["Options (op):" :op] ["Options (az):" :az]])]
@@ -163,7 +164,9 @@ once a name and = are typed."
                       (if (and (or (= cmd :op) (= cmd :auth)) (= n 1))
                           profile-entries
                           (and (= cmd :profile) (= n 1))
-                          [{:value :list} {:value :show}]
+                          [{:value :import-restish}
+                           {:value :list}
+                           {:value :show}]
                           (and (= cmd :profile) (= n 2) (= target :show))
                           profile-entries
                           (and (= cmd :completion) (= n 1))

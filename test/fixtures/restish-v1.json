@@ -1,0 +1,34 @@
+{
+  "$schema": "https://rest.sh/schemas/apis.json",
+  "petstore": {
+    "base": "https://api.example.com/v1",
+    "spec_files": ["https://api.example.com/openapi.json"],
+    "profiles": {
+      "default": {
+        "headers": {"X-Org": "acme"},
+        "query": {"api-version": "2"},
+        "auth": {"name": "oauth-client-credentials",
+                 "params": {"client_id": "pets", "client_secret": "env:PETS_SECRET",
+                            "token_url": "https://auth.example.com/token", "scopes": "read write"}}
+      },
+      "staging": {
+        "base": "https://staging.example.com/v1",
+        "auth": {"name": "http-basic", "params": {"username": "ci", "password": "env:STAGING_PW"}}
+      }
+    },
+    "tls": {"cert": "/certs/client.pem", "key": "/certs/client.key", "ca_cert": "/certs/ca.pem", "insecure": true}
+  },
+  "devices": {
+    "base": "https://devices.example.com",
+    "spec_files": ["./devices.yaml", "./extra.yaml"],
+    "profiles": {
+      "default": {"auth": {"name": "oauth-device-code",
+                           "params": {"client_id": "dev", "device_authorization_url": "https://auth.example.com/device",
+                                      "token_url": "https://auth.example.com/token"}}}
+    }
+  },
+  "discovered": {
+    "base": "https://discovered.example.com",
+    "profiles": {"default": {"auth": {"name": ""}}}
+  }
+}

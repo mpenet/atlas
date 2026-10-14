@@ -55,6 +55,7 @@
       (when tls.cert (tset ssl :certificate tls.cert))
       (when tls.key (tset ssl :key tls.key))
       (when tls.insecure (tset ssl :verify "none"))
+      (when tls.ca_cert (tset ssl :cafile tls.ca_cert))
       (when (next ssl) ssl))))
 
 (fn merge-ssl [profile cli-ssl]
@@ -118,6 +119,15 @@ when they cover every auth header (names), auth doesn't run at all."
       (base-fn (doto (collect [k v (pairs req)] k v)
                  (tset :headers headers))))))
 
+(fn with-profile-query [query base-fn]
+  "Adds the profile's query parameters to each request; explicit ones win."
+  (fn [req]
+    (let [merged (collect [k v (pairs query)] k v)]
+      (each [k v (pairs (or req.query {}))]
+        (tset merged k v))
+      (base-fn (doto (collect [k v (pairs req)] k v)
+                 (tset :query merged))))))
+
 (fn client-options [profile-name profile p config ?transport]
   "Client options shared by op and az: profile headers, ssl, timeout, servers,
 and the http-fn: auth headers (added on first use), pagination, retries,
@@ -139,7 +149,10 @@ request signing, logging, and the transport (or dry-run printing)."
         signed (or (when auth-cfg (auth.wrap-http-fn auth-cfg logged)) logged)
         retrying (retry.wrap signed (retry-options profile p config))
         pagination (paginate-options profile p config)
-        paginated (if pagination (paginate.wrap retrying pagination) retrying)]
+        paginated (if pagination (paginate.wrap retrying pagination) retrying)
+        queried (if (?. profile :query)
+                    (with-profile-query profile.query paginated)
+                    paginated)]
     {:headers (collect [k v (pairs (or (?. profile :headers) {}))]
                 (k:lower)
                 v)
@@ -159,8 +172,8 @@ request signing, logging, and the transport (or dry-run printing)."
      ;; per request, reused by every attempt and page, and an auth failure is
      ;; reported rather than retried as if it were a network error
      :http-fn (if auth-headers (with-auth-headers auth-headers auth-names
-                                 paginated)
-                  paginated)}))
+                                 queried)
+                  queried)}))
 
 (fn fetch-schema [url opts]
   "Fetch and parse a schema URL through opts.transport. Credentials are only

@@ -281,6 +281,7 @@ Top-level fields in `config.json` apply to all invocations as defaults:
 | `base-url` | string | Override the schema's server URL |
 | `server` | object | Server URL variables, e.g. `{"zone": "de-fra-1"}`; `--server.NAME=VAL` overrides per call |
 | `server-index` | number | Which of the schema's servers to use (1-based); `--server-index=N` overrides per call |
+| `query` | object | Query parameters added to every request, e.g. `{"api-version": "2"}`; `--q.` values win |
 | `headers` | object | Default headers for every request |
 | `timeout` | number | Default timeout in seconds |
 | `cache-ttl` | number | Schema cache TTL override for this profile |
@@ -289,7 +290,7 @@ Top-level fields in `config.json` apply to all invocations as defaults:
 | `verbose` | bool | Always print status line and response headers |
 | `retry` | object | Retry settings for this profile, same shape as the top-level `retry` |
 | `auth` | object | Authentication configuration — see [Authentication](#authentication) |
-| `tls` | object | mTLS configuration — see [mTLS](#mtls) |
+| `tls` | object | mTLS configuration (`cert`, `key`, `ca_cert`, `insecure`) — see [mTLS](#mtls) |
 | `ssl` | object | Raw luasec options merged with `tls` |
 | `extends` | string | Inherit from another profile |
 
@@ -335,6 +336,31 @@ atlas profile list           # list all profiles (name + schema)
 atlas profile show <name>    # show fully resolved profile as JSON
 ```
 
+
+## Moving from Restish
+
+`atlas profile import-restish` adds your Restish APIs to the atlas config as profiles:
+
+```sh
+atlas profile import-restish --dry-run   # show what would be added
+atlas profile import-restish             # add them (config.json.bak keeps the previous file)
+atlas profile import-restish ~/path/to/restish.json
+```
+
+Without a path it looks where Restish does: `restish.json` (Restish 2) or the older `apis.json` in `$RSH_CONFIG_DIR`, `$XDG_CONFIG_HOME/restish`, `~/.config/restish`, then `~/Library/Application Support/restish` and `~/.restish`.
+
+Each API becomes a profile named after it (its non-default profiles become `API.PROFILE`). Existing atlas profiles with the same name are kept, never overwritten.
+
+| Restish | atlas profile |
+|---|---|
+| `base` / `base_url` (+ `operation_base`) | `base-url` |
+| `spec_files[0]` / `spec_url` | `schema` |
+| `headers`, `query` | `headers`, `query` |
+| `tls` / `client_cert`, `client_key`, `ca_cert`, `insecure` | `tls` |
+| `server_variables` | `server` |
+| `auth` (`name` or `type`), `auth_ref` | `auth`; `http-basic` → `basic`, `oauth-device-code` → `oauth-device-authorization`, `scopes` → `scope` |
+
+Settings without an atlas equivalent are listed as warnings rather than dropped silently: APIs without `spec_files` (Restish discovers specs, atlas needs `schema`), extra `spec_files`, `issuer_url` OIDC discovery, `credentials`, `tls_signer`, `url_overrides`, `pagination`.
 ## Authentication
 
 Add an `auth` block to a profile. Values prefixed with `env:` are read from environment variables at runtime.

@@ -354,3 +354,80 @@
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "workflow inputs (-i, --i.) only apply to az"
                                                   1 true)))))))
+
+(describe "atlas profile import-restish"
+          (fn []
+            (let [json (require :lunajson)
+                  target "build/test-home/import-config.json"
+                  run-import (fn [args config]
+                               (let [out []
+                                     err []
+                                     real-print _G.print
+                                     real-stderr io.stderr]
+                                 (set _G.print
+                                      (fn [...]
+                                        (table.insert out
+                                                      (table.concat [...] "\t"))))
+                                 (set io.stderr
+                                      {:write (fn [_ s] (table.insert err s))})
+                                 (let [code (cli.run args
+                                                     {:config config
+                                                      :config-path target})]
+                                   (set _G.print real-print)
+                                   (set io.stderr real-stderr)
+                                   {: code
+                                    :out (table.concat out "\n")
+                                    :err (table.concat err)})))
+                  read-target #(let [f (io.open target)]
+                                 (when f
+                                   (let [v (json.decode (f:read :*a))]
+                                     (f:close)
+                                     v)))]
+              (before_each (fn []
+                             (os.remove target)
+                             (os.remove (.. target ".bak"))))
+              (it "previews with --dry-run without writing"
+                  (fn []
+                    (let [r (run-import ["profile"
+                                         "import-restish"
+                                         "test/fixtures/restish-v1.json"
+                                         "--dry-run"]
+                                        {})]
+                      (assert.are.equal 0 r.code)
+                      (assert.is_truthy (r.out:find "\"petstore.staging\"" 1
+                                                    true))
+                      (assert.is_truthy (r.err:find "discovered: no spec_files"
+                                                    1 true))
+                      (assert.is_nil (read-target)))))
+              (it "adds profiles to the config, keeping existing ones"
+                  (fn []
+                    (let [f (io.open target :w)]
+                      (f:write "{\"output\": \"yaml\", \"profiles\": {\"petstore\": {\"schema\": \"mine.json\"}}}")
+                      (f:close))
+                    (let [r (run-import ["profile"
+                                         "import-restish"
+                                         "test/fixtures/restish-v1.json"]
+                                        {:output "yaml"
+                                         :profiles {:petstore {:schema "mine.json"}}})
+                          written (read-target)]
+                      (assert.are.equal 0 r.code)
+                      (assert.are.equal "mine.json"
+                                        written.profiles.petstore.schema)
+                      (assert.are.equal "yaml" written.output)
+                      (assert.are.equal "basic"
+                                        (. written.profiles "petstore.staging"
+                                           :auth :name))
+                      (assert.is_not_nil written.profiles.devices)
+                      (assert.is_truthy (r.out:find "kept existing profile: petstore"
+                                                    1 true))
+                      (assert.is_truthy (r.out:find "imported 3 profiles" 1
+                                                    true))
+                      (assert.is_not_nil (io.open (.. target ".bak"))))))
+              (it "fails clearly for a missing file"
+                  (fn []
+                    (let [r (run-import ["profile"
+                                         "import-restish"
+                                         "nope/restish.json"]
+                                        {})]
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find "nope/restish.json" 1 true))))))))

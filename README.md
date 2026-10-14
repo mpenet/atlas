@@ -6,6 +6,7 @@ OpenAPI 3.x toolbox.
 
 - **Standalone CLI** — similar to Restish, with profiles, OAuth 2.0 (authorization code, client credentials, device flow), mTLS, response selection, and shell completion.
 - **Arazzo workflow execution** — run multi-step API sequences from [Arazzo 1.0](https://spec.openapis.org/arazzo/latest.html) documents: runtime expressions, the simple condition language, `goto`/`retry`/`end` actions, reusable components, sub-workflows, polling loops, and profile-based auth. Regex criteria use Lua patterns; JSONPath/XPath criteria are not supported.
+- **Coming from Restish?** `atlas profile import-restish` turns your Restish APIs into atlas profiles.
 - **Fennel/Lua library** — point it at any schema (local file, URL, or parsed table) and get back a callable client.
 
 

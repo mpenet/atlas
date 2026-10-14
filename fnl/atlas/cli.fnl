@@ -16,6 +16,8 @@
         : check-body} (require :atlas.cli.request))
 
 (local {: parse-args} (require :atlas.cli.args))
+(local restish (require :atlas.cli.restish))
+(local json (require :lunajson))
 (local {: list-ops
         : render
         : print-resp
@@ -26,7 +28,8 @@
         : print-arazzo-result
         : list-arazzo-workflows} (require :atlas.cli.output))
 
-(local {: load-config
+(local {: config-path
+        : load-config
         : resolve-profile
         : merge-ssl
         : client-options
@@ -77,12 +80,67 @@
         (print (pretty-mod.pretty p 0 true))
         (die (.. "Profile not found: " (tostring name))))))
 
-(fn run-profile [subcmd name config]
+(fn read-json-file [path]
+  (let [f (or (io.open path :r) (die (.. "cannot open " path)))
+        text (f:read :*a)]
+    (f:close)
+    (let [(ok value) (pcall json.decode text)]
+      (if ok value (die (.. "not valid JSON: " path))))))
+
+(fn write-config [path config]
+  "Write config as JSON to path, keeping the previous file as path.bak."
+  (let [previous (io.open path :r)]
+    (when previous
+      (let [text (previous:read :*a)
+            backup (io.open (.. path ".bak") :w)]
+        (previous:close)
+        (backup:write text)
+        (backup:close))))
+  (os.execute (.. "mkdir -p " (util.shell-quote (or (path:match "^(.*)/") "."))))
+  (let [f (or (io.open path :w) (die (.. "cannot write " path)))]
+    (f:write (.. (pretty-mod.pretty config 0 false) "\n"))
+    (f:close)))
+
+(fn import-restish [file p env]
+  "Add the profiles of a Restish config to the atlas config; existing atlas
+profiles are kept. --dry-run prints the converted profiles instead."
+  (let [path (or file (restish.find-config {:RSH_CONFIG_DIR (os.getenv :RSH_CONFIG_DIR)
+                                            :XDG_CONFIG_HOME (os.getenv :XDG_CONFIG_HOME)}
+                                           (or (os.getenv :HOME) ".")
+                                           #(let [f (io.open $ :r)]
+                                              (when f (f:close)
+                                                true)))
+                 (die "no Restish config found; pass its path: atlas profile import-restish FILE"))
+        (profiles warnings) (restish.convert (read-json-file path))
+        config (collect [k v (pairs env.config)] k v)
+        existing (or config.profiles {})
+        names (sorted-names profiles)]
+    (io.stderr:write (.. "reading " path "\n"))
+    (each [_ w (ipairs warnings)]
+      (io.stderr:write (.. "warning: " w "\n")))
+    (if p.dry-run
+        (print (pretty-mod.pretty profiles 0 false))
+        (let [merged (collect [k v (pairs existing)] k v)
+              added (icollect [_ name (ipairs names)]
+                      (when (= nil (. existing name))
+                        (tset merged name (. profiles name))
+                        name))]
+          (each [_ name (ipairs names)]
+            (when (. existing name)
+              (print (.. "kept existing profile: " name))))
+          (set config.profiles merged)
+          (write-config env.config-path config)
+          (print (string.format "imported %d profiles into %s: %s"
+                                (length added) env.config-path
+                                (table.concat added ", ")))))))
+
+(fn run-profile [subcmd name p env]
   (match subcmd
-    :list (profile-list config)
-    :show (profile-show config name)
+    :list (profile-list env.config)
+    :show (profile-show env.config name)
+    :import-restish (import-restish name p env)
     _ (die (.. "Unknown profile subcommand: " (tostring subcmd)
-               "\nUsage: atlas profile <list|show> [name]"))))
+               "\nUsage: atlas profile <list|show|import-restish> [name-or-file]"))))
 
 (fn run-auth [profile-name p config]
   (when (not profile-name)
@@ -311,7 +369,7 @@ invalid body unless --no-validate."
                         :bash (completion-bash)
                         :zsh (completion-zsh)
                         _ (die "Usage: atlas completion <fish|bash|zsh>"))
-          :profile (run-profile p.schema p.operation env.config)
+          :profile (run-profile p.schema p.operation p env)
           :auth (run-auth p.schema p env.config)
           (where (or :az :arazzo)) (run-arazzo p env)
           :op (run-op p env)
@@ -320,8 +378,9 @@ invalid body unless --no-validate."
 
 (fn run [args ?env]
   "Run atlas with args and return the exit code.
-?env: {:transport http-fn :config table :schema-cache bool} to replace the
-network, the config file and the schema cache."
+?env: {:transport http-fn :config table :config-path string :schema-cache bool}
+replaces the network, the config contents, where the config is written, and
+the schema cache."
   (let [env (or ?env {})
         (config-ok config) (if env.config (values true env.config)
                                (pcall load-config))]
@@ -331,7 +390,9 @@ network, the config file and the schema cache."
           1)
         (let [(ok result) (pcall dispatch args
                                  (doto (collect [k v (pairs env)] k v)
-                                   (tset :config config)))]
+                                   (tset :config config)
+                                   (tset :config-path
+                                         (or env.config-path (config-path)))))]
           (if ok
               (if (= (type result) :number) result 0)
               (let [(code message) (exit-status result)]

@@ -71,6 +71,8 @@
 
 (require :atlas.cli.settings)
 
+(require :atlas.cli.restish)
+
 (require :atlas.cli.complete)
 
 (require :atlas.cli)

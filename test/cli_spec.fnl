@@ -871,3 +871,33 @@
                                                        "--h.X-A=1"
                                                        "--h.x-a=2"])
                                       :headers))))))
+
+(describe "profile query and ca_cert"
+          (fn []
+            (it "adds the profile's query parameters to every request, explicit ones winning"
+                (fn []
+                  (let [sent []
+                        opts (cli.client-options "p"
+                                                 {:query {:api-version "2"
+                                                          :region "eu"}}
+                                                 {:ssl {} :retry 0} {}
+                                                 (fn [req]
+                                                   (table.insert sent req)
+                                                   {:status 200 :headers {}}))]
+                    (opts.http-fn {:method "GET"
+                                   :url "https://h/x"
+                                   :query {:region "us"}})
+                    (assert.are.same {:api-version "2" :region "us"}
+                                     (. sent 1 :query)))))
+            (it "maps tls ca_cert to luasec's cafile"
+                (fn []
+                  (assert.are.equal "ca.pem"
+                                    (. (cli.merge-ssl {:tls {:ca_cert "ca.pem"}}
+                                                      nil)
+                                       :cafile))))))
+
+(describe "import-restish discoverability"
+          (fn []
+            (it "completes the profile subcommand"
+                (fn []
+                  (assert.are.same ["import-restish"] (complete "profile im"))))))
