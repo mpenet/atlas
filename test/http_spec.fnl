@@ -77,6 +77,43 @@
                     (assert.is_truthy (: (tostring err) :find "timeout"))
                     (assert.is_true (< (- (socket.gettime) t0) 2)))))))
 
+(describe "http.request over the network"
+          (fn []
+            (fn with-server [n f]
+              "Runs f with the port of an echo server answering n requests."
+              (let [proc (io.popen (.. "lua test/fixtures/echo-server.lua " n))
+                    port (proc:read :*l)
+                    (ok err) (pcall f port)]
+                (proc:close)
+                (assert ok err)))
+
+            (it "sends the method, path, query and body, and decodes the reply"
+                (fn []
+                  (with-server 1
+                    (fn [port]
+                      (let [resp (http.request {:method "POST"
+                                                :url (.. "http://127.0.0.1:"
+                                                         port "/pets")
+                                                :query {:a "1"}
+                                                :headers {:content-type "application/json"}
+                                                :body {:name "Rex"}
+                                                :ssl {:verify "none"}})]
+                        (assert.are.equal 200 resp.status)
+                        (assert.are.same {:method "POST"
+                                          :path "/pets?a=1"
+                                          :body "{\"name\":\"Rex\"}"
+                                          :content_type "application/json"}
+                                         resp.body))))))
+            (it "fetches text from a URL"
+                (fn []
+                  (with-server 1
+                    (fn [port]
+                      (let [text (http.fetch-text (.. "http://127.0.0.1:" port
+                                                      "/spec.json")
+                                                  {:headers {:x "1"}})]
+                        (assert.is_truthy (text:find "\"path\":\"/spec.json\""
+                                                     1 true)))))))))
+
 (describe "http.fetch-text"
           (fn []
             (it "reads local files"

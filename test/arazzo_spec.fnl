@@ -595,6 +595,96 @@
                                                             "wf" {} clients {})
                                       "operationId 'op' is in several sources (a, b): use $sourceDescriptions.NAME.op"))))))
 
+(describe "run-workflow step details"
+          (fn []
+            (it "sends header and cookie parameters"
+                (fn []
+                  (let [seen []
+                        clients {:api (make-client {:op (fn [req]
+                                                          (table.insert seen
+                                                                        req)
+                                                          (ok-resp {}))})}]
+                    (arazzo.run-workflow (one-step-doc {:operationId "op"
+                                                        :parameters [{:in "header"
+                                                                      :name "X-Req"
+                                                                      :value "a"}
+                                                                     {:in "cookie"
+                                                                      :name "sid"
+                                                                      :value "s1"}
+                                                                     {:in "cookie"
+                                                                      :name "t"
+                                                                      :value 2}]})
+                                         "wf" {} clients {})
+                    (assert.are.same {:x-req "a" :cookie "sid=s1; t=2"}
+                                     (. seen 1 :headers)))))
+            (it "fails a step whose operation does not exist"
+                (fn []
+                  (assert.has.error #(arazzo.run-workflow (one-step-doc {:operationId "nope"})
+                                                          "wf" {} {:api {}} {})
+                                    "step 's1': operation not found: nope")))
+            (it "runs a workflow named by a retry action before retrying"
+                (fn []
+                  (let [log []
+                        n (counter)
+                        clients {:api (make-client {:op (fn []
+                                                          (n.inc)
+                                                          (table.insert log :op)
+                                                          (ok-resp {}
+                                                                   (if (= 1
+                                                                          (n.val))
+                                                                       500
+                                                                       200)))
+                                                    :fix (fn []
+                                                           (table.insert log
+                                                                         :fix)
+                                                           (ok-resp {}))})}
+                        doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "wf"
+                                          :steps [{:stepId "s1"
+                                                   :operationId "op"
+                                                   :successCriteria [{:condition "$statusCode == 200"}]
+                                                   :onFailure [{:name "again"
+                                                                :type "retry"
+                                                                :workflowId "repair"
+                                                                :retryLimit 1}]}]}
+                                         {:workflowId "repair"
+                                          :steps [{:stepId "f"
+                                                   :operationId "fix"}]}]}]
+                    (arazzo.run-workflow doc "wf" {} clients {})
+                    (assert.are.same [:op :fix :op] log))))
+            (it "continues with another workflow on a goto workflowId"
+                (fn []
+                  (let [log []
+                        clients {:api (make-client {:a (fn []
+                                                         (table.insert log :a)
+                                                         (ok-resp {}))
+                                                    :b (fn []
+                                                         (table.insert log :b)
+                                                         (ok-resp {}))})}
+                        doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "wf"
+                                          :steps [{:stepId "s1"
+                                                   :operationId "a"
+                                                   :onSuccess [{:name "next"
+                                                                :type "goto"
+                                                                :workflowId "other"}]}
+                                                  {:stepId "s2"
+                                                   :operationId "a"}]}
+                                         {:workflowId "other"
+                                          :steps [{:stepId "o"
+                                                   :operationId "b"}]}]}]
+                    (arazzo.run-workflow doc "wf" {} clients {})
+                    (assert.are.same [:a :b] log))))
+            (it "loads and runs a document from a file"
+                (fn []
+                  (let [clients {:api (make-client {:getUser #(ok-resp {:id 1})})}
+                        result (arazzo.run "test/fixtures/simple.arazzo.json"
+                                           "simple" nil {: clients})]
+                    (assert.are.equal 200
+                                      (. result.steps :step1 :response :status)))))))
+
 (describe "run-workflow parameters"
           (fn []
             (it "passes path params by name regardless of order"

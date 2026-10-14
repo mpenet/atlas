@@ -212,6 +212,84 @@
                     (assert.is_truthy (r.err:find "inputs.id: expected string, got integer"
                                                   1 true))
                     (assert.are.equal 0 (length r.requests)))))
+            (it "prints each step's response with --arazzo-output steps"
+                (fn []
+                  (let [r (atlas-run ["az"
+                                      "flows"
+                                      "fetchPet"
+                                      "-i"
+                                      "id=7"
+                                      "--arazzo-output"
+                                      "steps"]
+                                     {"GET https://api.test/pets/7" (respond 200
+                                                                             {:name "Rex"})})]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "--- get ---\nname: Rex\n--- outputs ---\nname: Rex"
+                                      r.out))))
+            (it "prints requests and responses with --arazzo-output full"
+                (fn []
+                  (let [r (atlas-run ["az"
+                                      "flows"
+                                      "fetchPet"
+                                      "-i"
+                                      "id=7"
+                                      "--arazzo-output"
+                                      "full"]
+                                     {"GET https://api.test/pets/7" (respond 200
+                                                                             {:name "Rex"})})]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "--- get request ---\noperation: getPet\n--- get response HTTP 200 ---\nname: Rex\n--- outputs ---\nname: Rex"
+                                      r.out))))
+            (it "lists the workflows of a document"
+                (fn []
+                  (let [r (atlas-run ["az" "flows"])]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "fetchPet" r.out))))
+            (it "takes inputs from -d and --b. fields"
+                (fn []
+                  (let [routes {"GET https://api.test/pets/7" (respond 200
+                                                                       {:name "Rex"})}]
+                    (assert.are.equal "name: Rex"
+                                      (. (atlas-run ["az"
+                                                     "flows"
+                                                     "fetchPet"
+                                                     "-d"
+                                                     "{\"id\": \"7\"}"]
+                                                    routes)
+                                         :out))
+                    (assert.are.equal "name: Rex"
+                                      (. (atlas-run ["az"
+                                                     "flows"
+                                                     "fetchPet"
+                                                     "--b.id=7"]
+                                                    routes)
+                                         :out)))))
+            (it "prints workflow help"
+                (fn []
+                  (let [r (atlas-run ["az" "flows" "fetchPet" "--help"])]
+                    (assert.are.equal 0 r.code)
+                    (assert.is_truthy (r.out:find "fetchPet" 1 true))
+                    (assert.are.equal 0 (length r.requests)))))
+            (it "rejects unknown workflows and --dry-run"
+                (fn []
+                  (let [r (atlas-run ["az" "flows" "nope"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.are.equal "Unknown workflow: nope\n" r.err))
+                  (let [r (atlas-run ["az" "flows" "fetchPet" "--dry-run"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "not supported for az" 1 true)))))
+            (it "reports a failed workflow in progress mode"
+                (fn []
+                  (let [r (atlas-run ["az"
+                                      "flows"
+                                      "fetchPet"
+                                      "-i"
+                                      "id=7"
+                                      "--arazzo-output"
+                                      "progress"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "workflow fetchPet failed" 1
+                                                  true)))))
             (it "fails with exit 1 when a step fails"
                 (fn []
                   (let [r (atlas-run ["az" "flows" "fetchPet" "-i" "id=7"])]
@@ -236,7 +314,71 @@
                                     (. (atlas-run ["auth" "p"]) :out))))
             (it "rejects unknown commands with exit 1"
                 (fn []
-                  (assert.are.equal 1 (. (atlas-run ["frobnicate"]) :code))))))
+                  (assert.are.equal 1 (. (atlas-run ["frobnicate"]) :code))))
+            (it "shows a profile, or fails when it does not exist"
+                (fn []
+                  (let [r (atlas-run ["profile" "show" "yaml"])]
+                    (assert.are.equal 0 r.code)
+                    (assert.is_truthy (r.out:find "test/fixtures/cli-api.json"
+                                                  1 true)))
+                  (let [r (atlas-run ["profile" "show" "nope"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.are.equal "Profile not found: nope\n" r.err))))
+            (it "rejects unknown profile subcommands"
+                (fn []
+                  (let [r (atlas-run ["profile" "frob"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "Unknown profile subcommand: frob"
+                                                  1 true)))))
+            (it "explains what atlas auth needs"
+                (fn []
+                  (assert.are.equal "Usage: atlas auth <profile> [--logout]\n"
+                                    (. (atlas-run ["auth"]) :err))
+                  (assert.are.equal "Profile not found: nope\n"
+                                    (. (atlas-run ["auth" "nope"]) :err))
+                  (assert.are.equal "No auth configured for profile: yaml\n"
+                                    (. (atlas-run ["auth" "yaml"]) :err))
+                  (assert.is_truthy (: (. (atlas-run ["auth" "broken-auth"])
+                                          :err)
+                                       :find
+                                       "external auth command produced no output"
+                                       1 true))))
+            (it "logs out of a profile"
+                (fn []
+                  (let [r (atlas-run ["auth" "p" "--logout"])]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "Logged out: p" r.out))))
+            (it "lists configured profiles and contexts when op or az has no target"
+                (fn []
+                  (let [r (atlas-run ["op"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "Configured profiles:\n  broken-auth\ttest/fixtures/cli-api.json\n"
+                                                  1 true)))
+                  (let [r (atlas-run ["az"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "Configured Arazzo contexts:\n  flows\ttest/fixtures/cli-flow.arazzo.json\n"
+                                                  1 true)))))
+            (it "answers the shell scripts' completion requests"
+                (fn []
+                  (assert.are.equal "import-restish"
+                                    (. (atlas-run ["__complete"
+                                                   "atlas profile im"])
+                                       :out))
+                  (assert.are.equal "--verbose\tShow status, headers and requests"
+                                    (. (atlas-run ["__complete"
+                                                   "--describe"
+                                                   "atlas op x --verb"])
+                                       :out))
+                  (assert.are.equal ""
+                                    (. (atlas-run ["__complete" "atlas"]) :out))))
+            (it "prints completion scripts for each shell"
+                (fn []
+                  (each [_ shell (ipairs ["fish" "bash" "zsh"])]
+                    (let [r (atlas-run ["completion" shell])]
+                      (assert.are.equal 0 r.code)
+                      (assert.is_truthy (r.out:find "__complete" 1 true))))
+                  (assert.are.equal 1
+                                    (. (atlas-run ["completion" "tcsh"]) :code))))))
 
 (describe "credentials and schema sources"
           (fn []

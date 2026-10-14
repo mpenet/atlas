@@ -136,4 +136,33 @@
                 (fn []
                   (assert.are.same {:a false :b false}
                                    (yaml.parse "a: &f false\nb: *f\n"))
-                  (assert.are.same {} (yaml.parse "a: &n null\nb: *n\n"))))))
+                  (assert.are.same {} (yaml.parse "a: &n null\nb: *n\n"))))
+            (it "resolves negative infinity and NaN"
+                (fn []
+                  (let [v (yaml.parse "a: -.inf\nb: .NaN\n")]
+                    (assert.are.equal (- math.huge) v.a)
+                    (assert.is_true (not= v.b v.b)))))
+            (it "applies explicit core tags"
+                (fn []
+                  (assert.are.same {:i 5 :f 1.5 :b true}
+                                   (yaml.parse "i: !!int '5'\nf: !!float '1.5'\nb: !!bool 'true'\nn: !!null ''\n"))
+                  (let [(ok err) (pcall yaml.parse "i: !!int abc\n")]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "invalid !!int value: abc" 1 true)))
+                  (let [(ok err) (pcall yaml.parse "f: !!float abc\n")]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "invalid !!float value: abc" 1 true)))))
+            (it "uses an aliased scalar as a key"
+                (fn []
+                  (assert.are.same {:a "k" :k 1}
+                                   (yaml.parse "a: &x k\n? *x\n: 1\n"))))
+            (it "rejects unknown aliases"
+                (fn []
+                  (let [(ok err) (pcall yaml.parse "a: *nope\n")]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "nope" 1 true)))))
+            (it "returns nil for an empty document"
+                (fn []
+                  (assert.is_nil (yaml.parse ""))))))

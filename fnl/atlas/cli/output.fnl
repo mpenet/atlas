@@ -242,39 +242,33 @@ variable shows the value in effect."
                                     ")"))))))
     (table.concat lines "\n")))
 
+(fn print-step [step-id step render full]
+  (if full
+      (do
+        (print (.. "--- " step-id " request ---"))
+        (when step.op-ref (print (.. "operation: " step.op-ref)))
+        (when (and step.request step.request.body)
+          (print (render step.request.body)))
+        (print (.. "--- " step-id " response"
+                   (if (and step.response step.response.status)
+                       (.. " HTTP " step.response.status)
+                       "") " ---")))
+      (print (.. "--- " step-id " ---")))
+  (when step.response (print (render step.response.body))))
+
 (fn print-arazzo-result [result mode output no-color]
-  (let [render #(render $ output (not no-color))]
+  (let [render #(render $ output (not no-color))
+        has-outputs (next (or result.outputs {}))]
     (match (or mode :final)
       ;; progress already went to stderr while the workflow ran
       (where (or :final :progress))
-      (when (next (or result.outputs {}))
+      (when has-outputs
         (print (render result.outputs)))
-      :steps
+      (where (or :steps :full))
       (do
-        (let [ordered (executed-steps result)]
-          (each [_ step-id (ipairs ordered)]
-            (let [step (. result.steps step-id)]
-              (print (.. "--- " step-id " ---"))
-              (when step.response
-                (print (render step.response.body))))))
-        (when (next (or result.outputs {}))
-          (print "--- outputs ---")
-          (print (render result.outputs))))
-      :full
-      (do
-        (let [ordered (executed-steps result)]
-          (each [_ step-id (ipairs ordered)]
-            (let [step (. result.steps step-id)]
-              (print (.. "--- " step-id " request ---"))
-              (when step.op-ref (print (.. "operation: " step.op-ref)))
-              (when (and step.request step.request.body)
-                (print (render step.request.body)))
-              (print (.. "--- " step-id " response"
-                         (if (and step.response step.response.status)
-                             (.. " HTTP " step.response.status)
-                             "") " ---"))
-              (when step.response (print (render step.response.body))))))
-        (when (next (or result.outputs {}))
+        (each [_ step-id (ipairs (executed-steps result))]
+          (print-step step-id (. result.steps step-id) render (= mode :full)))
+        (when has-outputs
           (print "--- outputs ---")
           (print (render result.outputs)))))))
 

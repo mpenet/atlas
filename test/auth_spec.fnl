@@ -19,6 +19,7 @@
   (var idx 0)
   (var calls [])
   (values {:encode-body real-http.encode-body
+           :encode-request real-http.encode-request
            :request (fn [req]
                       (table.insert calls req)
                       (set idx (+ idx 1))
@@ -112,7 +113,84 @@
                                                             :params {:token_url "https://auth.example.com/token"
                                                                      :client_id "c"
                                                                      :client_secret "s"}}
-                                                           {}))))))))
+                                                           {}))))))
+            (it "reports the provider's error description"
+                (fn []
+                  (let [(http) (seq-mock (err-resp {:error "invalid_client"
+                                                    :error_description "bad secret"}
+                                                   401))
+                        auth (reload-auth http)
+                        (ok err) (pcall auth.authenticate (tmp-profile)
+                                        {:name "oauth-client-credentials"
+                                         :params {:token_url "https://auth.example.com/token"
+                                                  :client_id "c"
+                                                  :client_secret "s"}}
+                                        {})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "token request failed: HTTP 401 — bad secret"
+                                         1 true)))))
+            (it "sends audience and reads env: secrets"
+                (fn []
+                  (let [(http calls) (seq-mock (ok-resp (json-body {:access_token "tok"})))
+                        auth (reload-auth http)
+                        profile (tmp-profile)]
+                    (auth.authenticate profile
+                                       {:name "oauth-client-credentials"
+                                        :params {:token_url "https://auth.example.com/token"
+                                                 :client_id "c"
+                                                 :client_secret "env:HOME"
+                                                 :audience "api://x"}}
+                                       {})
+                    (clean-token profile)
+                    (let [body (. calls 1 :raw-body)
+                          util (require :atlas.util)]
+                      (assert.is_truthy (body:find "audience=api%3A%2F%2Fx" 1
+                                                   true))
+                      (assert.is_truthy (body:find (.. "client_secret="
+                                                       (util.url-encode (os.getenv :HOME)))
+                                                   1 true))))))
+            (it "reuses a stored token while it is valid"
+                (fn []
+                  (let [(http calls) (seq-mock)
+                        auth (reload-auth http)
+                        profile (tmp-profile)]
+                    (auth.save-token profile
+                                     {:access_token "cached"
+                                      :expires_at (+ (os.time) 3600)})
+                    (let [h (auth.get-headers profile
+                                              {:name "oauth-client-credentials"
+                                               :params {:token_url "https://a/token"
+                                                        :client_id "c"}}
+                                              {})]
+                      (clean-token profile)
+                      (assert.are.same {:authorization "Bearer cached"} h)
+                      (assert.are.equal 0 (length calls))))))
+            (it "authenticates again when a refresh fails"
+                (fn []
+                  (let [(http calls) (seq-mock (err-resp {:error "invalid_grant"})
+                                               (ok-resp (json-body {:access_token "fresh"})))
+                        auth (reload-auth http)
+                        profile (tmp-profile)
+                        err []
+                        real-stderr io.stderr]
+                    (auth.save-token profile
+                                     {:access_token "old"
+                                      :expires_at 1
+                                      :refresh_token "r1"})
+                    (set io.stderr {:write (fn [_ s] (table.insert err s))})
+                    (let [(ok h) (pcall auth.get-headers profile
+                                        {:name "oauth-client-credentials"
+                                         :params {:token_url "https://a/token"
+                                                  :client_id "c"}}
+                                        {})]
+                      (set io.stderr real-stderr)
+                      (clean-token profile)
+                      (assert.is_true ok h)
+                      (assert.are.same {:authorization "Bearer fresh"} h)
+                      (assert.are.equal 2 (length calls))
+                      (assert.are.equal "Refreshing token...\nToken refresh failed, re-authenticating...\n"
+                                        (table.concat err))))))))
 
 ;; ---- device authorization ----
 
@@ -346,7 +424,36 @@
                                         signed.uri)
                       (assert.are.equal "https://api.example.com/items?a=x%20y&b=2"
                                         (. calls 1 :url))
-                      (assert.is_nil (. calls 1 :query))))))))
+                      (assert.is_nil (. calls 1 :query))))))
+            (it "signs the encoded body and leaves the caller's request alone"
+                (fn []
+                  (let [(http calls) (seq-mock (ok-resp {}))
+                        auth (reload-auth http)
+                        input (os.tmpname)
+                        wrapped (auth.wrap-http-fn {:name "external-tool"
+                                                    :params {:commandline (.. "cat > "
+                                                                              input
+                                                                              "; echo '{\"headers\": {\"x-sig\": [\"s1\"]}}'")}}
+                                                   http.request)
+                        req {:method "POST"
+                             :url "https://api.example.com/items"
+                             :query {:a "1"}
+                             :headers {:content-type "application/json"}
+                             :body {:n 1}}]
+                    (wrapped req)
+                    (let [f (io.open input)
+                          signed (json.decode (f:read :*a))]
+                      (f:close)
+                      (os.remove input)
+                      (assert.are.equal "{\"n\":1}" signed.body)
+                      (assert.are.equal "{\"n\":1}" (. calls 1 :raw-body))
+                      (assert.are.equal "s1" (. calls 1 :headers :x-sig))
+                      (assert.are.same {:method "POST"
+                                        :url "https://api.example.com/items"
+                                        :query {:a "1"}
+                                        :headers {:content-type "application/json"}
+                                        :body {:n 1}}
+                                       req)))))))
 
 ;; ---- authorization code callback ----
 
@@ -571,7 +678,22 @@
                                                      {:status 200}))]
                     (wrapped {:method "GET"
                               :url "https://h/items?api_key=K&page=2"})
-                    (assert.is_nil (?. sent 1 :query :api_key)))))))
+                    (assert.is_nil (?. sent 1 :query :api_key)))))
+            (it "leaves the caller's request alone"
+                (fn []
+                  (let [auth (reload-auth (pick-values 1 (seq-mock)))
+                        sent []
+                        wrapped (auth.wrap-http-fn {:name "api-key"
+                                                    :params {:name "api_key"
+                                                             :in "query"
+                                                             :value "K"}}
+                                                   (fn [req]
+                                                     (table.insert sent req)
+                                                     {:status 200}))
+                        req {:method "GET" :url "https://h/items"}]
+                    (wrapped req)
+                    (assert.are.same {:api_key "K"} (. sent 1 :query))
+                    (assert.are.same {:method "GET" :url "https://h/items"} req))))))
 
 (describe "auth.header-names"
           (fn []

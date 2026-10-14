@@ -158,7 +158,86 @@
               (it "returns nil when there is no body"
                   (fn []
                     (assert.is_nil (cli.format-output {:status 204 :headers {}}
-                                                      :json false)))))))
+                                                      :json false))))
+              (it "raw with select prints tables as compact JSON and scalars as text"
+                  (fn []
+                    (let [r {:status 200
+                             :headers {}
+                             :body {:a {:b 1} :n 2}
+                             :raw "{}"}]
+                      (assert.are.equal "{\n  \"b\": 1\n}"
+                                        (cli.format-output r :raw false ".a"))
+                      (assert.are.equal "2"
+                                        (cli.format-output r :raw false ".n"))
+                      (assert.is_nil (cli.format-output r :raw false ".zz")))))
+              (it "raw returns nil for an empty body"
+                  (fn []
+                    (assert.is_nil (cli.format-output {:status 204
+                                                       :headers {}
+                                                       :raw ""}
+                                                      :raw false)))))))
+
+(fn capture [f]
+  "Runs f with print and io.stderr captured; returns (result out err)."
+  (let [out []
+        err []
+        real-print _G.print
+        real-stderr io.stderr]
+    (set _G.print (fn [s] (table.insert out (tostring s))))
+    (set io.stderr {:write (fn [_ s] (table.insert err s))})
+    (let [(ok result) (pcall f)]
+      (set _G.print real-print)
+      (set io.stderr real-stderr)
+      (assert ok result)
+      (values result (table.concat out "\n") (table.concat err)))))
+
+(describe "cli.print-resp"
+          (fn []
+            (it "prints nothing for a dry run"
+                (fn []
+                  (let [(code out err) (capture #(cli.print-resp {:dry-run true
+                                                                  :status 0}
+                                                                 :json true))]
+                    (assert.are.equal 0 code)
+                    (assert.are.equal "" out)
+                    (assert.are.equal "" err))))
+            (it "reports an empty body on stderr"
+                (fn []
+                  (let [(code out err) (capture #(cli.print-resp {:status 204
+                                                                  :headers {}}
+                                                                 :json true))]
+                    (assert.are.equal 0 code)
+                    (assert.are.equal "" out)
+                    (assert.are.equal "HTTP 204\n" err))))
+            (it "prints status, timing and headers when verbose"
+                (fn []
+                  (let [(_ out err) (capture #(cli.print-resp {:status 200
+                                                               :headers {:b "2"
+                                                                         :a "1"}
+                                                               :body {:x 1}}
+                                                              :json true true
+                                                              nil 0.5))]
+                    (assert.are.equal "{\n  \"x\": 1\n}" out)
+                    (assert.are.equal "HTTP 200  0.500s\na: 1\nb: 2\n\n" err))))
+            (it "sends error bodies to stderr with the exit code"
+                (fn []
+                  (let [(code out err) (capture #(cli.print-resp {:status 503
+                                                                  :headers {}
+                                                                  :body {:e 1}}
+                                                                 :json true))]
+                    (assert.are.equal 5 code)
+                    (assert.are.equal "" out)
+                    (assert.are.equal "HTTP 503\n{\n  \"e\": 1\n}\n" err))))
+            (it "warns when pagination stopped on an error"
+                (fn []
+                  (let [(_ _ err) (capture #(cli.print-resp {:status 200
+                                                             :headers {}
+                                                             :body [1]
+                                                             :pages 2
+                                                             :next-page-status 500}
+                                                            :json true))]
+                    (assert.are.equal "warning: stopped after 2 page(s): next page returned HTTP 500\n"
+                                      err))))))
 
 (describe "cli.client-options"
           (fn []
@@ -779,7 +858,19 @@
                         (assert.is_truthy (text:find "> GET https://h/x?api_key=<redacted>&page=2"
                                                      1 true))
                         (assert.is_nil (text:find "SECRET" 1 true))
-                        (assert.is_nil (text:find "Bearer t" 1 true)))))))))
+                        (assert.is_nil (text:find "Bearer t" 1 true)))))))
+            (it "logs the request body, tables as JSON"
+                (fn []
+                  (let [log (fn [body]
+                              (let [(_ _ err) (capture #((cli.wrap-log-request (fn []
+                                                                                 {:status 200})) {:method "POST"
+                                                                                                  :url "https://h/x"
+                                                                                                  : body}))]
+                                err))]
+                    (assert.are.equal "> POST https://h/x\n> body: {\"a\":1}\n"
+                                      (log {:a 1}))
+                    (assert.are.equal "> POST https://h/x\n> body: text\n"
+                                      (log "text")))))))
 
 (describe "explicit nulls and repeated params"
           (fn []
@@ -896,6 +987,103 @@
                                                       nil)
                                        :cafile))))))
 
+(describe "profiles and settings"
+          (fn []
+            (it "inherits from extends, merging headers"
+                (fn []
+                  (let [profiles {:base {:schema "s.json"
+                                         :headers {:a "1" :b "1"}
+                                         :timeout 5}
+                                  :child {:extends "base"
+                                          :headers {:b "2"}
+                                          :timeout 9}
+                                  :grandchild {:extends "child"}}]
+                    (assert.are.same {:schema "s.json"
+                                      :headers {:a "1" :b "2"}
+                                      :timeout 9}
+                                     (cli.resolve-profile "grandchild" profiles)))))
+            (it "rejects circular and missing extends"
+                (fn []
+                  (assert.has.error #(cli.resolve-profile "a"
+                                                          {:a {:extends "b"}
+                                                           :b {:extends "a"}})
+                                    "Circular extends: a")
+                  (assert.has.error #(cli.resolve-profile "a"
+                                                          {:a {:extends "z"}})
+                                    "Profile not found: z")))
+            (it "maps every tls key, and --ssl. flags override them"
+                (fn []
+                  (assert.are.same {:certificate "c.pem"
+                                    :key "k.pem"
+                                    :verify "none"
+                                    :cafile "ca.pem"}
+                                   (cli.tls->ssl {:cert "c.pem"
+                                                  :key "k.pem"
+                                                  :insecure true
+                                                  :ca_cert "ca.pem"}))
+                  (assert.is_nil (cli.tls->ssl {}))
+                  (assert.are.same {:certificate "c.pem" :verify "peer"}
+                                   (cli.merge-ssl {:tls {:cert "c.pem"
+                                                         :insecure true}}
+                                                  {:verify "peer"}))))
+            (it "reads the config file, failing on corrupt JSON"
+                (fn []
+                  (let [path (cli.config-path)]
+                    ;; never touch a real config
+                    (assert.is_truthy (path:find "/build/test-home/" 1 true))
+                    (os.execute (.. "mkdir -p '" (path:match "^(.*)/") "'"))
+                    (assert.are.same {} (cli.load-config))
+                    (with-open [f (io.open path :w)]
+                      (f:write "{\"profiles\": {\"x\": {}}}"))
+                    (assert.are.same {:profiles {:x {}}} (cli.load-config))
+                    (with-open [f (io.open path :w)]
+                      (f:write "{nope"))
+                    (let [(ok err) (pcall cli.load-config)]
+                      (os.remove path)
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "corrupt config" 1 true))))))
+            (it "serves a fetched schema from the cache until it expires"
+                (fn []
+                  (let [url (.. "https://cache.test/" (os.time) (math.random)
+                                ".json")
+                        calls []
+                        opts {:transport (fn [req]
+                                           (table.insert calls req)
+                                           {:status 200
+                                            :headers {}
+                                            :raw "{\"openapi\": \"3.0.0\"}"})}]
+                    (assert.are.same {:openapi "3.0.0"}
+                                     (cli.load-schema-cached url opts))
+                    (assert.are.same {:openapi "3.0.0"}
+                                     (cli.load-schema-cached url opts))
+                    (assert.are.equal 1 (length calls))
+                    (cli.load-schema-cached url
+                                            (doto (collect [k v (pairs opts)]
+                                                    k
+                                                    v)
+                                              (tset :reload true)))
+                    (assert.are.equal 2 (length calls)))))
+            (it "prints curl commands and logs requests per the options"
+                (fn []
+                  (let [(_ out) (capture #(let [opts (cli.client-options nil
+                                                                         nil
+                                                                         {:curl true}
+                                                                         {})]
+                                            (opts.http-fn {:method "GET"
+                                                           :url "https://h/x"})))]
+                    (assert.are.equal "curl -X GET 'https://h/x'" out))
+                  (let [(_ _ err) (capture #(let [opts (cli.client-options nil
+                                                                           nil
+                                                                           {:verbose true}
+                                                                           {}
+                                                                           (fn []
+                                                                             {:status 200
+                                                                              :headers {}}))]
+                                              (opts.http-fn {:method "GET"
+                                                             :url "https://h/x"})))]
+                    (assert.are.equal "> GET https://h/x\n" err))))))
+
 (describe "import-restish discoverability"
           (fn []
             (it "completes the profile subcommand"
@@ -934,4 +1122,18 @@
                     (assert.is_nil (cli.select-path data ".nope.deeper"))
                     (assert.is_nil (cli.select-path data ".items[9].name"))))
               (it "returns the data for an empty path"
-                  (fn [] (assert.are.same data (cli.select-path data "")))))))
+                  (fn [] (assert.are.same data (cli.select-path data ""))))
+              (it "continues the path after picking fields"
+                  (fn []
+                    (assert.are.equal 2
+                                      (cli.select-path data
+                                                       ".meta.{count}.count"))
+                    (assert.are.same ["x" "y"]
+                                     (cli.select-path data
+                                                      ".items.{tags}.tags[0]"))))
+              (it "returns nil where the path does not fit the data"
+                  (fn []
+                    (assert.is_nil (cli.select-path data ".meta.{count"))
+                    (assert.is_nil (cli.select-path data ".meta.count[]"))
+                    (assert.is_nil (cli.select-path data ".meta.count[0]"))
+                    (assert.is_nil (cli.select-path data ".meta.count.x")))))))

@@ -6,3 +6,4 @@ luarocks.lock
 /test/*_spec.lua
 **.lua
 /tmp
+!test/fixtures/*.lua

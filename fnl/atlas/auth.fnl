@@ -404,19 +404,24 @@ any auth flow; signing tools and query api-keys supply none up front."
                           param (.. (util.url-encode name) "=")]
                       (or (not= nil (url:find (.. "?" param) 1 true))
                           (not= nil (url:find (.. "&" param) 1 true))))]
-        (when (not in-url?)
-          (let [query (collect [k v (pairs (or req.query {}))]
-                        k
-                        v)]
-            (tset query name value)
-            (tset req :query query)))
-        (base-fn req)))))
+        (base-fn (if in-url? req
+                     (doto (collect [k v (pairs req)] k v)
+                       (tset :query
+                             (doto (collect [k v (pairs (or req.query {}))]
+                                     k
+                                     v)
+                               (tset name value))))))))))
 
 (fn wrap-signing [auth-config base-fn]
   (when (and (= auth-config.name "external-tool")
              (not= (?. auth-config :params :output) "bearer-token"))
     (let [params auth-config.params]
-      (fn [req]
+      (fn [caller-req]
+        ;; signing rewrites url, body and headers: work on a copy
+        (local req (collect [k v (pairs caller-req)] k v))
+        (tset req :headers (collect [k v (pairs (or req.headers {}))]
+                             k
+                             v))
         ;; sign the URL that goes on the wire, query string included
         (when req.query
           (tset req :url (util.append-query req.url req.query))
@@ -429,10 +434,8 @@ any auth flow; signing tools and query api-keys supply none up front."
             (tset req :body nil)))
         (let [extra (external-signing-headers params req)]
           (when extra
-            (let [headers (or req.headers {})]
-              (each [k vs (pairs extra)]
-                (tset headers k (if (= (type vs) :table) (. vs 1) vs)))
-              (tset req :headers headers)))
+            (each [k vs (pairs extra)]
+              (tset req.headers k (if (= (type vs) :table) (. vs 1) vs))))
           (base-fn req))))))
 
 (fn wrap-http-fn [auth-config base-fn]
