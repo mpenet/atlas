@@ -147,3 +147,56 @@
                   (assert.is_true (expr.eval-criterion {:response {:body (json.decode "{\"a\":null}"
                                                                                       true)}}
                                                        {:condition "$response.body#/a == null"}))))))
+
+(describe "JSON null across atlas"
+          (fn []
+            (local expr (require :atlas.arazzo.expr))
+            (local refs (require :atlas.refs))
+            (local util (require :atlas.util))
+            (local request (require :atlas.cli.request))
+            (local {: select-path} (require :atlas.cli.output))
+            (it "is kept, not copied, by the ref resolver"
+                (fn []
+                  (let [schema (json.decode "{\"enum\":[\"red\",null]}")
+                        v ((refs.resolver {}) schema)]
+                    (assert.are.equal json.null (. v.enum 2))
+                    (assert.are.same [] (validate.check v json.null)))))
+            (it "survives Arazzo payloads, and a missing value in an array is null"
+                (fn []
+                  (let [v (expr.eval {:inputs {:b 2}}
+                                     (json.decode "{\"tags\":[\"a\",null],\"x\":[\"$inputs.b\",\"$inputs.a\"]}"
+                                                  true))]
+                    (assert.are.equal "{\"tags\":[\"a\",null],\"x\":[2,null]}"
+                                      (json.encode v)))))
+            (it "is a missing path parameter, and left out of queries"
+                (fn []
+                  (assert.has.error #(util.resolve-path "/pets/{id}"
+                                                        {:id json.null})
+                                    "missing required path parameter: id")
+                  (assert.are.equal "a=1"
+                                    (util.query-string {:a 1 :b json.null}))
+                  (assert.are.equal "c=1"
+                                    (util.query-string {:c (json.array [1
+                                                                        json.null])}))))
+            (it "never matches a regex"
+                (fn []
+                  (assert.is_false (expr.eval-criterion {:response {:body {:x json.null}}}
+                                                        {:context "$response.body#/x"
+                                                         :type "regex"
+                                                         :condition "^n"}))))
+            (it "is replaced by body fields set under it"
+                (fn []
+                  (assert.are.equal "{\"o\":{\"k\":1}}"
+                                    (json.encode (request.build-body [["o.k"
+                                                                       "1"]]
+                                                                     nil
+                                                                     (json.decode "{\"o\":null}"
+                                                                                  true))))
+                  (assert.has.error #(request.build-body [["s" "x"]] nil
+                                                         json.null))))
+            (it "matches nothing in --select paths"
+                (fn []
+                  (let [data (json.decode "{\"a\":null}" true)]
+                    (assert.is_nil (select-path data ".a[]"))
+                    (assert.is_nil (select-path data ".a.{x}"))
+                    (assert.is_nil (select-path data ".a.b")))))))

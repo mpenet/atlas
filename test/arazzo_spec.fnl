@@ -815,6 +815,41 @@
                     (assert.are.same {:a {:b "new"} :keep "k" :c 3}
                                      (. seen 1 :body)))))))
 
+(describe "request body replacements"
+          (fn []
+            (it "leave the inputs they start from alone"
+                (fn []
+                  (let [seen []
+                        clients {:api (make-client {:op (fn [req]
+                                                          (table.insert seen
+                                                                        req)
+                                                          (ok-resp {}))})}
+                        inputs {:pet {:name "rex"}}]
+                    (arazzo.run-workflow (one-step-doc {:operationId "op"
+                                                        :requestBody {:payload "$inputs.pet"
+                                                                      :replacements [{:target "/name"
+                                                                                      :value "changed"}]}})
+                                         "wf" inputs clients {})
+                    (assert.are.same {:name "changed"} (. seen 1 :body))
+                    (assert.are.same {:pet {:name "rex"}} inputs))))))
+
+(describe "workflow inputs from another file"
+          (fn []
+            (it "resolve against the document's location"
+                (fn []
+                  (let [dir (os.tmpname)]
+                    (os.remove dir)
+                    (os.execute (.. "mkdir -p '" dir "'"))
+                    (with-open [f (io.open (.. dir "/inputs.json") :w)]
+                      (f:write "{\"W\":{\"type\":\"object\",\"properties\":{\"n\":{\"type\":\"integer\",\"default\":5}}}}"))
+                    (with-open [f (io.open (.. dir "/flow.json") :w)]
+                      (f:write "{\"arazzo\":\"1.0.0\",\"info\":{},\"workflows\":[{\"workflowId\":\"w\",\"inputs\":{\"$ref\":\"inputs.json#/W\"},\"steps\":[],\"outputs\":{\"n\":\"$inputs.n\"}}]}"))
+                    (let [(ok result) (pcall arazzo.run (.. dir "/flow.json")
+                                             "w" {} {:clients {}})]
+                      (os.execute (.. "rm -rf '" dir "'"))
+                      (assert.is_true ok result)
+                      (assert.are.equal 5 result.outputs.n)))))))
+
 (describe "parameters"
           (fn []
             (it "must say where they go"

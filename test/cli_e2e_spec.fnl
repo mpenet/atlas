@@ -369,6 +369,34 @@
                     (assert.are.equal 1 r.code)
                     (assert.are.equal "--logout doesn't apply to op (it is for auth)\n"
                                       r.err))))
+            (it "scopes options to profile and auth too"
+                (fn []
+                  (let [r (atlas-run ["profile" "list" "--timeout" "3"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.are.equal "--timeout doesn't apply to profile (it is for op and az)\n"
+                                      r.err))
+                  (let [r (atlas-run ["profile" "list" "--dry-run"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "--dry-run only applies to profile import-restish"
+                                                  1 true)))
+                  (let [r (atlas-run ["auth" "p" "--base-url" "http://x"])]
+                    (assert.are.equal 1 r.code))
+                  (assert.are.equal "authorization: Bearer t0k"
+                                    (. (atlas-run ["auth"
+                                                   "p"
+                                                   "--ssl.verify=none"])
+                                       :out))))
+            (it "prints usage for --help on profile and auth, doing nothing else"
+                (fn []
+                  (each [_ args (ipairs [["auth" "p" "--help"]
+                                         ["profile"
+                                          "import-restish"
+                                          "x.json"
+                                          "--help"]])]
+                    (let [r (atlas-run args)]
+                      (assert.are.equal 0 r.code)
+                      (assert.is_truthy (r.out:find "Usage: atlas" 1 true))
+                      (assert.is_nil (r.out:find "Bearer" 1 true))))))
             (it "explains bad option values"
                 (fn []
                   (let [r (atlas-run ["op" "p" "get-pet" "3" "--output=yml"])]

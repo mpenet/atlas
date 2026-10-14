@@ -16,6 +16,7 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - The bash completion script treats the candidates it gets (operation names, enum values from the spec…) as data: `compgen -W` expanded `$(...)` in them, so a spec could run commands when completing.
 - On a redirect to another origin, the headers authentication added are dropped whatever their name, and logs and dry runs redact them and a query API key whatever their name; user info in URLs is redacted too.
 - The schema cache directory is private to the user (0700).
+- A URL whose host part holds a backslash matches no origin, so credentials never follow it (libcurl reads `http://a\@b/` as host `b`); retried schema fetches and next-page requests keep the marking of credential headers, so a later cross-origin redirect drops them; `$ref` errors redact the document's URL.
 
 ### Added
 

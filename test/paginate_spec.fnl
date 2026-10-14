@@ -14,7 +14,7 @@
 
 (fn page [body ?next]
   "A 200 response shaped like the real transport's, with :raw JSON text."
-  (let [json (require :lunajson)]
+  (let [json (require :atlas.json)]
     {:status 200
      :headers (if ?next {:link (.. "<" ?next ">; rel=\"next\"")} {})
      :body body
@@ -81,11 +81,43 @@
             (it "does not follow links that only look same-origin"
                 (fn []
                   (each [_ link (ipairs ["https://evil.example?@h/a?p=2"
-                                         "https://evil.example#@h/a"])]
+                                         "https://evil.example#@h/a"
+                                         "https://h\\@evil.example/a"])]
                     (let [(http seen) (site {"https://h/a" (page [1] link)})
                           f (paginate.wrap http {})]
                       (f {:method "GET" :url "https://h/a" :headers {}})
                       (assert.are.equal 1 (length seen))))))
+            (it "requests next pages like the first, sensitive headers marked"
+                (fn []
+                  (let [seen []
+                        json (require :atlas.json)
+                        pages {"https://h/a" (page [1] "https://h/a?p=2")
+                               "https://h/a?p=2" (page [2])}
+                        f (paginate.wrap (fn [req]
+                                           (table.insert seen req)
+                                           (let [util (require :atlas.util)]
+                                             (. pages
+                                                (util.append-query req.url
+                                                                   (or req.query
+                                                                       {})))))
+                                         {})]
+                    (f {:method "GET"
+                        :url "https://h/a"
+                        :headers {:x-key "k"}
+                        :sensitive-headers [:x-key]})
+                    (assert.are.same [:x-key] (. seen 2 :sensitive-headers)))))
+            (it "keeps null members in the merged body"
+                (fn []
+                  (let [json (require :atlas.json)
+                        (http) (site {"https://h/a" (page (json.decode "[{\"a\":null}]"
+                                                                       true)
+                                                          "https://h/a?p=2")
+                                      "https://h/a?p=2" (page (json.decode "[{\"a\":null}]"
+                                                                           true))})
+                        f (paginate.wrap http {})
+                        r (f {:method "GET" :url "https://h/a" :headers {}})]
+                    (assert.are.equal "[{\"a\":null},{\"a\":null}]"
+                                      (json.encode r.body)))))
             (it "stops at max-pages"
                 (fn []
                   (let [(http seen) (site {"https://h/1" (page [1]

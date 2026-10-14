@@ -1,6 +1,7 @@
 ;; ABOUTME: Resolves $refs in OpenAPI and Arazzo documents: local JSON
 ;; ABOUTME: pointers, references into other files or URLs; recursion stays cyclic.
 (local util (require :atlas.util))
+(local json (require :atlas.json))
 
 (fn split-ref [ref]
   "(document-part pointer) of a $ref; the pointer is percent-decoded."
@@ -44,8 +45,9 @@ nowhere, or only at each other, raise."
               value (util.json-pointer target.root pointer)]
           (when (= nil value)
             (error (.. "unresolved $ref '" ref "'"
-                       (if target.base (.. " in " target.base) ""))
-                   0))
+                       (if target.base
+                           (.. " in " (util.redact-url target.base))
+                           "")) 0))
           (values target value (.. (or target.base "") "#" pointer)))))
 
     (fn ref-of [value]
@@ -86,7 +88,9 @@ nowhere, or only at each other, raise."
     (set deref (fn [from value]
                  (match (ref-of value)
                    ref (resolve-ref from ref)
-                   _ (if (not= (type value) :table) value (. copies value)
+                   _ (if (or (not= (type value) :table) (= value json.null))
+                         value
+                         (. copies value)
                          (. copies value)
                          ;; the copy keeps the table's metatable (JSON arrays)
                          (let [out (setmetatable {} (getmetatable value))]

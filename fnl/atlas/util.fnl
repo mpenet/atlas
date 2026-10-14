@@ -1,5 +1,6 @@
 ;; ABOUTME: Shared helpers: JSON pointers, URL/form encoding, path templating,
 ;; ABOUTME: URL resolution, header lookup, secrets and atlas directories.
+(local json (require :atlas.json))
 (fn unescape-pointer [segment]
   "A JSON Pointer segment with ~1 and ~0 unescaped (in that order)."
   (pick-values 1 (-> segment (: :gsub "~1" "/") (: :gsub "~0" "~"))))
@@ -75,17 +76,18 @@ dashes (getPetById → get-pet-by-id, projects/list_cards → projects-list-card
 
 (fn origin [url]
   "scheme://host:port of an http(s) URL, port explicit, as libcurl connects:
-the authority ends at the first / ? # (and at \\, which URL parsers disagree
-about), and user info before its last @ is dropped. nil for anything else."
+the authority ends at the first / ? #, and user info before its last @ is
+dropped. nil for anything else, and for an authority holding a \\, which
+URL parsers read differently: such a URL matches no origin."
   (let [(scheme rest) (url:match "^(%a[%w+.-]*)://(.*)$")
         scheme (and scheme (scheme:lower))]
     (when (and scheme (. default-ports scheme))
-      (let [authority (rest:match "^([^/?#\\]*)")
+      (let [authority (rest:match "^([^/?#]*)")
             hostport (or (authority:match "^.*@(.*)$") authority)
             (host port) (if (hostport:match "^%[")
                             (hostport:match "^(%[[^%]]*%]):?(%d*)$")
                             (hostport:match "^([^:]*):?(%d*)$"))]
-        (when (and host (not= host ""))
+        (when (and host (not= host "") (not (authority:find "\\" 1 true)))
           (.. scheme "://" (host:lower) ":"
               (if (= port "") (. default-ports scheme) port)))))))
 
@@ -118,8 +120,7 @@ about), and user info before its last @ is dropped. nil for anything else."
 (fn redact-url [url ?names]
   "url with its user info masked, and the values of query parameters that look
 like credentials or are in the set ?names (lowercase)."
-  (let [(without-userinfo) (url:gsub "^(%a[%w+.-]*://)[^/?#@]*@"
-                                     "%1<redacted>@")]
+  (let [(without-userinfo) (url:gsub "^(%a[%w+.-]*://)[^/?#]*@" "%1<redacted>@")]
     (pick-values 1 (without-userinfo:gsub "([?&])([^=&#]+)=([^&#]*)"
                      (fn [sep name value]
                        (let [n (url-decode name)]
@@ -168,9 +169,10 @@ delimiters are not."
               explode
               (icollect [_ p (ipairs keys)]
                 (.. (enc p) "=" (enc (. value p))))
-              [(.. k "=" (table.concat (icollect [_ p (ipairs keys)]
-                                         (.. (enc p) "," (enc (. value p))))
-                                       ","))])))))
+              (let [d (. delimiters style)]
+                [(.. k "=" (table.concat (icollect [_ p (ipairs keys)]
+                                           (.. (enc p) d (enc (. value p))))
+                                         d))]))))))
 
 (fn query-string [params ?styles]
   "Query string for params, keys sorted; ?styles maps a parameter name to
@@ -181,8 +183,14 @@ its {:style :explode} (default: form, exploded)."
     (each [_ name (ipairs names)]
       (let [{: style : explode} (or (?. ?styles name) {})
             style (or style :form)
-            explode (if (= nil explode) (= style :form) explode)]
-        (each [_ part (ipairs (query-pairs name (. params name) style explode))]
+            explode (if (= nil explode) (= style :form) explode)
+            ;; null is no value: left out, as are null list elements
+            raw (. params name)
+            value (if (= raw json.null) nil (json.array? raw)
+                      (icollect [_ x (ipairs raw)]
+                        (when (not= x json.null) x)) raw)]
+        (each [_ part (ipairs (if (= nil value) []
+                                  (query-pairs name value style explode)))]
           (table.insert parts part))))
     (table.concat parts "&")))
 
@@ -248,7 +256,8 @@ a,b and objects as k1,v1,k2,v2 (keys sorted), each part url-encoded."
   (pick-values 1 (template:gsub "{([^}]+)}"
                                 (fn [param]
                                   (let [v (. params param)]
-                                    (assert (not= nil v)
+                                    (assert (and (not= nil v)
+                                                 (not= v json.null))
                                             (.. "missing required path parameter: "
                                                 param))
                                     (simple-style v))))))

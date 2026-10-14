@@ -103,6 +103,13 @@
                     (tset node :properties {:next node})
                     (let [v (deref {} {:schema node})]
                       (assert.are.equal v.schema v.schema.properties.next)))))
+            (it "keeps credentials of a document's URL out of errors"
+                (fn []
+                  (let [(ok err) (pcall deref {} {:$ref "ext.json#/Nope"}
+                                        {:base "http://user:SECRETPW@h/spec.json"
+                                         :load (fn [_] {})})]
+                    (assert.is_false ok)
+                    (assert.is_nil (: (tostring err) :find "SECRETPW" 1 true)))))
             (it "raises for refs that resolve to nothing"
                 (fn []
                   (let [(ok err) (pcall deref {:components {}}

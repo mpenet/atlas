@@ -278,6 +278,17 @@
                                               :sensitive-headers [:x-appid]})
                       (assert.are.same {:accept "application/json"}
                                        (. seen 2 :headers)))))
+              (it "drops credentials on redirects with a backslash in the host"
+                  (fn []
+                    (let [target "https://a.test\\@evil.test/y"
+                          (send seen) (site {"https://a.test/x" (moved target)
+                                             target {:status 200 :headers {}}})]
+                      (http.follow-redirects send
+                                             {:method "GET"
+                                              :url "https://a.test/x"
+                                              :headers creds})
+                      (assert.are.same {:accept "application/json"}
+                                       (. seen 2 :headers)))))
               (it "drops credentials on redirects that only look same-origin"
                   (fn []
                     (let [target "https://evil.test?@a.test/y"

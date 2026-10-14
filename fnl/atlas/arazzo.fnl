@@ -18,11 +18,23 @@
 
 ;; ---- loading ----
 
+;; where each loaded document came from, to resolve its relative $refs
+(local doc-locations (setmetatable {} {:__mode :k}))
+
 (fn load-doc [path]
   "Load and parse an Arazzo document (JSON or YAML) from a local path or http(s):// URL."
   (let [(ok parsed) (pcall yaml.decode (http-mod.fetch-text path))]
     (assert ok (.. "failed to parse arazzo document: " (tostring parsed)))
+    (when (= (type parsed) :table)
+      (tset doc-locations parsed path))
     parsed))
+
+(fn doc-resolver [doc]
+  "$ref resolver for doc, references into other files resolved from its
+location (no credentials are sent for them)."
+  (refs.resolver doc
+                 {:base (. doc-locations doc)
+                  :load #(atlas.load-schema $ {:credentials false})}))
 
 ;; ---- client building ----
 
@@ -129,8 +141,9 @@ Expression format: '{$sourceDescriptions.NAME.url}#/paths/~1foo/method'"
   (let [result {:headers {} :path {} :query {}}
         cookies []]
     (each [_ p (ipairs params)]
-      (let [v (expr.eval ctx p.value)]
-        (match p.in
+      (let [raw (expr.eval ctx p.value) ;; a null value is no value
+            v (when (not= raw json.null) raw)]
+        (match (when (not= nil v) p.in)
           :path (tset result.path p.name v)
           :query (tset result.query p.name v)
           :header (tset result.headers (p.name:lower) v)
@@ -155,9 +168,15 @@ way are created)."
     (tset node (if (json.array? node) (+ 1 (tonumber last)) last) new)
     value))
 
+(fn copy [v]
+  "A deep copy of decoded JSON v, arrays still arrays."
+  (if (or (not= (type v) :table) (= v json.null)) v
+      (setmetatable (collect [k x (pairs v)] k (copy x)) (getmetatable v))))
+
 (fn request-body [ctx request-body]
-  "The step's body: the evaluated payload with its replacements applied."
-  (let [body (expr.eval ctx request-body.payload)]
+  "The step's body: the evaluated payload with its replacements applied (to
+a copy: the payload may be an input or another step's data)."
+  (let [body (copy (expr.eval ctx request-body.payload))]
     (each [_ r (ipairs (or request-body.replacements []))]
       (assert (= (type body) :table)
               "requestBody replacements need a structured payload")
@@ -389,7 +408,7 @@ nil when a failure is left unhandled."
   (let [given (collect [k v (pairs (or inputs {}))]
                 k
                 v)
-        schema (when wf.inputs ((refs.resolver doc) wf.inputs))]
+        schema (when wf.inputs ((doc-resolver doc) wf.inputs))]
     (each [name prop (pairs (or (?. schema :properties) {}))]
       (when (and (= nil (. given name)) (not= nil (?. prop :default)))
         (tset given name prop.default)))
@@ -467,7 +486,7 @@ order; the CLI accepts these as positional arguments."
 (fn workflow-inputs [doc wf]
   "The workflow's inputs JSON Schema with $refs resolved, or nil."
   (when wf.inputs
-    ((refs.resolver doc) wf.inputs)))
+    ((doc-resolver doc) wf.inputs)))
 
 ;; ---- public API ----
 

@@ -12,8 +12,10 @@
                                     (util.origin "https://evil.com?@api.good.com/"))
                   (assert.are.equal "https://evil.com:443"
                                     (util.origin "https://evil.com#@api.good.com/x"))
-                  (assert.are.equal "https://evil.com:443"
-                                    (util.origin "https://evil.com\\@api.good.com/"))))
+                  ;; parsers disagree about \ (libcurl reads it as user info):
+                  ;; such a URL has no origin, so it never matches one
+                  (assert.is_nil (util.origin "https://evil.com\\@api.good.com/"))
+                  (assert.is_nil (util.origin "http://127.0.0.1:9001\\@127.0.0.1:9002/"))))
             (it "drops user info, lowercases, and makes the port explicit"
                 (fn []
                   (assert.are.equal "https://api.good.com:443"
@@ -34,6 +36,10 @@
                 (fn []
                   (assert.are.equal "https://<redacted>@h/x?api_key=<redacted>&page=2"
                                     (util.redact-url "https://me:pw@h/x?api_key=s&page=2"))))
+            (it "masks all the user info, up to its last @"
+                (fn []
+                  (assert.are.equal "http://<redacted>@127.0.0.1:1/x"
+                                    (util.redact-url "http://a@b:secret@127.0.0.1:1/x"))))
             (it "masks query parameters named as sensitive"
                 (fn []
                   (assert.are.equal "https://h/x?appid=<redacted>&page=2"
@@ -69,6 +75,14 @@
                     (assert.are.equal "a=1|2"
                                       (qs {:a [1 2]}
                                           {:a {:style "pipeDelimited"}}))
+                    (assert.are.equal "c=G|200|R|100"
+                                      (qs {:c {:R 100 :G 200}}
+                                          {:c {:style "pipeDelimited"
+                                               :explode false}}))
+                    (assert.are.equal "c=G%20200%20R%20100"
+                                      (qs {:c {:R 100 :G 200}}
+                                          {:c {:style "spaceDelimited"
+                                               :explode false}}))
                     (assert.are.equal "f[x]=1&f[y]=a%20b"
                                       (qs {:f {:x 1 :y "a b"}}
                                           {:f {:style "deepObject"}}))

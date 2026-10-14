@@ -22,11 +22,12 @@
        ;; :scope        :op, :az, :auth or :any
        ;; :also         other commands that accept it, though usage lists it
        ;;               under :scope
-       ;; :family       a --PREFIX.NAME=VALUE family, listed for usage/completion only
+       ;; :family       a --PREFIX.NAME=VALUE family (its scope applies to all names)
        [{:names ["--list"] :key :list :scope :op :help "List all operations"}
         {:names ["--help"]
          :key :help
          :scope :any
+         :also [:auth :profile]
          :help "Show documentation for an operation or workflow (or list them)"}
         {:names ["--body" "-d"]
          :key :body
@@ -96,6 +97,7 @@
         {:family "--ssl."
          :shown "--ssl.KEY=VAL"
          :scope :any
+         :also [:auth]
          :help "TLS option: cafile, capath, certificate, key, verify (e.g. --ssl.verify=none)"}
         {:names ["--output"]
          :key :output
@@ -242,13 +244,13 @@ returns (kind key value); kind is a value of field-prefixes."
                        :auth :auth
                        :profile :profile})
 
-;; the scope of each --PREFIX.NAME=VALUE family
-(local field-scopes {:query :op
-                     :header :op
-                     :input :az
-                     :body :any
-                     :server :any
-                     :ssl :any})
+;; the option entry of each --PREFIX.NAME=VALUE family, by field kind: its
+;; :scope and :also say which commands take it
+(local family-options (collect [_ o (ipairs options)]
+                        (when o.family
+                          (values (. field-prefixes
+                                     (o.family:match "^%-%-(.-)%.$"))
+                                  o))))
 
 (fn check-scopes [cmd used]
   "Raise for an option that doesn't apply to command cmd; used is a list of
@@ -256,10 +258,13 @@ returns (kind key value); kind is a value of field-prefixes."
   (let [scope (. command-scopes (or cmd ""))]
     (when scope
       (each [_ [name opt-scope also] (ipairs used)]
-        (when (not (or (= opt-scope :any) (= opt-scope scope)
+        ;; :any is any API command: op and az
+        (when (not (or (= opt-scope scope)
+                       (and (= opt-scope :any) (or (= scope :op) (= scope :az)))
                        (accumulate [ok false _ s (ipairs (or also [])) &until ok]
                          (= s scope))))
-          (error (.. name " doesn't apply to " cmd " (it is for " opt-scope ")")
+          (error (.. name " doesn't apply to " cmd " (it is for "
+                     (if (= opt-scope :any) "op and az" opt-scope) ")")
                  0))))))
 
 (fn parse-args [args]
@@ -290,7 +295,8 @@ returns (kind key value); kind is a value of field-prefixes."
             (let [(kind k v) (field-arg a)]
               (table.insert used
                             [(a:match "^(%-%-?[%w-]+%.?)")
-                             (. field-scopes kind)])
+                             (?. family-options kind :scope)
+                             (?. family-options kind :also)])
               (add-field r kind k v)) ;; -iKEY=VAL, glued
             (a:match "^%-i.+=")
             (do

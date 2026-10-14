@@ -27,9 +27,16 @@
                  (when long
                    (if o.value (.. long "=") long)))))
 
+(fn applies? [o scope]
+  "Whether option o applies to a command of scope, as parsing decides: its
+own scope, :any for the API commands op and az, or one of its :also."
+  (or (= o.scope scope) (and (= o.scope :any) (or (= scope :op) (= scope :az)))
+      (accumulate [ok false _ s (ipairs (or o.also [])) &until ok]
+        (= s scope))))
+
 (fn scope-options [scope]
   (icollect [_ o (ipairs options)]
-    (when (or (= o.scope scope) (= o.scope :any))
+    (when (applies? o scope)
       {:shown (shown o) :complete (completion o) :help o.help})))
 
 (fn usage []
@@ -175,9 +182,12 @@ operation, or an Arazzo document's workflow and inputs."
                       (if kind ((field-entries prefix kind context) rest) []))
                     (current:match "^%-")
                     (icollect [_ o (ipairs (scope-options (match cmd
+                                                            :op :op
                                                             :az :az
+                                                            :arazzo :az
                                                             :auth :auth
-                                                            _ :op)))]
+                                                            :profile :profile
+                                                            _ :none)))]
                       (when o.complete {:value o.complete :help o.help}))
                     (positional-entries (or ctx.config {}) positional context))
         matching (icollect [_ e (ipairs entries)]

@@ -131,12 +131,16 @@ meant a JSON pointer into it: raise saying so."
 Text that only starts with $ (\"$5\") is not an expression and stays as is."
   (if (and (= (type expr) :string) (expression? expr)) (resolve-expr ctx expr)
       (and (= (type expr) :string) (expr:match "{%$")) (eval-template ctx expr)
-      (= (type expr) :table) (let [out (collect [k v (pairs expr)]
-                                         k
-                                         (eval ctx v))]
-                               ;; arrays stay arrays, even empty ones
-                               (if (json.array? expr) (json.array out) out))
-      expr))
+      (= expr json.null) expr
+      ;; arrays stay arrays, and an element that resolves to nothing is null,
+      ;; so the others keep their place
+      (json.array? expr) (json.array (fcollect [i 1 (length expr)]
+                                      (match (eval ctx (. expr i))
+                                        nil json.null
+                                        v v)))
+      (= (type expr) :table) (collect [k v (pairs expr)]
+                              k
+                              (eval ctx v)) expr))
 
 ;; ---- simple condition language ----
 ;; Grammar (Arazzo 1.0 "simple" criteria):
@@ -341,7 +345,7 @@ Arazzo spec, a doubled quote stands for the quote itself."
       ;; a missing value matches nothing
       :regex
       (let [v (eval ctx criterion.context)]
-        (and (not= nil v)
+        (and (not= nil v) (not= json.null v)
              (not= nil (: (tostring v) :match criterion.condition))))
       _
       (error (.. "unsupported criterion type: "

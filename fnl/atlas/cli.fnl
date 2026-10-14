@@ -140,6 +140,8 @@ profiles are kept. --dry-run prints the converted profiles instead."
                                 (table.concat added ", ")))))))
 
 (fn run-profile [subcmd name p env]
+  (when (and p.dry-run (not= subcmd :import-restish))
+    (die "--dry-run only applies to profile import-restish"))
   (match subcmd
     :list (profile-list env.config)
     :show (profile-show env.config name)
@@ -382,6 +384,7 @@ invalid body unless --no-validate."
                         :bash (completion-bash)
                         :zsh (completion-zsh)
                         _ (die "Usage: atlas completion <fish|bash|zsh>"))
+          (where (or :profile :auth) p.help) (usage)
           :profile (run-profile p.schema p.operation p env)
           :auth (run-auth p.schema p env.config)
           (where (or :az :arazzo)) (run-arazzo p env)

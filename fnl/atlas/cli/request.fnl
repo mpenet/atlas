@@ -38,14 +38,15 @@ multipart operations take JSON or YAML; any other type is sent as-is."
   (var cur t)
   (for [i 1 (- (length keys) 1)]
     (let [k (. keys i)]
-      (when (not= (type (. cur k)) :table)
+      (when (or (not= (type (. cur k)) :table) (= (. cur k) json.null))
         (tset cur k {}))
       (set cur (. cur k))))
   (tset cur (. keys (length keys)) v))
 
 (fn build-body [fields ?schema ?base]
   "Apply [KEY.PATH VAL] fields onto ?base, coercing each value by ?schema."
-  (assert (or (= ?base nil) (= (type ?base) :table))
+  (assert (or (= ?base nil)
+              (and (= (type ?base) :table) (not= ?base json.null)))
           "--body.KEY=VAL fields require --body to be a JSON object")
   (let [body (or ?base {})]
     (each [_ [path v] (ipairs fields)]

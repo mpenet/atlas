@@ -55,11 +55,13 @@ survive. opts: {:max-pages n} (default 25)"
                   (if (or (not target) (>= (length chunks) max-pages)
                           (not= (util.origin target) (util.origin first-url)))
                       (set done true)
-                      (let [page (http-fn {:method "GET"
-                                           :url target
-                                           :headers req.headers
-                                           :ssl req.ssl
-                                           :timeout req.timeout})
+                      ;; the original request (headers, TLS, timeout, what
+                      ;; authentication marked sensitive) at the next URL
+                      (let [page (http-fn (doto (collect [k v (pairs req)] k v)
+                                            (tset :method "GET")
+                                            (tset :url target)
+                                            (tset :query nil)
+                                            (tset :body nil)))
                             items (array-text page)]
                         (if items
                             (do
@@ -75,7 +77,7 @@ survive. opts: {:max-pages n} (default 25)"
                                           ",") "]")]
                 {:status first.status
                  :headers first.headers
-                 :body (json.decode raw)
+                 :body (json.decode raw true)
                  :raw raw
                  :pages (length chunks)
                  :next-page-status failed-status})))))))

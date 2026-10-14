@@ -66,11 +66,15 @@ headers in the set ?names (lowercase)."
                    (string.format (.. "%-" width "s  %s") op.k op.summary)
                    op.k))))))
 
+(fn container? [v]
+  "Whether a path can go into v: an array or object, not null."
+  (and (= (type v) :table) (not= v json.null)))
+
 (fn pick-fields [value fields]
   "value with only fields kept: an object, or each object of an array."
   (let [pick (fn [obj]
                (collect [_ f (ipairs fields)] f (. obj f)))]
-    (when (= (type value) :table)
+    (when (container? value)
       (if (or (json.array? value) (= (type (. value 1)) :table))
           (json.array (icollect [_ obj (ipairs value)]
                         (when (= (type obj) :table) (pick obj))))
@@ -81,15 +85,15 @@ headers in the set ?names (lowercase)."
 over an array, {a,b} to keep fields. nil when the path doesn't match."
   (if (or (= nil data) (= path "")) data (path:match "^%.")
       (select-path data (path:sub 2)) (path:match "^%[%]")
-      (when (= (type data) :table)
+      (when (container? data)
         (json.array (icollect [_ v (ipairs data)] (select-path v (path:sub 3)))))
       (path:match "^%[%d+%]")
       (let [(index rest) (path:match "^%[(%d+)%](.*)$")]
-        (when (= (type data) :table)
+        (when (container? data)
           (select-path (. data (+ 1 (tonumber index))) rest)))
       (path:match "^{")
       (let [(fields rest) (path:match "^{([^}]+)}(.*)$")]
-        (when (and fields (= (type data) :table))
+        (when (and fields (container? data))
           (let [picked (pick-fields data
                                     (icollect [f (fields:gmatch "[^,]+")]
                                       (f:match "^%s*(.-)%s*$")))]
@@ -98,7 +102,7 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
                               (select-path obj rest)))
                 (select-path picked rest)))))
       (let [(key rest) (path:match "^([^%.%[{]+)(.*)$")]
-        (when (and key (= (type data) :table))
+        (when (and key (container? data))
           (select-path (. data key) rest)))))
 
 (fn request-text [req]

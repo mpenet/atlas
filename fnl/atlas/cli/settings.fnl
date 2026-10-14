@@ -208,17 +208,24 @@ request signing, logging, and the transport (or dry-run printing)."
   "Fetch and parse a schema URL through opts.transport. Credentials are only
 sent after the server answers 401/403, so help and listings don't trigger
 authentication. opts: {:transport :headers :ssl :auth-headers}"
-  (let [send #(opts.transport {:method "GET" :url url :headers $ :ssl opts.ssl})
+  (let [send #(opts.transport {:method "GET"
+                               : url
+                               :headers $1
+                               :ssl opts.ssl
+                               :sensitive-headers $2})
         first (send (or opts.headers {}))
         resp (if (and opts.auth-headers
                       (or (= first.status 401) (= first.status 403)))
                  (let [headers (collect [k v (pairs (or opts.headers {}))]
                                  k
-                                 v)]
+                                 v)
+                       added []]
                    (each [k v (pairs (opts.auth-headers))]
                      (when (= nil (util.header headers k))
-                       (tset headers k v)))
-                   (send headers))
+                       (tset headers k v)
+                       (table.insert added k)))
+                   ;; a redirect to another origin must drop them
+                   (send headers added))
                  first)]
     (assert (util.success? resp.status)
             (string.format "HTTP %s fetching schema from %s" resp.status

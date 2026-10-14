@@ -849,6 +849,12 @@
                                                                               :load-schema (fn [_]
                                                                                              completion-schema)}))]
                                      e.value))))
+            (it "offers only the options a command accepts"
+                (fn []
+                  (assert.are.same ["--dry-run" "--help"]
+                                   (complete "profile import-restish x --"))
+                  (assert.are.same ["--help" "--logout" "--ssl."]
+                                   (complete "auth p --"))))
             (it "completes shells"
                 (fn []
                   (assert.are.same ["bash" "fish" "zsh"]
@@ -1143,6 +1149,19 @@
                   (assert.is_true (. (cli.display-options nil {:no-color true}
                                                           {} true)
                                      :no-color))))
+            (it "marks the credentials it adds after a 401 as sensitive"
+                (fn []
+                  (let [seen []
+                        responses [{:status 401 :headers {} :raw ""}
+                                   {:status 200
+                                    :headers {}
+                                    :raw "{\"openapi\":\"3.0.0\"}"}]]
+                    (cli.fetch-schema "https://h/s.json"
+                                      {:transport (fn [req]
+                                                    (table.insert seen req)
+                                                    (. responses (length seen)))
+                                       :auth-headers #{:x-client "k"}})
+                    (assert.are.same [:x-client] (. seen 2 :sensitive-headers)))))
             (it "keeps credentials out of schema fetch errors"
                 (fn []
                   (each [_ resp (ipairs [{:status 404 :headers {} :raw ""}
