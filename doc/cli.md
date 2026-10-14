@@ -90,6 +90,9 @@ atlas op https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 -v
 | `-v`, `--verbose` | Print request details and response headers; for Arazzo, enables live step progress |
 | `--reload` | Bypass the schema cache and re-fetch |
 | `--cache-ttl=N` | Schema cache TTL in seconds (default: 3600) |
+| `--` | End of options: everything after is positional (e.g. a path param starting with `-`) |
+
+Unknown options are rejected with an error rather than ignored.
 
 ## Request body
 
@@ -105,14 +108,18 @@ atlas op myapi add-pet --body=@pet.json
 # from stdin
 cat pet.json | atlas op myapi add-pet -d @-
 
-# individual fields (numbers coerced automatically)
+# individual fields (typed from the request body schema)
 atlas op myapi add-pet --body.name=Rex --body.status=available --body.age=3
 
 # nested fields — dot-separated path, intermediate objects created and merged
 atlas op myapi create-vm --body.instance-type.id=abc123 --body.disk-size=10
 ```
 
-`--body.KEY=VAL` flags are deep-merged: `--body.a.b=1 --body.a.c=2` produces `{"a":{"b":1,"c":2}}`. `--body=…` and `--body.KEY=VAL` are mutually exclusive; `--body=…` wins if both are given.
+`--body.KEY=VAL` flags are deep-merged: `--body.a.b=1 --body.a.c=2` produces `{"a":{"b":1,"c":2}}`. When combined with `--body=…`, the fields are merged over that JSON object.
+
+Field values are typed using the operation's request body schema: a `string` property keeps `007` as `"007"`, `integer`/`number` properties become numbers, `boolean` accepts `true`/`false`, and `array`/`object` properties take JSON. Fields without a schema follow JSON literal rules: `42`, `-1.5`, `true` and `false` are converted; anything else, including `007` or `0x10`, stays a string.
+
+Path parameters are always sent exactly as typed, percent-encoded.
 
 ## Response selection
 
@@ -180,7 +187,7 @@ content-type: application/json
 
 ## Profiles
 
-Save named configurations in `~/.config/atlas/config.json`:
+Save named configurations in `~/.config/atlas/config.json` (`$XDG_CONFIG_HOME/atlas/config.json` when `XDG_CONFIG_HOME` is set):
 
 ```json
 {
@@ -412,7 +419,7 @@ atlas auth myapi --logout
 atlas auth myapi
 ```
 
-Tokens are stored in `~/.cache/atlas/tokens/<profile>.json` (mode 0600).
+Tokens are stored in `~/.cache/atlas/tokens/<profile>.json` (mode 0600; `$XDG_CACHE_HOME` replaces `~/.cache` when set).
 
 ## mTLS
 
@@ -472,7 +479,7 @@ For a custom CA bundle or other luasec options, use `ssl` alongside or instead o
 
 ## Schema caching
 
-Schemas fetched from URLs are cached in `~/.cache/atlas/schemas/` with a 1-hour TTL.
+Schemas fetched from URLs are cached in `~/.cache/atlas/schemas/` (or `$XDG_CACHE_HOME/atlas/schemas/`) with a 1-hour TTL.
 
 ```sh
 # force re-fetch
@@ -518,7 +525,8 @@ atlas az <name-or-file> [workflow-id] [path-params...] [options]
 
 - `<name-or-file>` — a name from `~/.config/atlas/config.json` (see below), a local file path, or an `http(s)://` URL.
 - If `workflow-id` is omitted, all available workflows are listed.
-- The Arazzo document's `sourceDescriptions` of type `openapi` are loaded automatically as API clients.
+- The Arazzo document's `sourceDescriptions` of type `openapi` are loaded automatically as API clients. Relative source URLs resolve against the Arazzo document's own location.
+- Profile headers, OAuth/external-tool auth, TLS settings, timeout and `base-url` apply to every request. A `base-url` override is rejected when the document has more than one `openapi` source, since it would be ambiguous.
 
 ### Configuration
 
@@ -556,7 +564,7 @@ atlas az myapi create-resource --body.name=foo --profile=myapi-staging
 
 ### Path parameters
 
-Path parameters declared in a workflow are passed as positional arguments after the workflow ID, in the order they appear in the workflow's step parameters:
+Workflow inputs used as path parameters (`"value": "$inputs.NAME"`) can be passed as positional arguments after the workflow ID, in the order they first appear in the workflow's step parameters. Steps always fill path parameters by name, so the order in the Arazzo document doesn't matter for the request itself:
 
 ```sh
 # workflow with one path param (e.g. id)
@@ -607,7 +615,9 @@ atlas az myapi my-workflow --inputs='{"timeout":30,"region":"eu"}'
 atlas az myapi my-workflow --inputs=@inputs.json
 ```
 
-Merge priority (highest last): config `inputs` → `--inputs` blob → individual `-i`/`--input.*` flags.
+Merge priority (highest last): config `inputs` → positional path params → `--inputs` blob → `--body`/`-d` object → individual `-i`/`--input.*`/`--body.*` fields.
+
+Individual field values are typed by the workflow's `inputs` JSON Schema, with the same rules as `--body.KEY=VAL` for regular calls.
 
 ### Output modes
 
@@ -622,7 +632,7 @@ Merge priority (highest last): config `inputs` → `--inputs` blob → individua
 atlas az myapi create-resource --body.name=foo --arazzo-output=progress
 ```
 
-`-v` / `--verbose` is equivalent to `progress` mode and additionally logs every HTTP request (method, URL, headers, body) to stderr. Step outputs (declared in the Arazzo document) are printed after each step using the `--output` format.
+`-v` / `--verbose` is equivalent to `progress` mode and additionally logs every HTTP request (method, URL, headers, body) to stderr. Credentials in logged headers (`Authorization`, cookies, and names containing `key`, `token`, `secret`, `signature` or `password`) are redacted. Step outputs (declared in the Arazzo document) are printed after each step using the `--output` format.
 
 Progress output uses color (suppressed by `--no-color`):
 - `→ stepId` — step is running (dim)
@@ -633,24 +643,41 @@ Progress output uses color (suppressed by `--no-color`):
 
 | Expression | Resolves to |
 |------------|-------------|
-| `$inputs.KEY` | Workflow input |
+| `$inputs.KEY` | Workflow input (`$inputs.KEY#/ptr` for a JSON Pointer into it) |
 | `$statusCode` | HTTP status of current response |
+| `$method` | HTTP method of current request |
+| `$url` | URL of current request, query string included |
 | `$response.body#/ptr` | JSON Pointer into response body |
-| `$response.header.NAME` | Response header |
+| `$response.header.NAME` | Response header (case-insensitive) |
 | `$request.body#/ptr` | JSON Pointer into request body |
+| `$request.header.NAME` | Request header (case-insensitive) |
 | `$steps.ID.outputs.KEY` | Named output from a previous step |
 | `$steps.ID.response.body#/ptr` | Response body from a previous step |
-| `$url` | Request URL |
+| `$steps.ID.response.header.NAME` | Response header from a previous step |
+| `$workflows.ID.outputs.KEY` | Output of a workflow already run by this workflow |
+| `$sourceDescriptions.NAME.OPID` | Operation `OPID` in source `NAME` (for `operationId`) |
+| `$find(ARRAY, FIELD, VALUE[, RETURN])` | Atlas extension: first element of `ARRAY` whose `FIELD` equals `VALUE`, or its `RETURN` field |
 | `{$expr}` | Template string substitution |
 
 ### Success criteria
 
-Steps use `successCriteria` to determine pass/fail. Supported criterion types:
+Steps use `successCriteria` to determine pass/fail; all criteria must pass. A step without criteria succeeds. Supported criterion types:
 
-- **Simple** — boolean expression: `$statusCode == 200`, `$response.body#/state == "success"`
-- **Regex** — pattern match: `{"type":"regex","context":"$statusCode","condition":"^2"}`
+- **Simple** — the Arazzo condition language: comparisons `== != < <= > >=`, logical `&& || !`, parentheses, string literals in `'single'` or `"double"` quotes, numbers, `true`, `false`, `null`. `&&` binds tighter than `||`.
+  - `$statusCode == 200`
+  - `($statusCode == 200 || $statusCode == 201) && $response.body#/state != 'failed'`
+  - Values from responses are compared as values; they are never interpreted as part of the condition.
+- **Regex** — `{"type":"regex","context":"$statusCode","condition":"^2"}`. Atlas evaluates the pattern as a [Lua pattern](https://www.lua.org/manual/5.4/manual.html#6.4.1) rather than an ECMAScript regex. Simple anchors and literals behave the same; for character classes use `%d` (digit), `%w` (alphanumeric), `%s` (space), and `%` to escape (`%.`). There is no alternation (`a|b`) or `{m,n}` repetition: `^2%d%d$` matches any 2xx status.
 
-On failure, `onFailure` actions run; on success, `onSuccess` actions. Supported action types: `end`, `goto` (by `stepId` or `workflowId`). `goto` targeting the same step sleeps 2 seconds before retrying (configurable via `retryAfter` on the action). Goto loops are detected and aborted after 50 iterations.
+On failure, `onFailure` actions run; on success, `onSuccess` actions. The workflow's `successActions`/`failureActions` apply to every step after the step's own actions; a step action with the same `name` replaces the workflow one. Supported action types:
+
+- `end` — stop the workflow.
+- `goto` — continue at `stepId`, or run `workflowId` and stop. A `goto` to the same step with `retryAfter` sleeps that many seconds first. A workflow aborts when any goto target is reached 50 times; raise this for long polling loops with `--max-gotos=N` (library: `:max-gotos` in the run options).
+- `retry` — re-run the current step after `retryAfter` seconds, at most `retryLimit` times (default 1). With `workflowId`, that workflow runs before each retry. When retries are exhausted the step fails.
+
+Actions and parameters can be `{"reference": "$components.KIND.NAME"}` reusable objects pointing into the document's `components`; a `value` next to a parameter reference overrides the component's value.
+
+Step parameters with the same `name` and `in` as a workflow-level parameter replace it.
 
 ### Sub-workflows
 

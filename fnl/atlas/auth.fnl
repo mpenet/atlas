@@ -1,65 +1,43 @@
+;; ABOUTME: Profile authentication: OAuth 2.0 flows with a token cache, and
+;; ABOUTME: external-tool bearer tokens or per-request signing.
 (local json (require :lunajson))
 (local http (require :atlas.http))
+(local util (require :atlas.util))
 (local socket (require :socket))
+(local digest (require :atlas.digest))
 
 ;; ---- helpers ----
 
 (fn cache-dir []
-  (.. (or (os.getenv :HOME) ".") "/.cache/atlas/tokens"))
+  (.. (util.cache-dir) "/tokens"))
 
 (fn token-path [profile-name]
-  (.. (cache-dir) "/" profile-name ".json"))
+  (.. (cache-dir) "/" (util.url-encode profile-name) ".json"))
 
 (fn shell-quote [s]
   (.. "'" (: (tostring s) :gsub "'" "'\\''") "'"))
 
-(fn url-encode [s]
-  (: (tostring s) :gsub "[^%w%-%.%_%~]"
-    (fn [c] (string.format "%%%02X" (string.byte c)))))
-
-(fn form-encode [t]
-  (let [parts []]
-    (each [k v (pairs t)]
-      (table.insert parts (.. (url-encode k) "=" (url-encode v))))
-    (table.concat parts "&")))
-
-(fn qs-append [base params]
-  (.. base "?" (form-encode params)))
-
 (fn expand-env [s]
   (if (and (= (type s) :string) (s:match "^env:(.+)"))
-    (let [(var-name) (s:match "^env:(.+)")]
-      (or (os.getenv var-name)
-          (error (.. "environment variable not set: " var-name))))
-    s))
-
-(fn sha256-base64url [s]
-  (let [tmp (os.tmpname)
-        f (io.open tmp :w)]
-    (when f
-      (f:write s)
-      (f:close)
-      (let [h (io.popen (.. "openssl dgst -sha256 -binary " (shell-quote tmp)
-                            " | openssl base64 | tr '+/' '-_' | tr -d '='"))
-            result (when h (let [r (h:read :*l)] (h:close) r))]
-        (os.remove tmp)
-        (when (and result (> (length result) 0)) result)))))
+      (let [(var-name) (s:match "^env:(.+)")]
+        (or (os.getenv var-name)
+            (error (.. "environment variable not set: " var-name))))
+      s))
 
 (fn random-string [n]
+  "n characters from [A-Za-z0-9] read from /dev/urandom, without modulo bias."
   (let [chars "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         nchars (length chars)
-        out []
-        f (io.open "/dev/urandom" :rb)]
-    (if f
-        (do (for [_ 1 n]
-              (let [byte (string.byte (f:read 1))
-                    i (+ 1 (% byte nchars))]
-                (table.insert out (chars:sub i i))))
-            (f:close))
-        (do (math.randomseed (os.time))
-            (for [_ 1 n]
-              (let [i (math.random 1 nchars)]
-                (table.insert out (chars:sub i i))))))
+        limit (- 256 (% 256 nchars))
+        f (assert (io.open "/dev/urandom" :rb)
+                  "cannot read /dev/urandom for OAuth state")
+        out []]
+    (while (< (length out) n)
+      (let [byte (string.byte (f:read 1))]
+        (when (< byte limit)
+          (let [i (+ 1 (% byte nchars))]
+            (table.insert out (chars:sub i i))))))
+    (f:close)
     (table.concat out)))
 
 ;; ---- token cache ----
@@ -74,7 +52,8 @@
 (fn save-token [profile-name data]
   (let [dir (cache-dir)
         path (token-path profile-name)]
-    (os.execute (.. "mkdir -p " (shell-quote dir) " && chmod 700 " (shell-quote dir)))
+    (os.execute (.. "mkdir -p " (shell-quote dir) " && chmod 700 "
+                    (shell-quote dir)))
     (let [f (io.open path :w)]
       (when f
         (f:write (json.encode data))
@@ -85,52 +64,56 @@
   (os.remove (token-path profile-name)))
 
 (fn token-valid? [data]
-  (and data
-       data.access_token
-       (or (not data.expires_at)
-           (> data.expires_at (+ (os.time) 30)))))
+  (and data data.access_token
+       (or (not data.expires_at) (> data.expires_at (+ (os.time) 30)))))
 
 ;; ---- HTTP form post ----
 
 (fn post-form [url params ssl]
-  (let [body (form-encode params)]
+  (let [body (util.form-encode params)]
     (http.request {:method :POST
                    :url url
                    :headers {:content-type "application/x-www-form-urlencoded"
-                              :accept "application/json"}
+                             :accept "application/json"}
                    :raw-body body
                    :ssl (or ssl {})})))
 
-(fn store-token [resp profile-name]
+(fn json-body [resp]
+  "Response body as a table, decoding it if the transport left it a string."
+  (if (= (type resp.body) :table)
+      resp.body
+      (let [(ok decoded) (pcall json.decode (or resp.body ""))]
+        (when (and ok (= (type decoded) :table))
+          decoded))))
+
+(fn store-token [resp profile-name ?previous]
   (assert (and (>= resp.status 200) (< resp.status 300))
           (let [detail (when (= (type resp.body) :table)
                          (or resp.body.error_description resp.body.error ""))]
             (.. "token request failed: HTTP " resp.status
                 (if (and detail (> (length detail) 0)) (.. " — " detail) ""))))
-  (let [body (if (= (type resp.body) :table)
-                 resp.body
-                 (let [(ok decoded) (pcall json.decode resp.body)]
-                   (assert ok (.. "token response is not JSON: " (tostring resp.body)))
-                   decoded))
+  (let [body (assert (json-body resp)
+                     (.. "token response is not JSON: " (tostring resp.body)))
         data {:access_token body.access_token
               :token_type (or body.token_type "Bearer")}]
     (when body.expires_in
       (tset data :expires_at (+ (os.time) body.expires_in)))
-    (when body.refresh_token
-      (tset data :refresh_token body.refresh_token))
+    (match (or body.refresh_token (?. ?previous :refresh_token))
+      refresh (tset data :refresh_token refresh))
     (save-token profile-name data)
     data))
 
 ;; ---- refresh ----
 
 (fn try-refresh [profile-name params ssl cached]
-  (let [(ok resp) (pcall post-form params.token_url
-                         {:grant_type "refresh_token"
-                          :refresh_token cached.refresh_token
-                          :client_id (expand-env params.client_id)}
-                         ssl)]
-    (when (and ok (>= resp.status 200) (< resp.status 300))
-      (store-token resp profile-name))))
+  (let [form {:grant_type "refresh_token"
+              :refresh_token cached.refresh_token
+              :client_id (expand-env params.client_id)}]
+    (when params.client_secret
+      (tset form :client_secret (expand-env params.client_secret)))
+    (let [(ok resp) (pcall post-form params.token_url form ssl)]
+      (when (and ok (>= resp.status 200) (< resp.status 300))
+        (store-token resp profile-name cached)))))
 
 ;; ---- client credentials ----
 
@@ -152,11 +135,8 @@
                           form ssl)]
       (assert (and (>= resp.status 200) (< resp.status 300))
               (.. "device authorization request failed: HTTP " resp.status))
-      (let [body (if (= (type resp.body) :table)
-                     resp.body
-                     (let [(ok d) (pcall json.decode resp.body)]
-                       (assert ok "device authorization response is not JSON")
-                       d))
+      (let [body (assert (json-body resp)
+                         "device authorization response is not JSON")
             device-code body.device_code
             user-code body.user_code
             verify-uri (or body.verification_uri_complete body.verification_uri)
@@ -164,7 +144,8 @@
             interval (or body.interval 5)]
         (assert device-code "device authorization response missing device_code")
         (assert user-code "device authorization response missing user_code")
-        (io.stderr:write (.. "Open this URL to authenticate:\n  " verify-uri "\n"))
+        (io.stderr:write (.. "Open this URL to authenticate:\n  " verify-uri
+                             "\n"))
         (io.stderr:write (.. "User code: " user-code "\n"))
         (io.stderr:write "Waiting for authorization...")
         (var deadline (+ (os.time) expires-in))
@@ -173,30 +154,31 @@
         (while (and (not token) (< (os.time) deadline))
           (socket.sleep poll-interval)
           (let [(ok poll-resp) (pcall post-form params.token_url
-                                     {:grant_type "urn:ietf:params:oauth:grant-type:device_code"
-                                      :device_code device-code
-                                      :client_id (expand-env params.client_id)}
-                                     ssl)]
+                                      {:grant_type "urn:ietf:params:oauth:grant-type:device_code"
+                                       :device_code device-code
+                                       :client_id (expand-env params.client_id)}
+                                      ssl)]
             (if (not ok)
                 nil
-                (let [pbody (if (= (type poll-resp.body) :table)
-                                poll-resp.body
-                                (let [(ok2 d) (pcall json.decode poll-resp.body)]
-                                  (when ok2 d)))]
-                  (if (and pbody (>= poll-resp.status 200) (< poll-resp.status 300))
-                      (do (io.stderr:write "\n")
-                          (set token (store-token poll-resp profile-name)))
+                (let [pbody (json-body poll-resp)]
+                  (if (and pbody (>= poll-resp.status 200)
+                           (< poll-resp.status 300))
+                      (do
+                        (io.stderr:write "\n")
+                        (set token (store-token poll-resp profile-name)))
                       (let [err (and pbody pbody.error)]
                         (if (= err "slow_down")
                             (set poll-interval (+ poll-interval 5))
                             (= err "authorization_pending")
                             nil
                             (= err "expired_token")
-                            (do (io.stderr:write "\n")
-                                (error "device code expired"))
+                            (do
+                              (io.stderr:write "\n")
+                              (error "device code expired"))
                             (= err "access_denied")
-                            (do (io.stderr:write "\n")
-                                (error "device authorization denied by user"))
+                            (do
+                              (io.stderr:write "\n")
+                              (error "device authorization denied by user"))
                             nil)))))))
         (assert token "device authorization timed out")
         token))))
@@ -215,70 +197,93 @@
   (let [srv (socket.tcp)
         (ok-b err-b) (srv:bind "127.0.0.1" (or ?port 0))]
     (assert ok-b (.. "OAuth callback bind failed: " (tostring err-b)))
-    (let [(ok-l err-l) (srv:listen 1)]
+    (let [(ok-l err-l) (srv:listen 8)]
       (assert ok-l (.. "OAuth callback listen failed: " (tostring err-l)))
       (let [(_ port) (srv:getsockname)]
         (values srv port)))))
 
-(fn wait-for-callback [srv expected-state]
-  (srv:settimeout 120)
-  (let [(client err) (srv:accept)]
-    (assert client (.. "OAuth callback timed out: " (tostring err)))
-    (client:settimeout 10)
-    (let [first (client:receive "*l")]
-      (var line (client:receive "*l"))
-      (while (and line (> (length line) 2))
-        (set line (client:receive "*l")))
-      (if (not first)
-          (do (client:send "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n")
-              (client:close)
-              (srv:close)
-              (error "malformed OAuth callback request"))
-          (let [(path) (first:match "GET (%S+) ")]
-            (if (not path)
-                (do (client:send "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n")
-                    (client:close)
-                    (srv:close)
-                    (error "malformed OAuth callback request"))
-                (let [(code) (path:match "[?&]code=([^&]+)")
-                      (state) (path:match "[?&]state=([^&]+)")]
-                  (client:send (.. "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
-                                   "<html><body><h1>Authentication successful.</h1>"
-                                   "<p>You can close this tab.</p></body></html>"))
-                  (client:close)
-                  (srv:close)
-                  (assert code "no authorization code in callback")
-                  (assert (= state expected-state) "OAuth state mismatch — possible CSRF")
-                  code)))))))
+(fn parse-query [qs]
+  (collect [k v (qs:gmatch "([^&=]+)=?([^&]*)")]
+    (util.url-decode k)
+    (util.url-decode v)))
 
-(fn authorization-code [profile-name params ssl]
+(fn reply [client status body]
+  (client:send (.. "HTTP/1.1 " status
+                   "\r\nContent-Type: text/html; charset=utf-8\r\n"
+                   "Connection: close\r\n\r\n<html><body>" body "</body></html>"))
+  (client:close))
+
+(fn read-request-target [client]
+  "Request target of an HTTP request, after draining its headers."
+  (client:settimeout 10)
+  (let [first (client:receive "*l")]
+    (var line first)
+    (while (and line (> (length line) 0))
+      (set line (client:receive "*l")))
+    (when first (first:match "^GET (%S+) "))))
+
+(fn wait-for-callback [srv expected-state callback-path]
+  "Accept connections until the OAuth redirect to callback-path arrives;
+other requests (favicon, probes) get a 404. Returns the authorization code."
+  (let [deadline (+ (socket.gettime) 120)]
+    (var result nil)
+    (while (= result nil)
+      (srv:settimeout (math.max 0 (- deadline (socket.gettime))))
+      (let [(client err) (srv:accept)]
+        (when (not client)
+          (srv:close)
+          (error (.. "OAuth callback timed out: " (tostring err))))
+        (let [target (read-request-target client)
+              (path qs) (when target (target:match "^([^?]*)%??(.*)$"))]
+          (if (not= path callback-path)
+              (reply client "404 Not Found" "Not found.")
+              (let [params (parse-query qs)]
+                (set result
+                     (if params.error
+                         {:failure (.. "authorization failed: " params.error
+                                       (if params.error_description
+                                           (.. " — " params.error_description)
+                                           ""))}
+                         (not= params.state expected-state)
+                         {:failure "OAuth state mismatch — possible CSRF"}
+                         (not params.code)
+                         {:failure "no authorization code in callback"}
+                         {:code params.code}))
+                (if result.code
+                    (reply client "200 OK"
+                           "<h1>Authentication successful.</h1><p>You can close this tab.</p>")
+                    (reply client "400 Bad Request"
+                           "<h1>Authentication failed.</h1>")))))))
+    (srv:close)
+    (when result.failure (error result.failure))
+    result.code))
+
+(fn authorization-code [profile-name params ssl ?opts]
   (let [(srv port) (start-local-server params.redirect_port)
         redirect-host (or params.redirect_host "127.0.0.1")
-        redirect-uri (.. "http://" redirect-host ":" port (or params.redirect_path "/callback"))
-        state (random-string 16)
+        redirect-path (or params.redirect_path "/callback")
+        redirect-uri (.. "http://" redirect-host ":" port redirect-path)
+        state (random-string 32)
         code-verifier (random-string 64)
-        code-challenge (sha256-base64url code-verifier)
         auth-params {:response_type "code"
                      :client_id (expand-env params.client_id)
                      :redirect_uri redirect-uri
                      :state state
-                     :scope (or params.scope "")}]
-    (when (and code-challenge (> (length code-challenge) 0))
-      (tset auth-params :code_challenge code-challenge)
-      (tset auth-params :code_challenge_method "S256"))
-    (let [auth-url (qs-append params.authorize_url auth-params)]
+                     :scope (or params.scope "")
+                     :code_challenge (digest.pkce-challenge code-verifier)
+                     :code_challenge_method "S256"}]
+    (let [auth-url (util.append-query params.authorize_url auth-params)]
       (io.stderr:write (.. "Opening browser for authentication...\n"))
       (io.stderr:write (.. "If browser does not open, visit:\n" auth-url "\n"))
-      (open-browser auth-url)
-      (let [code (wait-for-callback srv state)
+      ((or (?. ?opts :open-browser) open-browser) auth-url)
+      (let [code (wait-for-callback srv state redirect-path)
             form {:grant_type "authorization_code"
                   :code code
                   :redirect_uri redirect-uri
                   :client_id (expand-env params.client_id)}]
         (when params.client_secret
           (tset form :client_secret (expand-env params.client_secret)))
-        (when (and code-challenge (> (length code-challenge) 0))
-          (tset form :code_verifier code-verifier))
+        (tset form :code_verifier code-verifier)
         (store-token (post-form params.token_url form ssl) profile-name)))))
 
 ;; ---- external tool ----
@@ -294,7 +299,8 @@
                   (f:close)
                   (set tmp-path tmp)
                   (.. "/bin/sh -c "
-                      (shell-quote (.. params.commandline " < " (shell-quote tmp)))))
+                      (shell-quote (.. "( " params.commandline " ) < "
+                                       (shell-quote tmp)))))
                 (.. "/bin/sh -c " (shell-quote params.commandline)))
         h (io.popen cmd)]
     (assert h "failed to start external auth command")
@@ -305,17 +311,16 @@
 
 (fn external-bearer [params]
   (let [out (: (run-external params nil) :match "^%s*(.-)%s*$")]
-    (assert (and out (> (length out) 0)) "external auth command produced no output")
+    (assert (and out (> (length out) 0))
+            "external auth command produced no output")
     {:authorization (.. "Bearer " out)}))
 
 (fn external-signing-headers [params req]
   (let [body (when (not params.omitbody)
-               (or req.raw-body
-                   (when (= (type req.body) :string) req.body)
+               (or req.raw-body (when (= (type req.body) :string) req.body)
                    (when req.body
                      (let [(ok s) (pcall json.encode req.body)]
-                       (when ok s)))
-                   ""))
+                       (when ok s))) ""))
         payload (json.encode {:method (or req.method "GET")
                               :uri req.url
                               :headers (or req.headers {})
@@ -328,12 +333,16 @@
 
 ;; ---- public API ----
 
-(fn authenticate [profile-name auth-config ssl]
+(fn authenticate [profile-name auth-config ssl ?opts]
+  "Run the configured OAuth flow and cache the token.
+?opts: {:open-browser (fn [url])} to replace the system browser launcher."
   (let [params auth-config.params]
     (match auth-config.name
-      "oauth-authorization-code" (authorization-code profile-name params ssl)
+      "oauth-authorization-code" (authorization-code profile-name params ssl
+                                                     ?opts)
       "oauth-client-credentials" (client-credentials profile-name params ssl)
-      "oauth-device-authorization" (device-authorization profile-name params ssl)
+      "oauth-device-authorization" (device-authorization profile-name params
+                                                         ssl)
       _ (error (.. "unsupported auth type: " auth-config.name)))))
 
 (fn ensure-token [profile-name auth-config ssl]
@@ -341,10 +350,13 @@
     (if (token-valid? cached)
         cached.access_token
         (let [data (if (and cached cached.refresh_token)
-                       (do (io.stderr:write "Refreshing token...\n")
-                           (or (try-refresh profile-name auth-config.params ssl cached)
-                               (do (io.stderr:write "Token refresh failed, re-authenticating...\n")
-                                   (authenticate profile-name auth-config ssl))))
+                       (do
+                         (io.stderr:write "Refreshing token...\n")
+                         (or (try-refresh profile-name auth-config.params ssl
+                                          cached)
+                             (do
+                               (io.stderr:write "Token refresh failed, re-authenticating...\n")
+                               (authenticate profile-name auth-config ssl))))
                        (authenticate profile-name auth-config ssl))]
           data.access_token))))
 
@@ -365,12 +377,14 @@
              (not= (?. auth-config :params :output) "bearer-token"))
     (let [params auth-config.params]
       (fn [req]
+        ;; sign the URL that goes on the wire, query string included
+        (when req.query
+          (tset req :url (util.append-query req.url req.query))
+          (tset req :query nil))
         ;; pre-encode body so signing and wire use identical bytes
         (when (and req.body (not req.raw-body))
-          (let [(ok s) (pcall json.encode req.body)]
-            (when ok
-              (tset req :raw-body s)
-              (tset req :body nil))))
+          (tset req :raw-body (http.encode-body req))
+          (tset req :body nil))
         (let [extra (external-signing-headers params req)]
           (when extra
             (let [headers (or req.headers {})]
@@ -379,4 +393,12 @@
               (tset req :headers headers)))
           (base-fn req))))))
 
-{: get-headers : wrap-http-fn : authenticate : clear-token}
+{: get-headers
+ : wrap-http-fn
+ : authenticate
+ : clear-token
+ : save-token
+ : load-token
+ : token-path
+ : start-local-server
+ : wait-for-callback}

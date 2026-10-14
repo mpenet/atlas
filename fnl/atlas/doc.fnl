@@ -1,8 +1,18 @@
+;; ABOUTME: Renders human-readable help for an operation, in CLI or library form.
+;; ABOUTME: The text backs --help in the CLI and the docstring of library ops.
 (local util (require :atlas.util))
 
 (fn params-of-kind [op-spec kind]
   (icollect [_ p (ipairs (or op-spec.parameters []))]
     (when (= p.in kind) p)))
+
+(fn template-path-params [path op-spec]
+  "Path params in URL template order, with declared details where present."
+  (let [declared (collect [_ p (ipairs (params-of-kind op-spec :path))]
+                   p.name
+                   p)]
+    (icollect [_ name (ipairs (util.extract-path-params path))]
+      (or (. declared name) {:name name :in "path"}))))
 
 (fn param-type [p]
   (or (?. p :schema :type) :any))
@@ -30,100 +40,97 @@
           (tset required-set r true))
         {:properties schema.properties :required required-set}))))
 
-(fn build-cli [path method op-spec]
+(fn render [path method op-spec style]
+  "Help text for an operation; style supplies the usage line, the query
+params heading and an optional body hint, which differ between CLI and library."
   (let [lines []
         add #(table.insert lines $)
-        path-params (params-of-kind op-spec :path)
+        path-params (template-path-params path op-spec)
         query-params (params-of-kind op-spec :query)
-        has-body? (not= nil op-spec.requestBody)]
+        param-line #(string.format "  %-16s %s%s" $1.name (param-type $1)
+                                   (param-extras $1 $2))]
     (add (string.format "%s %s" (method:upper) path))
-    (let [s (when (and op-spec.summary (not= op-spec.summary "")) op-spec.summary)
+    (let [s (when (and op-spec.summary (not= op-spec.summary ""))
+              op-spec.summary)
           d (when (and op-spec.description (not= op-spec.description "")
-                       (not= op-spec.description op-spec.summary)) op-spec.description)]
+                       (not= op-spec.description op-spec.summary))
+              op-spec.description)]
       (when s (add (.. "\n" s)))
       (when d (add d)))
-    (let [parts [(util.camel->kebab op-spec.operationId)]]
-      (each [_ p (ipairs path-params)]
-        (table.insert parts (.. "<" p.name ">")))
-      (when has-body? (table.insert parts "[-d JSON|@file|@-]"))
-      (when (> (length query-params) 0) (table.insert parts "[--query.KEY=VAL ...]"))
-      (add (string.format "\nUsage: atlas <profile-or-schema> %s" (table.concat parts " "))))
+    (add (.. "\nUsage: " (style.usage op-spec path-params query-params)))
     (when (> (length path-params) 0)
       (add "\nPath params:")
       (each [_ p (ipairs path-params)]
-        (add (string.format "  %-16s %s%s" p.name (param-type p) (param-extras p true)))))
+        (add (param-line p true))))
     (when (> (length query-params) 0)
-      (add "\nQuery params (--query.KEY=VAL):")
+      (add (.. "\n" style.query-heading))
       (each [_ p (ipairs query-params)]
-        (add (string.format "  %-16s %s%s" p.name (param-type p) (param-extras p p.required)))))
+        (add (param-line p p.required))))
     (when op-spec.requestBody
       (let [rb op-spec.requestBody
             bschema (body-schema rb)]
-        (add (string.format "\nBody: %s%s"
-                            (if rb.required :required :optional)
+        (add (string.format "\nBody: %s%s" (if rb.required :required :optional)
                             (if rb.description (.. " — " rb.description) "")))
-        (add "  Use -d JSON, --body=@file, --body=@- for stdin, or --body.KEY=VAL for individual fields")
+        (when style.body-hint (add style.body-hint))
         (when bschema
           (each [name prop (pairs bschema.properties)]
-            (add (string.format "  %-16s %s%s%s"
-                                name
-                                (or prop.type :any)
+            (add (string.format "  %-16s %s%s%s" name (or prop.type :any)
                                 (if (. bschema.required name) " [required]" "")
-                                (if prop.description (.. " — " prop.description) "")))))))
+                                (if prop.description
+                                    (.. " — " prop.description)
+                                    "")))))))
     (add "\nResponses:")
     (each [code resp (pairs (or op-spec.responses {}))]
       (add (string.format "  %-6s %s" (tostring code) (or resp.description ""))))
     (table.concat lines "\n")))
 
-(fn build [path method op-spec]
-  (let [lines []
-        add #(table.insert lines $)
-        path-params (params-of-kind op-spec :path)
-        query-params (params-of-kind op-spec :query)
-        has-body? (not= nil op-spec.requestBody)]
-    (add (string.format "%s %s" (method:upper) path))
-    (let [s (when (and op-spec.summary (not= op-spec.summary "")) op-spec.summary)
-          d (when (and op-spec.description (not= op-spec.description "")
-                       (not= op-spec.description op-spec.summary)) op-spec.description)]
-      (when s (add (.. "\n" s)))
-      (when d (add d)))
-    (let [sig []]
-      (each [_ p (ipairs path-params)] (table.insert sig p.name))
-      (when has-body? (table.insert sig :body))
-      (when (> (length query-params) 0) (table.insert sig :?opts))
-      (add (string.format "\nUsage: (%s %s)"
-                          (util.camel->kebab op-spec.operationId)
-                          (table.concat sig " "))))
+(local cli-style
+       {:usage (fn [op-spec path-params query-params]
+                 (let [parts [(util.camel->kebab op-spec.operationId)]]
+                   (each [_ p (ipairs path-params)]
+                     (table.insert parts (.. "<" p.name ">")))
+                   (when op-spec.requestBody
+                     (table.insert parts "[-d JSON|@file|@-]"))
+                   (when (> (length query-params) 0)
+                     (table.insert parts "[--query.KEY=VAL ...]"))
+                   (.. "atlas <profile-or-schema> " (table.concat parts " "))))
+        :query-heading "Query params (--query.KEY=VAL):"
+        :body-hint "  Use -d JSON, --body=@file, --body=@- for stdin, or --body.KEY=VAL for individual fields"})
+
+(fn invoke-usage [name op-spec path-params query-params]
+  (let [parts []]
     (when (> (length path-params) 0)
-      (add "\nPath params:")
-      (each [_ p (ipairs path-params)]
-        (add (string.format "  %-16s %s%s"
-                            p.name
-                            (param-type p)
-                            (param-extras p true)))))
-    (when (> (length query-params) 0)
-      (add "\nQuery params (via {:query {...}}):")
-      (each [_ p (ipairs query-params)]
-        (add (string.format "  %-16s %s%s"
-                            p.name
-                            (param-type p)
-                            (param-extras p p.required)))))
-    (when op-spec.requestBody
-      (let [rb op-spec.requestBody
-            bschema (body-schema rb)]
-        (add (string.format "\nBody: %s%s"
-                            (if rb.required :required :optional)
-                            (if rb.description (.. " — " rb.description) "")))
-        (when bschema
-          (each [name prop (pairs bschema.properties)]
-            (add (string.format "  %-16s %s%s%s"
-                                name
-                                (or prop.type :any)
-                                (if (. bschema.required name) " [required]" "")
-                                (if prop.description (.. " — " prop.description) "")))))))
-    (add "\nResponses:")
-    (each [code resp (pairs (or op-spec.responses {}))]
-      (add (string.format "  %-6s %s" (tostring code) (or resp.description ""))))
-    (table.concat lines "\n")))
+      (table.insert parts (.. ":path {"
+                              (table.concat (icollect [_ p (ipairs path-params)]
+                                              (.. ":" p.name " …"))
+                                            " ")
+                              "}")))
+    (when op-spec.requestBody (table.insert parts ":body …"))
+    (when (> (length query-params) 0) (table.insert parts ":query {…}"))
+    (if (> (length parts) 0)
+        (string.format "(%s.invoke {%s})" name (table.concat parts " "))
+        (string.format "(%s.invoke)" name))))
+
+(fn positional-usage [name op-spec path-params query-params]
+  (let [sig (icollect [_ p (ipairs path-params)] p.name)]
+    (when op-spec.requestBody (table.insert sig :body))
+    (when (> (length query-params) 0) (table.insert sig :?opts))
+    (if (> (length sig) 0)
+        (string.format "(%s %s)" name (table.concat sig " "))
+        (string.format "(%s)" name))))
+
+(local library-style
+       {:usage (fn [op-spec path-params query-params]
+                 (let [name (util.camel->kebab op-spec.operationId)]
+                   (.. (invoke-usage name op-spec path-params query-params)
+                       "\n       "
+                       (positional-usage name op-spec path-params query-params))))
+        :query-heading "Query params (via {:query {...}}):"})
+
+(fn build-cli [path method op-spec]
+  (render path method op-spec cli-style))
+
+(fn build [path method op-spec]
+  (render path method op-spec library-style))
 
 {: build : build-cli}

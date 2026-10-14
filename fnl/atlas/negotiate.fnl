@@ -1,7 +1,8 @@
-(local preferred
-  [:application/json
-   :application/x-www-form-urlencoded
-   :multipart/form-data])
+;; ABOUTME: Chooses request Content-Type and Accept headers from an operation's
+;; ABOUTME: declared media types.
+(local preferred [:application/json
+                  :application/x-www-form-urlencoded
+                  :multipart/form-data])
 
 (fn pick-media-type [content]
   (when content

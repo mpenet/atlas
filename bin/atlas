@@ -1,4 +1,6 @@
 #!/usr/bin/env lua
+-- ABOUTME: Development launcher for the atlas CLI: resolves its own location
+-- ABOUTME: (following symlinks) and loads the compiled Lua modules next to it.
 local script = debug.getinfo(1, "S").source:match("^@(.+)$") or arg[0]
 local h = io.popen("readlink '" .. script .. "' 2>/dev/null")
 if h then

@@ -5,7 +5,7 @@
 OpenAPI 3.x toolbox.
 
 - **Standalone CLI** — similar to Restish, with profiles, OAuth 2.0 (authorization code, client credentials, device flow), mTLS, response selection, and shell completion.
-- **Arazzo workflow execution** — run multi-step API sequences from [Arazzo 1.0](https://spec.openapis.org/arazzo/latest.html) documents with full runtime expression support, conditional branching, polling loops, and profile-based auth.
+- **Arazzo workflow execution** — run multi-step API sequences from [Arazzo 1.0](https://spec.openapis.org/arazzo/latest.html) documents: runtime expressions, the simple condition language, `goto`/`retry`/`end` actions, reusable components, sub-workflows, polling loops, and profile-based auth. Regex criteria use Lua patterns; JSONPath/XPath criteria are not supported.
 - **Fennel/Lua library** — point it at any schema (local file, URL, or parsed table) and get back a callable client.
 
 
@@ -56,8 +56,8 @@ atlas az myapi create-and-wait \
 ;; library
 (local atlas (require :atlas))
 (local c (atlas.client "https://petstore3.swagger.io/api/v3/openapi.json"))
-(c.get-pet-by-id 42)
-(c.add-pet {:name "Rex" :status "available"})
+(c.get-pet-by-id.invoke {:path {:petId 42}})
+(c.add-pet.invoke {:body {:name "Rex" :status "available"}})
 ```
 
 
@@ -65,14 +65,14 @@ atlas az myapi create-and-wait \
 ## Building from source
 
 ```sh
-make deps     # lunajson, luasocket, luasec, fennel, busted
+make deps     # lunajson, luasocket, luasec, lyaml, fennel, busted
 make build    # compile Fennel → Lua
 make test     # run test suite
 make install  # build standalone binary and install to /usr/local/bin
 make binary   # build standalone binary → bin/atlas-bin
 ```
 
-`make binary` requires `fennel`, `lua`, `openssl`, and `pkg-config`. It statically links Lua, luasocket, luasec, and OpenSSL — the resulting binary has no runtime dependencies.
+`make binary` requires `fennel`, `lua`, `openssl`, `libyaml`, and `pkg-config`. It statically links Lua, luasocket, luasec, lyaml, OpenSSL and libyaml — the resulting binary has no runtime dependencies.
 
 ## License
 

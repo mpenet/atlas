@@ -1,14 +1,18 @@
+;; ABOUTME: The atlas command line: argument parsing, profiles, op/az/auth/profile
+;; ABOUTME: subcommands, output formatting and shell completion.
 (local atlas (require :atlas))
 (local arazzo (require :atlas.arazzo))
 (local auth (require :atlas.auth))
 (local cache (require :atlas.cache))
+(local coerce (require :atlas.coerce))
+(local util (require :atlas.util))
 (local http-mod (require :atlas.http))
 (local json (require :lunajson))
 (local pretty-mod (require :atlas.pretty))
 (local socket (require :socket))
 
 (fn config-path []
-  (.. (or (os.getenv :HOME) ".") "/.config/atlas/config.json"))
+  (.. (util.config-dir) "/config.json"))
 
 (fn load-config []
   (let [f (io.open (config-path) :r)]
@@ -25,7 +29,8 @@
                   (if path
                       (let [f (assert (io.open path :r))
                             c (f:read :*a)]
-                        (f:close) c)
+                        (f:close)
+                        c)
                       s)))
         (ok parsed) (pcall json.decode raw)]
     (assert ok (.. "invalid JSON in body: " (tostring parsed)))
@@ -34,8 +39,11 @@
 (fn merge-profiles [base child]
   (let [result (collect [k v (pairs base)] k v)]
     (each [k v (pairs child)]
-      (if (and (= k :headers) (= (type v) :table) (= (type (. result k)) :table))
-          (let [merged (collect [hk hv (pairs (. result k))] hk hv)]
+      (if (and (= k :headers) (= (type v) :table)
+               (= (type (. result k)) :table))
+          (let [merged (collect [hk hv (pairs (. result k))]
+                         hk
+                         hv)]
             (each [hk hv (pairs v)] (tset merged hk hv))
             (tset result k merged))
           (tset result k v)))
@@ -54,8 +62,16 @@
           (merge-profiles base child))
         p)))
 
-(fn coerce [s]
-  (or (tonumber s) s))
+(fn redact-header [name value]
+  "Value safe to print for header name: credentials are masked."
+  (let [n (name:lower)]
+    (if (or (= n "authorization") (= n "proxy-authorization"))
+        (let [(scheme) (: (tostring value) :match "^(%S+)%s")]
+          (if scheme (.. scheme " <redacted>") "<redacted>"))
+        (or (n:match "cookie") (n:match "key") (n:match "token")
+            (n:match "secret") (n:match "signature") (n:match "password"))
+        "<redacted>"
+        value)))
 
 (fn wrap-log-request [http-fn]
   (fn [req]
@@ -68,123 +84,146 @@
                            "\n")))
     (when (and req.headers (next req.headers))
       (each [k v (pairs req.headers)]
-        (io.stderr:write (.. "> " k ": " (tostring v) "\n"))))
+        (io.stderr:write (.. "> " k ": " (tostring (redact-header k v)) "\n"))))
     (http-fn req)))
 
-(fn set-nested [t path v]
-  (let [keys []]
-    (each [k (path:gmatch "[^.]+")]
-      (table.insert keys k))
-    (var cur t)
-    (for [i 1 (- (length keys) 1)]
-      (let [k (. keys i)]
-        (when (not (. cur k)) (tset cur k {}))
-        (set cur (. cur k))))
-    (tset cur (. keys (length keys)) v)))
+(fn set-nested [t keys v]
+  (var cur t)
+  (for [i 1 (- (length keys) 1)]
+    (let [k (. keys i)]
+      (when (not= (type (. cur k)) :table)
+        (tset cur k {}))
+      (set cur (. cur k))))
+  (tset cur (. keys (length keys)) v))
+
+(fn build-body [fields ?schema ?base]
+  "Apply [KEY.PATH VAL] fields onto ?base, coercing each value by ?schema."
+  (assert (or (= ?base nil) (= (type ?base) :table))
+          "--body.KEY=VAL fields require --body to be a JSON object")
+  (let [body (or ?base {})]
+    (each [_ [path v] (ipairs fields)]
+      (let [keys (icollect [k (path:gmatch "[^.]+")] k)]
+        (set-nested body keys
+                    (coerce.from-string v (coerce.schema-at ?schema keys)))))
+    body))
 
 (fn parse-args [args]
-  (let [r {:path-params [] :query {} :headers {} :ssl {} :body-params {}
-           :arazzo-inputs {}}]
+  (let [r {:path-params []
+           :query {}
+           :headers {}
+           :ssl {}
+           :body-fields []
+           :input-fields []}
+        positional (fn [a]
+                     (if (not r.cmd) (tset r :cmd a)
+                         (not r.schema) (tset r :schema a)
+                         (not r.operation) (tset r :operation a)
+                         (table.insert r.path-params a)))
+        value-after (fn [flag i]
+                      (or (. args (+ i 1))
+                          (error (.. flag " requires a value") 0)))]
     (var i 1)
+    (var options-done false)
     (while (<= i (length args))
       (let [a (. args i)]
-        (if
-          (a:match "^%-%-query%.(.-)=(.+)")
-          (let [(k v) (a:match "^%-%-query%.(.-)=(.+)")]
-            (tset r.query k v))
-
-          (a:match "^%-%-header%.(.-)=(.+)")
-          (let [(k v) (a:match "^%-%-header%.(.-)=(.+)")]
-            (tset r.headers k v))
-
-          (a:match "^%-%-ssl%.(.-)=(.+)")
-          (let [(k v) (a:match "^%-%-ssl%.(.-)=(.+)")]
-            (tset r.ssl k v))
-
-          (a:match "^%-%-body%.(.-)=(.+)")
-          (let [(k v) (a:match "^%-%-body%.(.-)=(.+)")]
-            (set-nested r.body-params k (coerce v)))
-
-          (a:match "^%-%-body=(.*)")
-          (let [(v) (a:match "^%-%-body=(.*)")]
-            (tset r :body (read-body v)))
-
-          (= a :-d)
-          (do (set i (+ i 1))
-              (tset r :body (read-body (. args i))))
-
-          (a:match "^%-%-schema=(.+)")
-          (let [(v) (a:match "^%-%-schema=(.+)")]
-            (tset r :schema-url v))
-
-          (a:match "^%-%-timeout=(.+)")
-          (let [(v) (a:match "^%-%-timeout=(.+)")]
-            (tset r :timeout (tonumber v)))
-
-          (a:match "^%-%-base%-url=(.+)")
-          (let [(v) (a:match "^%-%-base%-url=(.+)")]
-            (tset r :base-url v))
-
-          (a:match "^%-%-output=(.+)")
-          (let [(v) (a:match "^%-%-output=(.+)")]
-            (tset r :output v))
-
-          (= a :--list) (tset r :list true)
-          (= a :--help) (tset r :help true)
-          (= a :--no-color) (tset r :no-color true)
-          (= a :--reload) (tset r :reload true)
-          (= a :--logout) (tset r :logout true)
-          (or (= a :-v) (= a :--verbose)) (tset r :verbose true)
-
-          (a:match "^%-%-cache%-ttl=(.+)")
-          (let [(v) (a:match "^%-%-cache%-ttl=(.+)")]
-            (tset r :cache-ttl (tonumber v)))
-
-          (a:match "^%-%-complete%-ops=(.+)")
-          (let [(v) (a:match "^%-%-complete%-ops=(.+)")]
-            (tset r :complete-ops v))
-
-          (a:match "^%-%-select=(.+)")
-          (let [(v) (a:match "^%-%-select=(.+)")]
-            (tset r :select v))
-
-          (a:match "^%-%-input%.(.-)=(.+)")
-          (let [(k v) (a:match "^%-%-input%.(.-)=(.+)")]
-            (tset r.arazzo-inputs k (coerce v)))
-
-          (= a :-i)
-          (do (set i (+ i 1))
-              (let [kv (. args i)
-                    (k v) (kv:match "^(.-)=(.+)")]
-                (assert k (.. "invalid -i argument (expected KEY=VAL): " (tostring kv)))
-                (tset r.arazzo-inputs k (coerce v))))
-
-          (a:match "^%-i(.-)=(.+)")
-          (let [(k v) (a:match "^%-i(.-)=(.+)")]
-            (tset r.arazzo-inputs k (coerce v)))
-
-          (a:match "^%-%-inputs=(.*)")
-          (let [(v) (a:match "^%-%-inputs=(.*)")]
-            (tset r :arazzo-inputs-blob (read-body v)))
-
-          (a:match "^%-%-arazzo%-output=(.+)")
-          (let [(v) (a:match "^%-%-arazzo%-output=(.+)")]
-            (tset r :arazzo-output v))
-
-          (a:match "^%-%-profile=(.+)")
-          (let [(v) (a:match "^%-%-profile=(.+)")]
-            (tset r :profile v))
-
-          (not (a:match "^%-"))
-          (if (not r.cmd)    (tset r :cmd a)
-              (not r.schema) (tset r :schema a)
-              (not r.operation) (tset r :operation a)
-              (table.insert r.path-params a))))
+        (if options-done
+            (positional a)
+            (= a "--")
+            (set options-done true)
+            (a:match "^%-%-query%.(.-)=(.*)")
+            (let [(k v) (a:match "^%-%-query%.(.-)=(.*)")]
+              (tset r.query k v))
+            (a:match "^%-%-header%.(.-)=(.*)")
+            (let [(k v) (a:match "^%-%-header%.(.-)=(.*)")]
+              (tset r.headers k v))
+            (a:match "^%-%-ssl%.(.-)=(.+)")
+            (let [(k v) (a:match "^%-%-ssl%.(.-)=(.+)")]
+              (tset r.ssl k v))
+            (a:match "^%-%-body%.(.-)=(.*)")
+            (let [(k v) (a:match "^%-%-body%.(.-)=(.*)")]
+              (table.insert r.body-fields [k v]))
+            (a:match "^%-%-body=(.*)")
+            (let [(v) (a:match "^%-%-body=(.*)")]
+              (tset r :body (read-body v)))
+            (= a :-d)
+            (do
+              (tset r :body (read-body (value-after a i)))
+              (set i (+ i 1)))
+            (a:match "^%-%-schema=(.+)")
+            (let [(v) (a:match "^%-%-schema=(.+)")]
+              (tset r :schema-url v))
+            (a:match "^%-%-timeout=(.+)")
+            (let [(v) (a:match "^%-%-timeout=(.+)")]
+              (tset r :timeout (tonumber v)))
+            (a:match "^%-%-base%-url=(.+)")
+            (let [(v) (a:match "^%-%-base%-url=(.+)")]
+              (tset r :base-url v))
+            (a:match "^%-%-output=(.+)")
+            (let [(v) (a:match "^%-%-output=(.+)")]
+              (tset r :output v))
+            (= a :--list)
+            (tset r :list true)
+            (= a :--help)
+            (tset r :help true)
+            (= a :--no-color)
+            (tset r :no-color true)
+            (= a :--reload)
+            (tset r :reload true)
+            (= a :--logout)
+            (tset r :logout true)
+            (or (= a :-v) (= a :--verbose))
+            (tset r :verbose true)
+            (a:match "^%-%-cache%-ttl=(.+)")
+            (let [(v) (a:match "^%-%-cache%-ttl=(.+)")]
+              (tset r :cache-ttl (tonumber v)))
+            (a:match "^%-%-complete%-ops=(.+)")
+            (let [(v) (a:match "^%-%-complete%-ops=(.+)")]
+              (tset r :complete-ops v))
+            (a:match "^%-%-select=(.+)")
+            (let [(v) (a:match "^%-%-select=(.+)")]
+              (tset r :select v))
+            (a:match "^%-%-input%.(.-)=(.*)")
+            (let [(k v) (a:match "^%-%-input%.(.-)=(.*)")]
+              (table.insert r.input-fields [k v]))
+            (= a :-i)
+            (let [kv (value-after a i)
+                  (k v) (kv:match "^(.-)=(.*)")]
+              (assert k (.. "invalid -i argument (expected KEY=VAL): "
+                            (tostring kv)))
+              (table.insert r.input-fields [k v])
+              (set i (+ i 1)))
+            (a:match "^%-i(.-)=(.*)")
+            (let [(k v) (a:match "^%-i(.-)=(.*)")]
+              (table.insert r.input-fields [k v]))
+            (a:match "^%-%-inputs=(.*)")
+            (let [(v) (a:match "^%-%-inputs=(.*)")]
+              (tset r :arazzo-inputs-blob (read-body v)))
+            (a:match "^%-%-arazzo%-output=(.+)")
+            (let [(v) (a:match "^%-%-arazzo%-output=(.+)")]
+              (tset r :arazzo-output v))
+            (a:match "^%-%-max%-gotos=(%d+)$")
+            (tset r :max-gotos (tonumber (a:match "^%-%-max%-gotos=(%d+)$")))
+            (a:match "^%-%-profile=(.+)")
+            (let [(v) (a:match "^%-%-profile=(.+)")]
+              (tset r :profile v))
+            (not (a:match "^%-"))
+            (positional a)
+            (error (.. "unknown option: " a) 0)))
       (set i (+ i 1)))
     r))
 
+(fn op-request [op p]
+  "Build an op.invoke request from parsed CLI args."
+  (let [body (if (next p.body-fields)
+                 (build-body p.body-fields op.body-schema p.body)
+                 p.body)]
+    {:path (collect [i name (ipairs op.path-params)] name (. p.path-params i))
+     :query (when (next p.query) p.query)
+     :headers (when (next p.headers) p.headers)
+     :body (when op.has-body? body)}))
+
 (fn op? [v]
-  (and (= (type v) :table) (~= nil (. v :has-body?))))
+  (and (= (type v) :table) (not= nil (. v :has-body?))))
 
 (fn list-ops [c]
   (let [ops []]
@@ -215,14 +254,19 @@
                     (when (= (type cur) :table)
                       (each [_ v (ipairs cur)]
                         (table.insert result
-                          (if (> (length rest) 0) (select-path v rest) v))))
+                                      (if (> (length rest) 0)
+                                          (select-path v rest)
+                                          v))))
                     (set cur result)
                     (set i (+ n 1)))
                   (let [(idx j) (path:match "^%[(%d+)%]()" i)]
                     (if idx
-                        (do (set cur (. cur (+ 1 (tonumber idx))))
-                            (set i j))
-                        (do (set cur nil) (set i (+ n 1)))))))
+                        (do
+                          (set cur (. cur (+ 1 (tonumber idx))))
+                          (set i j))
+                        (do
+                          (set cur nil)
+                          (set i (+ n 1)))))))
             (= c "{")
             (let [(fields-str j) (path:match "^{([^}]+)}()" i)]
               (if fields-str
@@ -233,7 +277,9 @@
                                     (let [out {}]
                                       (each [_ f (ipairs fields)]
                                         (tset out f (. obj f)))
-                                      (if (> (length rest) 0) (select-path out rest) out))
+                                      (if (> (length rest) 0)
+                                          (select-path out rest)
+                                          out))
                                     obj))]
                     (each [f (fields-str:gmatch "[^,]+")]
                       (table.insert fields (f:match "^%s*(.-)%s*$")))
@@ -247,54 +293,73 @@
                               (set cur (apply cur))))
                         (set cur nil))
                     (set i (+ n 1)))
-                  (do (set cur nil) (set i (+ n 1)))))
+                  (do
+                    (set cur nil)
+                    (set i (+ n 1)))))
             (let [(key j) (path:match "^([^%.%[{]+)()" i)]
               (if key
-                  (do (set cur (. cur key)) (set i j))
-                  (do (set cur nil) (set i (+ n 1)))))))))
+                  (do
+                    (set cur (. cur key))
+                    (set i j))
+                  (do
+                    (set cur nil)
+                    (set i (+ n 1)))))))))
   cur)
+
+(fn render [v fmt use-color]
+  "Render a decoded value as yaml or (default) json."
+  (if (= fmt :yaml)
+      (let [s (pretty-mod.yaml v 0 use-color)]
+        (if (s:match "^\n") (s:sub 2) s))
+      (pretty-mod.pretty v 0 use-color)))
+
+(fn header-lines [headers]
+  (let [names (icollect [k (pairs (or headers {}))]
+                k)]
+    (table.sort names)
+    (table.concat (icollect [_ k (ipairs names)]
+                    (.. k ": " (tostring (. headers k))))
+                  "\n")))
+
+(fn format-output [resp output use-color ?select]
+  "Text to print for a successful response, or nil when there is nothing to show."
+  (let [body (if (and ?select resp.body) (select-path resp.body ?select)
+                 resp.body)]
+    (match (or output :json)
+      :status (tostring resp.status)
+      :headers (header-lines resp.headers)
+      :raw (if ?select
+               (when (not= nil body)
+                 (if (= (type body) :table) (render body :json false)
+                     (tostring body)))
+               (when (and resp.raw (> (length resp.raw) 0))
+                 resp.raw))
+      fmt (when (not= nil body) (render body fmt use-color)))))
 
 (fn print-resp [resp output no-color verbose ?select ?elapsed]
   (let [error? (and resp.status (>= resp.status 400))
-        body (if (and (not error?) ?select resp.body)
-                 (select-path resp.body ?select)
-                 resp.body)
-        timing (if ?elapsed (.. "  " (string.format "%.3fs" ?elapsed)) "")]
+        use-color (not no-color)
+        timing (if ?elapsed (string.format "  %.3fs" ?elapsed) "")]
+    (when (or verbose error?)
+      (io.stderr:write (.. "HTTP " resp.status timing "\n"))
+      (when verbose
+        (io.stderr:write (.. (header-lines resp.headers) "\n\n"))))
     (if error?
         (do
-          (io.stderr:write (.. "HTTP " resp.status timing "\n"))
-          (when verbose
-            (each [k v (pairs (or resp.headers {}))]
-              (io.stderr:write (.. k ": " v "\n")))
-            (io.stderr:write "\n"))
-          (when resp.body
-            (io.stderr:write (.. (pretty-mod.pretty resp.body 0 (not no-color)) "\n")))
+          (when (not= nil resp.body)
+            (io.stderr:write (.. (render resp.body :json use-color) "\n")))
           (os.exit 1))
-        (do
-          (when verbose
-            (print (.. "HTTP " resp.status timing))
-            (each [k v (pairs (or resp.headers {}))]
-              (print (.. k ": " v)))
-            (print ""))
-          (match (or output :json)
-            :raw     (print (tostring body))
-            :status  (print resp.status)
-            :headers (each [k v (pairs (or resp.headers {}))]
-                       (print (.. k ": " v)))
-            :yaml    (if body
-                         (let [rendered (pretty-mod.yaml body 0 (not no-color))]
-                           (print (if (rendered:match "^\n") (rendered:sub 2) rendered)))
-                         (when (not verbose)
-                           (io.stderr:write (.. "HTTP " resp.status "\n"))))
-            _ (if body
-                  (print (pretty-mod.pretty body 0 (not no-color)))
-                  (when (not verbose)
-                    (io.stderr:write (.. "HTTP " resp.status "\n")))))))))
+        (let [text (format-output resp output use-color ?select)]
+          (if text
+              (print text)
+              (when (not verbose)
+                (io.stderr:write (.. "HTTP " resp.status "\n"))))))))
 
 (fn strip-location [msg]
-  (let [s (tostring msg)
-        (r) (s:gsub "[^%s:]+%.lua:%d+: " "")]
-    r))
+  "Remove Lua error location prefixes (file.lua:N: or [string \"chunk\"]:N:)."
+  (let [(s) (: (tostring msg) :gsub "[^%s:]+%.lua:%d+: " "")
+        (s) (s:gsub "%[string \"[^\"]*\"%]:%d+: " "")]
+    s))
 
 (fn die [msg]
   (io.stderr:write (.. (strip-location (tostring msg)) "\n"))
@@ -321,16 +386,16 @@
     :list (profile-list config)
     :show (profile-show config name)
     _ (die (.. "Unknown profile subcommand: " (tostring subcmd)
-                     "\nUsage: atlas profile <list|show> [name]"))))
+               "\nUsage: atlas profile <list|show> [name]"))))
 
 (fn complete-ops [schema-or-profile]
-  (let [config   (load-config)
+  (let [config (load-config)
         profiles (or (?. config :profiles) {})
-        profile  (when (. profiles schema-or-profile)
-                   (resolve-profile schema-or-profile profiles {}))
-        schema   (or (?. profile :schema) schema-or-profile)
-        opts     {:headers (or (?. profile :headers) {})}
-        (ok c)   (pcall atlas.client schema opts)]
+        profile (when (. profiles schema-or-profile)
+                  (resolve-profile schema-or-profile profiles {}))
+        schema (or (?. profile :schema) schema-or-profile)
+        opts {:headers (or (?. profile :headers) {})}
+        (ok c) (pcall atlas.client schema opts)]
     (when ok
       (each [k v (pairs c)]
         (when (op? v) (print k))))))
@@ -473,6 +538,7 @@
   (print "  --input.KEY=VAL       Workflow input (long form)")
   (print "  --inputs=JSON         All inputs as a JSON object (or @file)")
   (print "  --arazzo-output=MODE  final (default), steps, progress, full")
+  (print "  --max-gotos=N         Max visits per goto target before aborting (default: 50)")
   (print "")
   (print "Config: ~/.config/atlas/config.json"))
 
@@ -485,84 +551,109 @@
       (when (next ssl) ssl))))
 
 (fn merge-ssl [profile cli-ssl]
-  (let [ssl (collect [k v (pairs (or (?. profile :ssl) {}))] k v)
+  (let [ssl (collect [k v (pairs (or (?. profile :ssl) {}))]
+              k
+              v)
         tls (tls->ssl (?. profile :tls))]
-    (when tls (each [k v (pairs tls)] (tset ssl k v)))
-    (when cli-ssl (each [k v (pairs cli-ssl)] (tset ssl k v)))
+    (when tls
+      (each [k v (pairs tls)] (tset ssl k v)))
+    (when cli-ssl
+      (each [k v (pairs cli-ssl)] (tset ssl k v)))
     ssl))
+
+(fn client-options [profile-name profile p config]
+  "Client options shared by op and az: headers (profile + auth), ssl,
+timeout, base-url and the http-fn (request logging, request signing)."
+  (let [ssl (merge-ssl profile p.ssl)
+        verbose (or p.verbose (?. profile :verbose) (?. config :verbose))
+        auth-cfg (let [a (?. profile :auth)]
+                   (when (and a a.name (not= a.name "")) a))
+        headers (collect [k v (pairs (or (?. profile :headers) {}))]
+                  (k:lower)
+                  v)
+        base-fn (if verbose (wrap-log-request http-mod.request)
+                    http-mod.request)]
+    (when auth-cfg
+      (let [(ok h) (pcall auth.get-headers profile-name auth-cfg ssl)]
+        (assert ok (.. "authentication failed: " (tostring h)))
+        (each [k v (pairs h)]
+          (tset headers (k:lower) v))))
+    {:headers headers
+     :ssl ssl
+     :timeout (or p.timeout (?. profile :timeout) (?. config :timeout))
+     :base-url (or p.base-url (?. profile :base-url))
+     :http-fn (or (when auth-cfg (auth.wrap-http-fn auth-cfg base-fn)) base-fn)}))
 
 (fn run-auth [profile-name p config]
   (assert profile-name "Usage: atlas auth <profile> [--logout]")
   (let [profiles (or (?. config :profiles) {})
-        profile  (when (. profiles profile-name)
-                   (resolve-profile profile-name profiles {}))]
+        profile (when (. profiles profile-name)
+                  (resolve-profile profile-name profiles {}))]
     (assert profile (.. "Profile not found: " profile-name))
     (let [auth-cfg (?. profile :auth)]
       (assert (and auth-cfg auth-cfg.name (not= auth-cfg.name ""))
               (.. "No auth configured for profile: " profile-name))
       (let [ssl (merge-ssl profile p.ssl)]
         (if (= auth-cfg.name "external-tool")
-            (let [(ok headers) (pcall auth.get-headers profile-name auth-cfg ssl)]
+            (let [(ok headers) (pcall auth.get-headers profile-name auth-cfg
+                                      ssl)]
               (if ok
                   (each [k v (pairs headers)]
                     (print (.. k ": " v)))
                   (die (tostring headers))))
             p.logout
-            (do (auth.clear-token profile-name)
-                (print (.. "Logged out: " profile-name)))
-            (do (auth.clear-token profile-name)
-                (let [(ok result) (pcall auth.get-headers profile-name auth-cfg ssl)]
-                  (if ok
-                      (print (.. "Authenticated: " profile-name))
-                      (die (tostring result))))))))))
+            (do
+              (auth.clear-token profile-name)
+              (print (.. "Logged out: " profile-name)))
+            (do
+              (auth.clear-token profile-name)
+              (let [(ok result) (pcall auth.get-headers profile-name auth-cfg
+                                       ssl)]
+                (if ok
+                    (print (.. "Authenticated: " profile-name))
+                    (die (tostring result))))))))))
+
+(fn executed-steps [result]
+  "Step ids in the order they first ran."
+  (let [seen {}]
+    (icollect [_ id (ipairs result.step-order)]
+      (when (not (. seen id))
+        (tset seen id true)
+        id))))
 
 (fn print-arazzo-result [result mode output no-color]
-  (let [fmt (or output :json)
-        render (fn [v]
-                 (match fmt
-                   :yaml (let [s (pretty-mod.yaml v 0 (not no-color))]
-                           (if (s:match "^\n") (s:sub 2) s))
-                   _     (pretty-mod.pretty v 0 (not no-color))))]
+  (let [render #(render $ output (not no-color))]
     (match (or mode :final)
-      :final
-      (when (next (or result.outputs {}))
-        (print (render result.outputs)))
-
-      :steps
-      (do
-        (let [ordered (icollect [id _ (pairs result.steps)] id)]
-          (table.sort ordered)
-          (each [_ step-id (ipairs ordered)]
-            (let [step (. result.steps step-id)]
-              (print (.. "--- " step-id " ---"))
-              (when step.response
-                (print (render step.response.body))))))
-        (when (next (or result.outputs {}))
-          (print "--- outputs ---")
-          (print (render result.outputs))))
-
-      :progress
-      (when (next (or result.outputs {}))
-        (print (render result.outputs)))
-
-      :full
-      (do
-        (let [ordered (icollect [id _ (pairs result.steps)] id)]
-          (table.sort ordered)
-          (each [_ step-id (ipairs ordered)]
-            (let [step (. result.steps step-id)]
-              (print (.. "--- " step-id " request ---"))
-              (when step.op-ref (print (.. "operation: " step.op-ref)))
-              (when (and step.request step.request.body)
-                (print (render step.request.body)))
-              (print (.. "--- " step-id " response"
-                         (if (and step.response step.response.status)
-                             (.. " HTTP " step.response.status) "")
-                         " ---"))
-              (when step.response (print (render step.response.body))))))
-        (when (next (or result.outputs {}))
-          (print "--- outputs ---")
-          (print (render result.outputs)))))))
+      :final (when (next (or result.outputs {}))
+               (print (render result.outputs)))
+      :steps (do
+               (let [ordered (executed-steps result)]
+                 (each [_ step-id (ipairs ordered)]
+                   (let [step (. result.steps step-id)]
+                     (print (.. "--- " step-id " ---"))
+                     (when step.response
+                       (print (render step.response.body))))))
+               (when (next (or result.outputs {}))
+                 (print "--- outputs ---")
+                 (print (render result.outputs))))
+      :progress (when (next (or result.outputs {}))
+                  (print (render result.outputs)))
+      :full (do
+              (let [ordered (executed-steps result)]
+                (each [_ step-id (ipairs ordered)]
+                  (let [step (. result.steps step-id)]
+                    (print (.. "--- " step-id " request ---"))
+                    (when step.op-ref (print (.. "operation: " step.op-ref)))
+                    (when (and step.request step.request.body)
+                      (print (render step.request.body)))
+                    (print (.. "--- " step-id " response"
+                               (if (and step.response step.response.status)
+                                   (.. " HTTP " step.response.status)
+                                   "") " ---"))
+                    (when step.response (print (render step.response.body))))))
+              (when (next (or result.outputs {}))
+                (print "--- outputs ---")
+                (print (render result.outputs)))))))
 
 (fn list-arazzo-workflows [doc]
   (let [wfs (or doc.workflows [])]
@@ -572,12 +663,14 @@
                   (math.max w (length wf.workflowId)))]
       (each [_ wf (ipairs wfs)]
         (print (if wf.summary
-                   (string.format (.. "%-" width "s  %s") wf.workflowId wf.summary)
+                   (string.format (.. "%-" width "s  %s") wf.workflowId
+                                  wf.summary)
                    wf.workflowId))))))
 
 (fn workflow-path-param-names [wf]
   "Return ordered list of input names that are path params in any step."
-  (let [seen {} names []]
+  (let [seen {}
+        names []]
     (each [_ step (ipairs (or wf.steps []))]
       (each [_ param (ipairs (or step.parameters []))]
         (when (= param.in :path)
@@ -591,100 +684,93 @@
 (fn run-arazzo [p]
   ;; p.schema = name-or-file, p.operation = workflow-id, p.path-params = extra positionals
   (let [name-or-file p.schema
-        workflow-id  p.operation]
+        workflow-id p.operation]
     (when (not name-or-file)
       (let [config (load-config)
-            named  (or (?. config :arazzo) {})]
+            named (or (?. config :arazzo) {})]
         (io.stderr:write "Usage: atlas az <name-or-file> <workflow-id> [-i KEY=VAL ...]\n\n")
         (if (next named)
-            (do (io.stderr:write "Configured Arazzo contexts:\n")
-                (each [n v (pairs named)]
-                  (io.stderr:write (.. "  " n "\t" (or v.file "") "\n"))))
+            (do
+              (io.stderr:write "Configured Arazzo contexts:\n")
+              (each [n v (pairs named)]
+                (io.stderr:write (.. "  " n "\t" (or v.file "") "\n"))))
             (io.stderr:write "No Arazzo contexts configured in ~/.config/atlas/config.json\n")))
       (os.exit 1))
-    (let [config   (load-config)
-          named    (?. config :arazzo name-or-file)
-          file     (if named named.file name-or-file)
+    (let [config (load-config)
+          named (?. config :arazzo name-or-file)
+          file (if named named.file name-or-file)
           profiles (or (?. config :profiles) {})
           profile-name (or p.profile (?. named :profile))
-          profile  (when (and profile-name (. profiles profile-name))
-                     (resolve-profile profile-name profiles {}))
+          profile (when (and profile-name (. profiles profile-name))
+                    (resolve-profile profile-name profiles {}))
           (ok doc) (pcall arazzo.load-doc file)]
       (assert ok (tostring doc))
       (if (not workflow-id)
           (list-arazzo-workflows doc)
-          (let [wf       (accumulate [found nil _ w (ipairs (or doc.workflows []))]
-                           (if (= w.workflowId workflow-id) w found))
+          (let [wf (accumulate [found nil _ w (ipairs (or doc.workflows []))]
+                     (if (= w.workflowId workflow-id) w found))
                 pp-names (if wf (workflow-path-param-names wf) [])
-                inputs   (let [base (collect [k v (pairs (or (?. named :inputs) {}))] k v)]
-                           (each [j name (ipairs pp-names)]
-                             (let [v (. p.path-params j)]
-                               (when v (tset base name v))))
-                           (each [k v (pairs (or p.arazzo-inputs-blob {}))]
-                             (tset base k v))
-                           (each [k v (pairs p.arazzo-inputs)]
-                             (tset base k v))
-                           (each [k v (pairs (or p.body-params {}))]
-                             (tset base k v))
-                           (when (and p.body (= (type p.body) :table))
-                             (each [k v (pairs p.body)]
-                               (tset base k v)))
-                           base)
-                mode     (or p.arazzo-output (if p.verbose :progress :final))
+                inputs (let [base (collect [k v (pairs (or (?. named :inputs)
+                                                           {}))]
+                                    k
+                                    v)]
+                         (each [j name (ipairs pp-names)]
+                           (let [v (. p.path-params j)]
+                             (when v (tset base name v))))
+                         (each [k v (pairs (or p.arazzo-inputs-blob {}))]
+                           (tset base k v))
+                         (when (and p.body (= (type p.body) :table))
+                           (each [k v (pairs p.body)]
+                             (tset base k v)))
+                         (let [fields (icollect [_ f (ipairs p.input-fields)] f)]
+                           (each [_ f (ipairs p.body-fields)]
+                             (table.insert fields f))
+                           (build-body fields (?. wf :inputs) base)))
+                mode (or p.arazzo-output (if p.verbose :progress :final))
                 no-color (or p.no-color (?. config :no-color))
-                output   (or p.output (?. config :output))
-                ssl      (merge-ssl profile p.ssl)
-                auth-cfg (let [a (?. profile :auth)]
-                           (when (and a a.name (not= a.name "")) a))
-                run-opts (let [o {:on-step nil
-                                  :timeout (or p.timeout (?. profile :timeout))
-                                  :ssl     ssl}]
-                           (let [base-fn (if p.verbose
-                                             (wrap-log-request http-mod.request)
-                                             http-mod.request)
-                                 wrapped (when auth-cfg (auth.wrap-http-fn auth-cfg base-fn))]
-                             (tset o :http-fn (or wrapped (when p.verbose base-fn))))
-                           (when (?. profile :base-url)
-                             (tset o :base-url (?. profile :base-url)))
-                           o)
+                output (or p.output (?. config :output))
+                run-opts (client-options profile-name profile p config)
                 use-color (not no-color)
-                dim    (fn [s] (if use-color (.. "\27[2m" s "\27[0m") s))
-                green  (fn [s] (if use-color (.. "\27[32m" s "\27[0m") s))
-                red    (fn [s] (if use-color (.. "\27[31m" s "\27[0m") s))
-                on-step  (when (or (= mode :progress) (= mode :full))
-                           (let [fmt    (or output :json)
-                                 render (fn [v]
-                                          (match fmt
-                                            :yaml (let [s (pretty-mod.yaml v 0 use-color)]
-                                                    (if (s:match "^\n") (s:sub 2) s))
-                                            _ (pretty-mod.pretty v 0 use-color)))]
-                             (fn [info]
-                               (match info.status
-                                 :running (io.stderr:write (.. (dim "→") " " info.step "\n"))
-                                 :done
-                                 (do
-                                   (io.stderr:write
-                                     (.. (green "✓") " " info.step
-                                         (if info.elapsed
-                                             (string.format "  %.3fs" info.elapsed) "")
-                                         (if (and info.response info.response.status)
-                                             (.. "  HTTP " info.response.status) "")
-                                         "\n"))
-                                   (when (and info.outputs (next info.outputs))
-                                     (io.stderr:write (.. (render info.outputs) "\n"))))))))]
+                dim (fn [s] (if use-color (.. "\27[2m" s "\27[0m") s))
+                green (fn [s] (if use-color (.. "\27[32m" s "\27[0m") s))
+                red (fn [s] (if use-color (.. "\27[31m" s "\27[0m") s))
+                on-step (when (or (= mode :progress) (= mode :full))
+                          (let [render #(render $ output use-color)]
+                            (fn [info]
+                              (match info.status
+                                :running (io.stderr:write (.. (dim "→") " "
+                                                              info.step "\n"))
+                                :done (do
+                                        (io.stderr:write (.. (green "✓") " "
+                                                             info.step
+                                                             (if info.elapsed
+                                                                 (string.format "  %.3fs"
+                                                                                info.elapsed)
+                                                                 "")
+                                                             (if (and info.response
+                                                                      info.response.status)
+                                                                 (.. "  HTTP "
+                                                                     info.response.status)
+                                                                 "")
+                                                             "\n"))
+                                        (when (and info.outputs
+                                                   (next info.outputs))
+                                          (io.stderr:write (.. (render info.outputs)
+                                                               "\n"))))))))]
             (tset run-opts :on-step on-step)
-            (let [t0      (socket.gettime)
-                  clients (arazzo.build-clients doc run-opts)
-                  (ok result) (pcall arazzo.run-workflow doc workflow-id inputs clients run-opts)
+            (tset run-opts :max-gotos p.max-gotos)
+            (let [t0 (socket.gettime)
+                  clients (arazzo.build-clients doc run-opts file)
+                  (ok result) (pcall arazzo.run-workflow doc workflow-id inputs
+                                     clients run-opts)
                   elapsed (- (socket.gettime) t0)]
               (when (or (= mode :progress) (= mode :full))
                 (if ok
-                    (io.stderr:write
-                      (.. (green "✓") " workflow " workflow-id
-                          (string.format "  %.3fs" elapsed) "\n"))
-                    (io.stderr:write
-                      (.. (red "✗") " workflow " workflow-id " failed"
-                          (string.format "  %.3fs" elapsed) "\n"))))
+                    (io.stderr:write (.. (green "✓") " workflow " workflow-id
+                                         (string.format "  %.3fs" elapsed) "\n"))
+                    (io.stderr:write (.. (red "✗") " workflow " workflow-id
+                                         " failed"
+                                         (string.format "  %.3fs" elapsed) "\n"))))
               (if ok
                   (print-arazzo-result result mode output no-color)
                   (die (tostring result)))))))))
@@ -699,13 +785,14 @@
 
 (fn run-op [p]
   (when (not p.schema)
-    (let [config   (load-config)
+    (let [config (load-config)
           profiles (or (?. config :profiles) {})]
       (io.stderr:write "Usage: atlas op <profile-or-schema> [operation] [args...]\n\n")
       (if (next profiles)
-          (do (io.stderr:write "Configured profiles:\n")
-              (each [n v (pairs profiles)]
-                (io.stderr:write (.. "  " n "\t" (or v.schema "(no schema)") "\n"))))
+          (do
+            (io.stderr:write "Configured profiles:\n")
+            (each [n v (pairs profiles)]
+              (io.stderr:write (.. "  " n "\t" (or v.schema "(no schema)") "\n"))))
           (io.stderr:write "No profiles configured in ~/.config/atlas/config.json\n")))
     (os.exit 1))
   (let [config (load-config)
@@ -717,71 +804,36 @@
         no-color (or p.no-color (?. profile :no-color) (?. config :no-color))
         output (or p.output (?. profile :output) (?. config :output))
         verbose (or p.verbose (?. profile :verbose) (?. config :verbose))
-        timeout (or p.timeout (?. profile :timeout) (?. config :timeout))
-        ssl (merge-ssl profile p.ssl)
-        auth-cfg (let [a (?. profile :auth)]
-                   (when (and a a.name (not= a.name "")) a))
-        auth-headers (when auth-cfg
-                       (let [(ok h) (pcall auth.get-headers p.schema auth-cfg ssl)]
-                         (if ok h (die (.. "authentication failed: " (tostring h))))))
+        opts (client-options p.schema profile p config)
         schema (if (and (= (type raw-schema) :string)
                         (raw-schema:match "^https?://"))
-                  (load-schema-cached raw-schema ttl p.reload ssl auth-headers)
-                  raw-schema)
-        opts {:headers (collect [k v (pairs (or (?. profile :headers) {}))] k v)
-              :timeout timeout
-              :ssl ssl}]
-    (when auth-headers
-      (each [k v (pairs auth-headers)]
-        (tset opts.headers k v)))
-    (let [base-fn (if verbose
-                      (wrap-log-request http-mod.request)
-                      http-mod.request)
-          wrapped (when auth-cfg (auth.wrap-http-fn auth-cfg base-fn))]
-      (tset opts :http-fn (or wrapped (when verbose base-fn))))
-    (when (or p.base-url (?. profile :base-url))
-      (tset opts :base-url (or p.base-url (?. profile :base-url))))
+                   (load-schema-cached raw-schema ttl p.reload opts.ssl
+                                       opts.headers)
+                   raw-schema)]
     (when (= (type schema) :table)
       (tset opts :source-url raw-schema))
     (let [(ok-c c) (pcall atlas.client schema opts)]
-      (when (not ok-c) (die (.. "failed to build client: " (tostring c))))
-      (if
-        p.list
-        (list-ops c)
-
-        (and p.help (not p.operation))
-        (list-ops c)
-
-        p.help
-        (let [op (. c p.operation)]
-          (if op
-              (print (or (. op :cli/help) "No documentation available."))
-              (die (.. "Unknown operation: " p.operation))))
-
-        p.operation
-        (let [op (. c p.operation)]
-          (when (not op) (die (.. "Unknown operation: " p.operation)))
-          (let [path-args (icollect [_ v (ipairs p.path-params)] (coerce v))
-                call-args (icollect [_ v (ipairs path-args)] v)
-                req-opts (let [o {}]
-                           (when (next p.query) (tset o :query p.query))
-                           (when (next p.headers) (tset o :headers p.headers))
-                           (when timeout (tset o :timeout timeout))
-                           (when (next o) o))]
-            (when op.has-body?
-              (let [body (if (and (not p.body) (next p.body-params))
-                             p.body-params
-                             p.body)]
-                (table.insert call-args body)))
-            (when req-opts (table.insert call-args req-opts))
+      (when (not ok-c)
+        (die (.. "failed to build client: " (tostring c))))
+      (if p.list
+          (list-ops c)
+          (and p.help (not p.operation))
+          (list-ops c)
+          p.help
+          (let [op (. c p.operation)]
+            (if op
+                (print (or (. op :cli/help) "No documentation available."))
+                (die (.. "Unknown operation: " p.operation))))
+          p.operation
+          (let [op (. c p.operation)]
+            (when (not op) (die (.. "Unknown operation: " p.operation)))
             (let [t0 (socket.gettime)
-                  (ok-r resp) (pcall op (table.unpack call-args))
+                  (ok-r resp) (pcall op.invoke (op-request op p))
                   elapsed (- (socket.gettime) t0)]
               (if ok-r
                   (print-resp resp output no-color verbose p.select elapsed)
-                  (die (.. "request failed: " (tostring resp)))))))
-
-        (list-ops c)))))
+                  (die (.. "request failed: " (tostring resp))))))
+          (list-ops c)))))
 
 (fn run [args]
   (let [p (parse-args args)]
@@ -792,31 +844,27 @@
       (complete-ops p.complete-ops)
       (os.exit 0))
     (match p.cmd
-      :completion
-      (match p.schema
-        :fish (completion-fish)
-        :bash (completion-bash)
-        :zsh  (completion-zsh)
-        _ (die "Usage: atlas completion <fish|bash|zsh>"))
-
-      :profile
-      (run-profile p.schema p.operation (load-config))
-
-      :auth
-      (run-auth p.schema p (load-config))
-
-      (where (or :az :arazzo))
-      (run-arazzo p)
-
-      :op
-      (run-op p)
-
-      _
-      (die (.. "Unknown command: " (tostring p.cmd)
-               "\nUsage: atlas <op|az|profile|auth|completion> ...")))))
+      :completion (match p.schema
+                    :fish (completion-fish)
+                    :bash (completion-bash)
+                    :zsh (completion-zsh)
+                    _ (die "Usage: atlas completion <fish|bash|zsh>"))
+      :profile (run-profile p.schema p.operation (load-config))
+      :auth (run-auth p.schema p (load-config))
+      (where (or :az :arazzo)) (run-arazzo p)
+      :op (run-op p)
+      _ (die (.. "Unknown command: " (tostring p.cmd)
+                 "\nUsage: atlas <op|az|profile|auth|completion> ...")))))
 
 (fn main [args]
   (let [(ok err) (pcall run args)]
     (when (not ok) (die (tostring err)))))
 
-{: main}
+{: main
+ : parse-args
+ : build-body
+ : op-request
+ : format-output
+ : client-options
+ : redact-header
+ : strip-location}

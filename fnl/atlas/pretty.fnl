@@ -1,11 +1,12 @@
-(local colors
-  {:reset  "\27[0m"
-   :key    "\27[36m"
-   :string "\27[32m"
-   :number "\27[33m"
-   :bool   "\27[35m"
-   :null   "\27[31m"
-   :punct  "\27[90m"})
+;; ABOUTME: Renders decoded values as colorized JSON or YAML for terminal output.
+;; ABOUTME: Output is deterministic: object keys are sorted.
+(local colors {:reset "\27[0m"
+               :key "\27[36m"
+               :string "\27[32m"
+               :number "\27[33m"
+               :bool "\27[35m"
+               :null "\27[31m"
+               :punct "\27[90m"})
 
 (fn c [color s use-color]
   (if use-color (.. (. colors color) s colors.reset) s))
@@ -19,49 +20,86 @@
       (set max-n k)))
   (= count max-n))
 
+(local json-escapes {"\"" "\\\""
+                     "\\" "\\\\"
+                     "\b" "\\b"
+                     "\f" "\\f"
+                     "\n" "\\n"
+                     "\r" "\\r"
+                     "\t" "\\t"})
+
+(fn json-string [s]
+  (.. "\""
+      (pick-values 1
+                   (s:gsub "[%c\"\\]"
+                           (fn [ch]
+                             (or (. json-escapes ch)
+                                 (string.format "\\u%04x" (string.byte ch))))))
+      "\""))
+
+(fn json-number [n]
+  (if (or (not= n n) (= n math.huge) (= n (- math.huge)))
+      "null"
+      (tostring n)))
+
+(fn sorted-keys [t]
+  (let [ks (icollect [k (pairs t)] k)]
+    (table.sort ks #(< (tostring $1) (tostring $2)))
+    ks))
+
 (fn pretty [v indent use-color]
   (let [ind (or indent 0)
         uc (not= use-color false)
-        pad  (string.rep "  " ind)
+        pad (string.rep "  " ind)
         pad+ (string.rep "  " (+ ind 1))]
     (match (type v)
-      :table
-      (if (= (next v) nil)
-          (c :punct "{}" uc)
-          (array? v)
-          (let [items (icollect [_ x (ipairs v)]
-                        (.. pad+ (pretty x (+ ind 1) uc)))]
-            (.. (c :punct "[" uc) "\n"
-                (table.concat items (.. (c :punct "," uc) "\n"))
-                "\n" pad (c :punct "]" uc)))
-          (let [items []]
-            (each [k x (pairs v)]
-              (table.insert items
-                (.. pad+
-                    (c :key (string.format "%q" (tostring k)) uc)
-                    (c :punct ": " uc)
-                    (pretty x (+ ind 1) uc))))
-            (.. (c :punct "{" uc) "\n"
-                (table.concat items (.. (c :punct "," uc) "\n"))
-                "\n" pad (c :punct "}" uc))))
-      :string (c :string (string.format "%q" v) uc)
-      :number (c :number (tostring v) uc)
+      :table (if (= (next v) nil)
+                 (c :punct "{}" uc)
+                 (array? v)
+                 (let [items (icollect [_ x (ipairs v)]
+                               (.. pad+ (pretty x (+ ind 1) uc)))]
+                   (.. (c :punct "[" uc) "\n"
+                       (table.concat items (.. (c :punct "," uc) "\n")) "\n" pad
+                       (c :punct "]" uc)))
+                 (let [items []]
+                   (each [_ k (ipairs (sorted-keys v))]
+                     (table.insert items
+                                   (.. pad+
+                                       (c :key (json-string (tostring k)) uc)
+                                       (c :punct ": " uc)
+                                       (pretty (. v k) (+ ind 1) uc))))
+                   (.. (c :punct "{" uc) "\n"
+                       (table.concat items (.. (c :punct "," uc) "\n")) "\n" pad
+                       (c :punct "}" uc))))
+      :string (c :string (json-string v) uc)
+      :number (c :number (json-number v) uc)
       :boolean (c :bool (tostring v) uc)
       :nil (c :null "null" uc)
       _ (tostring v))))
 
+(local yaml-reserved (collect [_ w (ipairs ["y"
+                                            "n"
+                                            "yes"
+                                            "no"
+                                            "true"
+                                            "false"
+                                            "on"
+                                            "off"
+                                            "null"
+                                            "~"
+                                            ".inf"
+                                            "-.inf"
+                                            "+.inf"
+                                            ".nan"])]
+                       w
+                       true))
+
 (fn yaml-needs-quotes? [s]
-  ;; quote strings that look like YAML scalars or contain special chars
-  (or (= s "")
-      (s:match "^[0-9]")
-      (s:match "^[-~|>!&*%%@`#,{}%[%]:]")
-      (s:match "[\n\r\t]")
-      (s:match ":[ \t]")
-      (s:match " #")
-      (s:match "^%s")
-      (s:match "%s$")
-      (= s "true") (= s "false") (= s "null")
-      (= s "~") (= s ".inf") (= s "-.inf") (= s ".nan")))
+  "True when s would not read back as the same string from a plain scalar."
+  (or (= s "") (. yaml-reserved (s:lower)) (not= nil (tonumber s))
+      (s:match "^[0-9]") (s:match "^[-?:,%[%]{}#&*!|>'\"%%@`.+~]")
+      (s:match "[\n\r\t]") (s:match ":[ \t]") (s:match ":$") (s:match " #")
+      (s:match "^%s") (s:match "%s$")))
 
 (fn yaml-escape [s]
   (-> s
@@ -76,28 +114,34 @@
         uc (not= ?use-color false)
         pad (string.rep "  " ind)]
     (match (type v)
-      :table
-      (if (= (next v) nil)
-          (c :punct "{}" uc)
-          (array? v)
-          (let [lines []]
-            (each [_ x (ipairs v)]
-              (let [rendered (yaml x (+ ind 1) uc)]
-                (if (rendered:match "^\n")
-                    (table.insert lines (.. pad (c :punct "-" uc) " " (rendered:gsub "^\n%s*" "")))
-                    (table.insert lines (.. pad (c :punct "-" uc) " " rendered)))))
-            (.. "\n" (table.concat lines "\n")))
-          (let [lines []]
-            (each [k x (pairs v)]
-              (let [key (tostring k)
-                    rendered (yaml x (+ ind 1) uc)]
-                (if (rendered:match "^\n")
-                    (table.insert lines (.. pad (c :key key uc) (c :punct ":" uc) rendered))
-                    (table.insert lines (.. pad (c :key key uc) (c :punct ":" uc) " " rendered)))))
-            (.. "\n" (table.concat lines "\n"))))
+      :table (if (= (next v) nil)
+                 (c :punct "{}" uc)
+                 (array? v)
+                 (let [lines []]
+                   (each [_ x (ipairs v)]
+                     (let [rendered (yaml x (+ ind 1) uc)]
+                       (if (rendered:match "^\n")
+                           (table.insert lines
+                                         (.. pad (c :punct "-" uc) " "
+                                             (rendered:gsub "^\n%s*" "")))
+                           (table.insert lines
+                                         (.. pad (c :punct "-" uc) " " rendered)))))
+                   (.. "\n" (table.concat lines "\n")))
+                 (let [lines []]
+                   (each [_ k (ipairs (sorted-keys v))]
+                     (let [key (tostring k)
+                           rendered (yaml (. v k) (+ ind 1) uc)]
+                       (if (rendered:match "^\n")
+                           (table.insert lines
+                                         (.. pad (c :key key uc)
+                                             (c :punct ":" uc) rendered))
+                           (table.insert lines
+                                         (.. pad (c :key key uc)
+                                             (c :punct ":" uc) " " rendered)))))
+                   (.. "\n" (table.concat lines "\n"))))
       :string (let [s (if (yaml-needs-quotes? v)
-                         (.. "\"" (yaml-escape v) "\"")
-                         v)]
+                          (.. "\"" (yaml-escape v) "\"")
+                          v)]
                 (c :string s uc))
       :number (c :number (tostring v) uc)
       :boolean (c :bool (tostring v) uc)

@@ -1,7 +1,7 @@
 FROM debian:bookworm-slim AS builder
 
 RUN apt-get update -q && apt-get install -y --no-install-recommends \
-    lua5.4 liblua5.4-dev libssl-dev pkg-config unzip wget \
+    lua5.4 liblua5.4-dev libssl-dev libyaml-dev pkg-config unzip wget \
     build-essential ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
@@ -17,13 +17,19 @@ RUN wget -q https://luarocks.org/releases/luarocks-3.11.1.tar.gz \
 RUN luarocks install fennel \
   && luarocks install lunajson \
   && luarocks install luasocket \
-  && luarocks install luasec
+  && luarocks install luasec \
+  && luarocks install lyaml \
+  && luarocks install busted
 
 WORKDIR /src
 COPY . .
 
+RUN make test FENNEL=fennel
+
 RUN LUA_PATH_EXTRA=$(luarocks path --lr-path 2>/dev/null) && \
     make binary FENNEL=fennel "LUA_PATH=./?.lua;./?/init.lua;${LUA_PATH_EXTRA}"
+
+RUN make check-binary
 
 # ---- export stage ----
 FROM scratch

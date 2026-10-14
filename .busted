@@ -2,7 +2,7 @@ return {
   default = {
     helper  = "test/helper.lua",
     loaders = {"lua", "fennel"},
-    pattern = "_test",
+    pattern = "_spec%.fnl",
     verbose = true,
   }
 }
