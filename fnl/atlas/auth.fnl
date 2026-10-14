@@ -14,8 +14,7 @@
 (fn token-path [profile-name]
   (.. (cache-dir) "/" (util.url-encode profile-name) ".json"))
 
-(fn shell-quote [s]
-  (.. "'" (: (tostring s) :gsub "'" "'\\''") "'"))
+(local shell-quote util.shell-quote)
 
 (fn expand-env [s]
   (if (and (= (type s) :string) (s:match "^env:(.+)"))
@@ -360,19 +359,57 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
                        (authenticate profile-name auth-config ssl))]
           data.access_token))))
 
+(fn required-param [auth-config key]
+  (let [v (?. auth-config :params key)]
+    (assert (and v (not= v ""))
+            (string.format "%s auth requires params.%s" auth-config.name key))
+    (expand-env v)))
+
+(fn api-key-in-query? [auth-config]
+  (and (= auth-config.name "api-key") (= (?. auth-config :params :in) "query")))
+
 (fn get-headers [profile-name auth-config ssl]
   "Returns static headers for any auth type.
+  bearer / basic / api-key (header): headers built from params.
+  api-key in the query string: returns {} — the parameter is added via wrap-http-fn.
   For external-tool with output=bearer-token: runs command once, returns Authorization header.
   For external-tool signing mode: returns {} — per-request headers come via wrap-http-fn.
   OAuth types: returns {:authorization 'Bearer <token>'}."
   (match auth-config.name
+    "bearer" {:authorization (.. "Bearer " (required-param auth-config :token))}
+    "basic" {:authorization (.. "Basic "
+                                (digest.base64 (.. (required-param auth-config
+                                                                   :username)
+                                                   ":"
+                                                   (required-param auth-config
+                                                                   :password))))}
+    "api-key" (if (api-key-in-query? auth-config)
+                  {}
+                  {(: (required-param auth-config :name) :lower) (required-param auth-config
+                                                                                 :value)})
     "external-tool" (if (= (?. auth-config :params :output) "bearer-token")
                         (external-bearer auth-config.params)
                         {})
     _ {:authorization (.. "Bearer " (ensure-token profile-name auth-config ssl))}))
 
-(fn wrap-http-fn [auth-config base-fn]
-  "Returns a per-request signing wrapper, or nil if not needed."
+(fn wrap-api-key-query [auth-config base-fn]
+  (let [name (required-param auth-config :name)
+        value (required-param auth-config :value)]
+    (fn [req]
+      ;; next-page URLs from pagination may already carry the key
+      (let [in-url? (let [url (or req.url "")
+                          param (.. (util.url-encode name) "=")]
+                      (or (not= nil (url:find (.. "?" param) 1 true))
+                          (not= nil (url:find (.. "&" param) 1 true))))]
+        (when (not in-url?)
+          (let [query (collect [k v (pairs (or req.query {}))]
+                        k
+                        v)]
+            (tset query name value)
+            (tset req :query query)))
+        (base-fn req)))))
+
+(fn wrap-signing [auth-config base-fn]
   (when (and (= auth-config.name "external-tool")
              (not= (?. auth-config :params :output) "bearer-token"))
     (let [params auth-config.params]
@@ -383,8 +420,10 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
           (tset req :query nil))
         ;; pre-encode body so signing and wire use identical bytes
         (when (and req.body (not req.raw-body))
-          (tset req :raw-body (http.encode-body req))
-          (tset req :body nil))
+          (let [(_ payload headers) (http.encode-request req)]
+            (tset req :raw-body payload)
+            (tset req :headers headers)
+            (tset req :body nil)))
         (let [extra (external-signing-headers params req)]
           (when extra
             (let [headers (or req.headers {})]
@@ -392,6 +431,12 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
                 (tset headers k (if (= (type vs) :table) (. vs 1) vs)))
               (tset req :headers headers)))
           (base-fn req))))))
+
+(fn wrap-http-fn [auth-config base-fn]
+  "Returns a per-request wrapper (query api-key or signing), or nil if not needed."
+  (if (api-key-in-query? auth-config)
+      (wrap-api-key-query auth-config base-fn)
+      (wrap-signing auth-config base-fn)))
 
 {: get-headers
  : wrap-http-fn

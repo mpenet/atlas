@@ -24,6 +24,22 @@
 
 ;; ---- client building ----
 
+(fn source-client [url opts server-vars used]
+  "Client for one source, given only the server variables its schema
+declares; records the variables it used in used."
+  (if (= nil (next server-vars))
+      (atlas.client url opts)
+      (let [schema (atlas.load-schema url opts.ssl)
+            declared (or (?. schema :servers 1 :variables) {})
+            own (collect [name value (pairs server-vars)]
+                  (when (. declared name)
+                    (tset used name true)
+                    (values name value)))
+            client-opts (collect [k v (pairs opts)] k v)]
+        (tset client-opts :server-vars own)
+        (tset client-opts :source-url url)
+        (atlas.client schema client-opts))))
+
 (fn build-clients [doc ?opts ?location]
   "Returns {sourceName → atlas-client} for openapi sourceDescriptions.
 Relative source URLs resolve against ?location, the document's own path or URL."
@@ -33,14 +49,19 @@ Relative source URLs resolve against ?location, the document's own path or URL."
     (when (and (?. ?opts :base-url) (> (length sources) 1))
       (error (.. "base-url override is ambiguous: the document has "
                  (length sources) " openapi sources") 0))
-    (each [_ src (ipairs sources)]
-      (let [url (if ?location (util.resolve-reference ?location src.url)
-                    src.url)
-            (ok c) (pcall atlas.client url (or ?opts {}))]
-        (if ok
-            (tset clients src.name c)
-            (io.stderr:write (.. "warning: could not build client for source '"
-                                 src.name "': " (tostring c) "\n")))))
+    (let [server-vars (or (?. ?opts :server-vars) {})
+          used {}]
+      (each [_ src (ipairs sources)]
+        (let [url (if ?location (util.resolve-reference ?location src.url)
+                      src.url)
+              (ok c) (pcall source-client url (or ?opts {}) server-vars used)]
+          (if ok
+              (tset clients src.name c)
+              (io.stderr:write (.. "warning: could not build client for source '"
+                                   src.name "': " (tostring c) "\n")))))
+      (each [name (pairs server-vars)]
+        (when (not (. used name))
+          (error (.. "no openapi source declares server variable '" name "'") 0))))
     clients))
 
 ;; ---- operation lookup ----

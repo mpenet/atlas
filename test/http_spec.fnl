@@ -89,3 +89,45 @@
                     (assert.is_false ok)
                     (assert.is_truthy (: (tostring err) :find
                                          "nope/missing.json" 1 true)))))))
+
+(describe "http.encode-body multipart"
+          (fn []
+            (it "encodes fields and file parts with a boundary in the content type"
+                (fn []
+                  (let [(payload content-type) (http.encode-body {:headers {:content-type "multipart/form-data"}
+                                                                  :body {:name "Rex"
+                                                                         :photo {:filename "rex.png"
+                                                                                 :content "\137PNG\0bin"
+                                                                                 :content-type "image/png"}}})
+                        boundary (content-type:match "^multipart/form%-data; boundary=(.+)$")]
+                    (assert.is_truthy boundary)
+                    (assert.are.equal (.. "--" boundary "\r\n"
+                                          "Content-Disposition: form-data; name=\"name\"\r\n\r\n"
+                                          "Rex\r\n" "--" boundary "\r\n"
+                                          "Content-Disposition: form-data; name=\"photo\"; filename=\"rex.png\"\r\n"
+                                          "Content-Type: image/png\r\n\r\n"
+                                          "\137PNG\0bin\r\n" "--" boundary
+                                          "--\r\n")
+                                      payload))))
+            (it "defaults file parts to application/octet-stream"
+                (fn []
+                  (let [payload (http.encode-body {:headers {:content-type "multipart/form-data"}
+                                                   :body {:f {:filename "x"
+                                                              :content "y"}}})]
+                    (assert.is_truthy (payload:find "Content-Type: application/octet-stream"
+                                                    1 true)))))
+            (it "leaves the content type alone for other bodies"
+                (fn []
+                  (let [(_ ct) (http.encode-body {:headers {:content-type "application/json"}
+                                                  :body {:a 1}})]
+                    (assert.is_nil ct))))))
+
+(describe "multipart field names"
+          (fn []
+            (it "percent-escapes quotes and line breaks"
+                (fn []
+                  (let [payload (http.encode-body {:headers {:content-type "multipart/form-data"}
+                                                   :body {"a\"\r\nX-Evil: 1" "v"}})]
+                    (assert.is_nil (payload:find "\r\nX-Evil" 1 true))
+                    (assert.is_truthy (payload:find "name=\"a%22%0D%0AX-Evil: 1\""
+                                                    1 true)))))))

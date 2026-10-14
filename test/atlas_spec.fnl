@@ -194,6 +194,11 @@
                                                                        :petId 1}
                                                                 :query {:x "y"}}))
                     (assert.are.equal 0 (length calls)))))
+            (it "exposes the negotiated request content type"
+                (fn []
+                  (let [c (atlas.client pets-schema {:http-fn (mock-http)})]
+                    (assert.are.equal "application/json" c.add-pet.content-type)
+                    (assert.is_nil c.get-owner-pet.content-type))))
             (it "exposes the negotiated request body schema"
                 (fn []
                   (let [c (atlas.client (schema {"/x" {:post {:operationId "mk"
@@ -262,3 +267,59 @@
                     (c.get-x)
                     (assert.are.equal "https://h.example.com/v%1/x"
                                       (. calls 1 :url)))))))
+
+(local zoned-schema
+       {:openapi "3.0.0"
+        :info {}
+        :servers [{:url "https://api-{zone}.example.com/{version}"
+                   :variables {:zone {:default "ch-gva-2"
+                                      :enum ["ch-gva-2" "de-fra-1"]}
+                               :version {:default "v2"}}}]
+        :paths {"/x" {:get {:operationId "getX" :responses {}}}}})
+
+(describe "server variable overrides"
+          (fn []
+            (it "uses defaults when no override is given"
+                (fn []
+                  (let [(http calls) (mock-http)
+                        c (atlas.client zoned-schema {:http-fn http})]
+                    (c.get-x.invoke)
+                    (assert.are.equal "https://api-ch-gva-2.example.com/v2/x"
+                                      (. calls 1 :url)))))
+            (it "substitutes overrides"
+                (fn []
+                  (let [(http calls) (mock-http)
+                        c (atlas.client zoned-schema
+                                        {:http-fn http
+                                         :server-vars {:zone "de-fra-1"
+                                                       :version "v3"}})]
+                    (c.get-x.invoke)
+                    (assert.are.equal "https://api-de-fra-1.example.com/v3/x"
+                                      (. calls 1 :url)))))
+            (it "rejects values outside the enum, listing allowed ones"
+                (fn []
+                  (let [(ok err) (pcall atlas.client zoned-schema
+                                        {:http-fn (mock-http)
+                                         :server-vars {:zone "mars-1"}})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "server variable zone: 'mars-1' is not one of ch-gva-2, de-fra-1"
+                                         1 true)))))
+            (it "rejects unknown variables, listing known ones"
+                (fn []
+                  (let [(ok err) (pcall atlas.client zoned-schema
+                                        {:http-fn (mock-http)
+                                         :server-vars {:region "x"}})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "unknown server variable 'region' (known: version, zone)"
+                                         1 true)))))
+            (it "is ignored when base-url is given"
+                (fn []
+                  (let [(http calls) (mock-http)
+                        c (atlas.client zoned-schema
+                                        {:http-fn http
+                                         :base-url "https://b"
+                                         :server-vars {:zone "de-fra-1"}})]
+                    (c.get-x.invoke)
+                    (assert.are.equal "https://b/x" (. calls 1 :url)))))))

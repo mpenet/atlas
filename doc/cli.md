@@ -83,12 +83,21 @@ atlas op https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 -v
 | `--query.KEY=VAL` | Query parameter (repeatable) |
 | `--header.KEY=VAL` | Per-request header (repeatable) |
 | `--timeout=N` | Timeout in seconds |
+| `--max-pages=N` | Follow up to N pages of `Link: <…>; rel="next"` pagination (default 25) |
+| `--no-paginate` | Return only the first page |
+| `--retry=N` | Retry 408/429/500/502/503/504 responses and network errors up to N times (default 2). Honors `Retry-After`, otherwise backs off 1s, 2s, 4s… Only GET/HEAD/OPTIONS unless `--retry-unsafe` |
+| `--retry-unsafe` | Also retry POST/PUT/PATCH/DELETE (only for idempotent endpoints) |
+| `--retry-max-wait=N` | Cap on a single wait between retries, in seconds (default 300) |
 | `--base-url=URL` | Override the base URL from the schema |
+| `--server.NAME=VAL` | Set a variable in the schema's server URL, e.g. `--server.zone=de-fra-1` for `https://api-{zone}.example.com`. Checked against the variable's `enum`; unset variables use their `default` |
 | `--output=FORMAT` | Output format: `json` (default), `yaml`, `raw`, `status`, `headers` |
 | `--select=PATH` | Extract a value from the response — see [Response selection](#response-selection) |
 | `--no-color` | Disable colored JSON output |
 | `-v`, `--verbose` | Print request details and response headers; for Arazzo, enables live step progress |
 | `--reload` | Bypass the schema cache and re-fetch |
+| `--dry-run` | Print the request (method, URL, headers, body) instead of sending it. Credentials are redacted. Auth and signing still run, so the output shows what would be sent |
+| `--curl` | Print an equivalent, runnable `curl` command instead of sending (credentials included) |
+| `--ignore-status` | Treat 4xx/5xx responses like successes: print the body to stdout with the chosen `--output`, exit 0 |
 | `--cache-ttl=N` | Schema cache TTL in seconds (default: 3600) |
 | `--` | End of options: everything after is positional (e.g. a path param starting with `-`) |
 
@@ -115,11 +124,26 @@ atlas op myapi add-pet --body.name=Rex --body.status=available --body.age=3
 atlas op myapi create-vm --body.instance-type.id=abc123 --body.disk-size=10
 ```
 
+How `-d`/`--body` is read depends on the operation's request content type:
+
+- JSON, form (`application/x-www-form-urlencoded`) and `multipart/form-data` operations accept JSON or YAML.
+- Any other type (`application/octet-stream`, `text/plain`, XML, images, …) is sent byte-for-byte: `atlas op myapi upload-image -d @photo.png`.
+
+For `multipart/form-data` operations, a field whose value starts with `@` becomes a file part (file name taken from the path); use `@@` for a literal leading `@`:
+
+```sh
+atlas op myapi upload-form --body.description=avatar --body.file=@photo.png
+```
+
 `--body.KEY=VAL` flags are deep-merged: `--body.a.b=1 --body.a.c=2` produces `{"a":{"b":1,"c":2}}`. When combined with `--body=…`, the fields are merged over that JSON object.
 
 Field values are typed using the operation's request body schema: a `string` property keeps `007` as `"007"`, `integer`/`number` properties become numbers, `boolean` accepts `true`/`false`, and `array`/`object` properties take JSON. Fields without a schema follow JSON literal rules: `42`, `-1.5`, `true` and `false` are converted; anything else, including `007` or `0x10`, stays a string.
 
 Path parameters are always sent exactly as typed, percent-encoded.
+
+## Pagination
+
+For GET operations that return a JSON array with a `Link: <…>; rel="next"` header, atlas follows the next links and returns all items as one array. Each page is requested with the same headers (auth included); links to another origin (scheme, host or port) are not followed. It stops after `--max-pages` pages (default 25, also settable as `max-pages` in a profile or the config). If a later page fails, the items collected so far are printed and a warning names the failing status. `--no-paginate` returns the first page as-is. Arazzo workflows never paginate, so step expressions keep referring to a single response.
 
 ## Response selection
 
@@ -224,6 +248,7 @@ Top-level fields in `config.json` apply to all invocations as defaults:
 | `output` | string | Default output format (`json`, `yaml`, `raw`, `status`, `headers`) |
 | `verbose` | bool | Always print status line and response headers |
 | `timeout` | number | Default timeout in seconds |
+| `retry` | object | Retry defaults: `{"attempts": 2, "unsafe": false, "max-wait": 300}` |
 
 ```json
 {
@@ -241,13 +266,14 @@ Top-level fields in `config.json` apply to all invocations as defaults:
 |-------|------|-------------|
 | `schema` | string | Schema URL or local path |
 | `base-url` | string | Override the schema's server URL |
+| `server` | object | Server URL variables, e.g. `{"zone": "de-fra-1"}`; `--server.NAME=VAL` overrides per call |
 | `headers` | object | Default headers for every request |
 | `timeout` | number | Default timeout in seconds |
 | `cache-ttl` | number | Schema cache TTL override for this profile |
 | `no-color` | bool | Disable colored output for this profile |
 | `output` | string | Default output format for this profile |
 | `verbose` | bool | Always print status line and response headers |
-| `timeout` | number | Default timeout in seconds |
+| `retry` | object | Retry settings for this profile, same shape as the top-level `retry` |
 | `auth` | object | Authentication configuration — see [Authentication](#authentication) |
 | `tls` | object | mTLS configuration — see [mTLS](#mtls) |
 | `ssl` | object | Raw luasec options merged with `tls` |
@@ -298,6 +324,26 @@ atlas profile show <name>    # show fully resolved profile as JSON
 ## Authentication
 
 Add an `auth` block to a profile. Values prefixed with `env:` are read from environment variables at runtime.
+
+### Static credentials
+
+For APIs that take a fixed token, username/password, or API key. Secrets usually come from the environment via `env:`.
+
+```json
+{"auth": {"name": "bearer", "params": {"token": "env:API_TOKEN"}}}
+```
+
+```json
+{"auth": {"name": "basic", "params": {"username": "me", "password": "env:API_PASSWORD"}}}
+```
+
+```json
+{"auth": {"name": "api-key", "params": {"name": "X-API-Key", "in": "header", "value": "env:API_KEY"}}}
+```
+
+With `"in": "query"` the key is added as a query parameter to every request instead (`?api_key=…`).
+
+`atlas auth <profile>` prints the resulting headers, which is handy to check what will be sent.
 
 ### OAuth 2.0 — Authorization Code
 
@@ -526,7 +572,7 @@ atlas az <name-or-file> [workflow-id] [path-params...] [options]
 - `<name-or-file>` — a name from `~/.config/atlas/config.json` (see below), a local file path, or an `http(s)://` URL.
 - If `workflow-id` is omitted, all available workflows are listed.
 - The Arazzo document's `sourceDescriptions` of type `openapi` are loaded automatically as API clients. Relative source URLs resolve against the Arazzo document's own location.
-- Profile headers, OAuth/external-tool auth, TLS settings, timeout and `base-url` apply to every request. A `base-url` override is rejected when the document has more than one `openapi` source, since it would be ambiguous.
+- Profile headers, OAuth/external-tool auth, TLS settings, timeout, `base-url` and `server` variables apply to every request. A `base-url` override is rejected when the document has more than one `openapi` source, since it would be ambiguous.
 
 ### Configuration
 
@@ -713,5 +759,7 @@ atlas az https://example.com/workflows.json deploy-service \
 
 | Code | Meaning |
 |------|---------|
-| 0 | Success |
-| 1 | HTTP 4xx/5xx response, network error, bad arguments, or authentication failure |
+| 0 | Success (or any HTTP status with `--ignore-status`) |
+| 1 | Network error, bad arguments, authentication failure, or failed Arazzo workflow |
+| 4 | HTTP 4xx response |
+| 5 | HTTP 5xx response |

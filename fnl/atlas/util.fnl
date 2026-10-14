@@ -60,6 +60,10 @@
     (table.insert out (s:sub pos))
     (table.concat out)))
 
+(fn shell-quote [s]
+  "Quote s as a single POSIX shell word."
+  (.. "'" (pick-values 1 (: (tostring s) :gsub "'" "'\\''")) "'"))
+
 (fn header [headers name]
   "Case-insensitive header lookup."
   (let [wanted (name:lower)]
@@ -76,6 +80,22 @@
                (-> s
                    (: :gsub "+" " ")
                    (: :gsub "%%(%x%x)" (fn [h] (string.char (tonumber h 16)))))))
+
+(fn secret-name? [name]
+  "True when a header or query parameter name looks like it carries a credential."
+  (let [n (name:lower)]
+    (not= nil (or (n:match "auth") (n:match "cookie") (n:match "key")
+                  (n:match "token") (n:match "secret") (n:match "sig")
+                  (n:match "passw")))))
+
+(fn redact-url [url]
+  "url with the values of credential-like query parameters masked."
+  (pick-values 1 (url:gsub "([?&])([^=&#]+)=([^&#]*)"
+                           (fn [sep name value]
+                             (.. sep name "="
+                                 (if (secret-name? (url-decode name))
+                                     "<redacted>"
+                                     value))))))
 
 (fn form-encode [params]
   "Encode params as application/x-www-form-urlencoded, keys sorted.
@@ -158,4 +178,7 @@ with the same name and location."
  : cache-dir
  : config-dir
  : merge-parameters
- : replace-all}
+ : replace-all
+ : shell-quote
+ : secret-name?
+ : redact-url}

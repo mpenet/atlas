@@ -1,5 +1,5 @@
-;; ABOUTME: SHA-256 (FIPS 180-4) and unpadded base64url in pure Lua 5.4,
-;; ABOUTME: used to derive OAuth PKCE S256 code challenges.
+;; ABOUTME: SHA-256 (FIPS 180-4), base64 and base64url in pure Lua 5.4,
+;; ABOUTME: used for OAuth PKCE S256 challenges and HTTP Basic credentials.
 
 (local k [0x428a2f98
           0x71374491
@@ -114,11 +114,7 @@
       (compress h (padded:sub i (+ i 63))))
     (string.pack ">I4I4I4I4I4I4I4I4" (table.unpack h))))
 
-(local alphabet
-       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
-
-(fn base64url [s]
-  "Unpadded base64url encoding (RFC 4648 §5)."
+(fn encode-base64 [s alphabet pad?]
   (let [out []]
     (for [i 1 (length s) 3]
       (let [(b1 b2 b3) (string.byte s i (+ i 2))
@@ -128,11 +124,25 @@
                       2)]
         (for [j 1 chars]
           (let [idx (+ 1 (band (rshift n (* 6 (- 4 j))) 63))]
-            (table.insert out (alphabet:sub idx idx))))))
+            (table.insert out (alphabet:sub idx idx))))
+        (when pad?
+          (table.insert out (string.rep "=" (- 4 chars))))))
     (table.concat out)))
+
+(fn base64 [s]
+  "Standard base64 with padding (RFC 4648 §4)."
+  (encode-base64 s
+                 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+                 true))
+
+(fn base64url [s]
+  "Unpadded base64url encoding (RFC 4648 §5)."
+  (encode-base64 s
+                 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+                 false))
 
 (fn pkce-challenge [verifier]
   "S256 code challenge for an OAuth PKCE code verifier (RFC 7636)."
   (base64url (sha256 verifier)))
 
-{: sha256 : base64url : pkce-challenge}
+{: sha256 : base64 : base64url : pkce-challenge}

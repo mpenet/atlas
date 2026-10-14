@@ -5,7 +5,10 @@
 (local auth (require :atlas.auth))
 (local cache (require :atlas.cache))
 (local coerce (require :atlas.coerce))
+(local retry (require :atlas.retry))
+(local paginate (require :atlas.paginate))
 (local util (require :atlas.util))
+(local yaml (require :atlas.yaml))
 (local http-mod (require :atlas.http))
 (local json (require :lunajson))
 (local pretty-mod (require :atlas.pretty))
@@ -22,19 +25,32 @@
           (if ok cfg (error (.. "corrupt config: " (config-path)))))
         {})))
 
+(fn read-file [path]
+  (let [f (assert (io.open path :rb))
+        content (f:read :*a)]
+    (f:close)
+    content))
+
 (fn read-body [s]
-  (let [raw (if (= s "@-")
-                (io.read :*a)
-                (let [(path) (s:match "^@(.+)")]
-                  (if path
-                      (let [f (assert (io.open path :r))
-                            c (f:read :*a)]
-                        (f:close)
-                        c)
-                      s)))
-        (ok parsed) (pcall json.decode raw)]
-    (assert ok (.. "invalid JSON in body: " (tostring parsed)))
+  "Raw body text: inline, @path for a file, @- for stdin."
+  (if (= s "@-") (io.read :*a)
+      (s:match "^@(.+)") (read-file (s:match "^@(.+)"))
+      s))
+
+(fn decode-structured [raw]
+  (let [(ok parsed) (pcall yaml.decode raw)]
+    (assert (and ok (not= nil parsed))
+            (.. "invalid body (expected JSON or YAML): " (tostring parsed)))
     parsed))
+
+(fn decode-body [raw content-type]
+  "Decode a raw body for an operation's content type: JSON, form and
+multipart operations take JSON or YAML; any other type is sent as-is."
+  (if (or (= nil content-type) (content-type:match "json")
+          (content-type:match "^application/x%-www%-form%-urlencoded")
+          (content-type:match "^multipart/form%-data"))
+      (decode-structured raw)
+      raw))
 
 (fn merge-profiles [base child]
   (let [result (collect [k v (pairs base)] k v)]
@@ -68,8 +84,7 @@
     (if (or (= n "authorization") (= n "proxy-authorization"))
         (let [(scheme) (: (tostring value) :match "^(%S+)%s")]
           (if scheme (.. scheme " <redacted>") "<redacted>"))
-        (or (n:match "cookie") (n:match "key") (n:match "token")
-            (n:match "secret") (n:match "signature") (n:match "password"))
+        (util.secret-name? n)
         "<redacted>"
         value)))
 
@@ -112,6 +127,7 @@
            :query {}
            :headers {}
            :ssl {}
+           :server-vars {}
            :body-fields []
            :input-fields []}
         positional (fn [a]
@@ -136,6 +152,9 @@
             (a:match "^%-%-header%.(.-)=(.*)")
             (let [(k v) (a:match "^%-%-header%.(.-)=(.*)")]
               (tset r.headers k v))
+            (a:match "^%-%-server%.(.-)=(.+)")
+            (let [(k v) (a:match "^%-%-server%.(.-)=(.+)")]
+              (tset r.server-vars k v))
             (a:match "^%-%-ssl%.(.-)=(.+)")
             (let [(k v) (a:match "^%-%-ssl%.(.-)=(.+)")]
               (tset r.ssl k v))
@@ -152,6 +171,17 @@
             (a:match "^%-%-schema=(.+)")
             (let [(v) (a:match "^%-%-schema=(.+)")]
               (tset r :schema-url v))
+            (a:match "^%-%-retry=(%d+)$")
+            (tset r :retry (tonumber (a:match "^%-%-retry=(%d+)$")))
+            (a:match "^%-%-retry%-max%-wait=(%d+)$")
+            (tset r :retry-max-wait
+                  (tonumber (a:match "^%-%-retry%-max%-wait=(%d+)$")))
+            (a:match "^%-%-max%-pages=(%d+)$")
+            (tset r :max-pages (tonumber (a:match "^%-%-max%-pages=(%d+)$")))
+            (= a :--no-paginate)
+            (tset r :no-paginate true)
+            (= a :--retry-unsafe)
+            (tset r :retry-unsafe true)
             (a:match "^%-%-timeout=(.+)")
             (let [(v) (a:match "^%-%-timeout=(.+)")]
               (tset r :timeout (tonumber v)))
@@ -169,6 +199,12 @@
             (tset r :no-color true)
             (= a :--reload)
             (tset r :reload true)
+            (= a :--dry-run)
+            (tset r :dry-run true)
+            (= a :--curl)
+            (tset r :curl true)
+            (= a :--ignore-status)
+            (tset r :ignore-status true)
             (= a :--logout)
             (tset r :logout true)
             (or (= a :-v) (= a :--verbose))
@@ -197,7 +233,7 @@
               (table.insert r.input-fields [k v]))
             (a:match "^%-%-inputs=(.*)")
             (let [(v) (a:match "^%-%-inputs=(.*)")]
-              (tset r :arazzo-inputs-blob (read-body v)))
+              (tset r :arazzo-inputs-blob (decode-structured (read-body v))))
             (a:match "^%-%-arazzo%-output=(.+)")
             (let [(v) (a:match "^%-%-arazzo%-output=(.+)")]
               (tset r :arazzo-output v))
@@ -212,11 +248,35 @@
       (set i (+ i 1)))
     r))
 
+(fn file-part [value]
+  "Multipart value for a CLI field: @path reads a file part, @@ escapes @."
+  (if (and (= (type value) :string) (value:match "^@@"))
+      (value:sub 2)
+      (and (= (type value) :string) (value:match "^@(.+)"))
+      (let [path (value:sub 2)]
+        {:filename (path:match "[^/]+$") :content (read-file path)})
+      value))
+
 (fn op-request [op p]
   "Build an op.invoke request from parsed CLI args."
-  (let [body (if (next p.body-fields)
-                 (build-body p.body-fields op.body-schema p.body)
-                 p.body)]
+  (let [json-op? (and op.content-type (op.content-type:match "json"))
+        valid-json? #(pcall json.decode $)
+        given (if (not= (type p.body) :string) p.body
+                  ;; valid JSON goes out byte-for-byte: scalars, null and
+                  ;; number formatting survive
+                  (and json-op? (not (next p.body-fields)) (valid-json? p.body))
+                  p.body (let [v (decode-body p.body op.content-type)]
+                          (if (and json-op? (not= (type v) :table))
+                              (json.encode v)
+                              v)))
+        multipart? (and op.content-type
+                        (op.content-type:match "^multipart/form%-data"))
+        body (if (next p.body-fields)
+                 (let [b (build-body p.body-fields op.body-schema given)]
+                   (if multipart?
+                       (collect [k v (pairs b)] k (file-part v))
+                       b))
+                 given)]
     {:path (collect [i name (ipairs op.path-params)] name (. p.path-params i))
      :query (when (next p.query) p.query)
      :headers (when (next p.headers) p.headers)
@@ -306,6 +366,44 @@
                     (set i (+ n 1)))))))))
   cur)
 
+(fn sorted-headers [headers]
+  (let [names (icollect [k (pairs (or headers {}))]
+                k)]
+    (table.sort names)
+    (icollect [_ k (ipairs names)]
+      [k (tostring (. headers k))])))
+
+(fn request-text [req]
+  "Human-readable request, credentials redacted."
+  (let [(url payload headers) (http-mod.encode-request req)
+        lines [(.. req.method " " (util.redact-url url))]]
+    (each [_ [k v] (ipairs (sorted-headers headers))]
+      (table.insert lines (.. k ": " (redact-header k v))))
+    (when payload
+      (table.insert lines "")
+      (table.insert lines payload))
+    (table.concat lines "\n")))
+
+(fn curl-command [req]
+  "Runnable curl command reproducing the request."
+  (let [(url payload headers) (http-mod.encode-request req)
+        parts ["curl" "-X" req.method (util.shell-quote url)]]
+    (assert (not (and payload (payload:find "\0" 1 true)))
+            "--curl cannot inline a binary body; use --dry-run to inspect it")
+    (each [_ [k v] (ipairs (sorted-headers headers))]
+      (table.insert parts "-H")
+      (table.insert parts (util.shell-quote (.. k ": " v))))
+    (when payload
+      (table.insert parts "--data-raw")
+      (table.insert parts (util.shell-quote payload)))
+    (table.concat parts " ")))
+
+(fn printing-transport [render]
+  "Transport that prints each request instead of sending it."
+  (fn [req]
+    (print (render req))
+    {:status 0 :headers {} :dry-run true}))
+
 (fn render [v fmt use-color]
   "Render a decoded value as yaml or (default) json."
   (if (= fmt :yaml)
@@ -336,10 +434,25 @@
                  resp.raw))
       fmt (when (not= nil body) (render body fmt use-color)))))
 
-(fn print-resp [resp output no-color verbose ?select ?elapsed]
-  (let [error? (and resp.status (>= resp.status 400))
+(fn exit-code [status ignore-status]
+  "Process exit code for an HTTP status: 4 for 4xx, 5 for 5xx, else 0."
+  (if (or ignore-status (< status 400)) 0
+      (< status 500) 4
+      5))
+
+(fn print-http-resp [resp
+                     output
+                     no-color
+                     verbose
+                     ?select
+                     ?elapsed
+                     ?ignore-status]
+  (let [error? (and resp.status (>= resp.status 400) (not ?ignore-status))
         use-color (not no-color)
         timing (if ?elapsed (string.format "  %.3fs" ?elapsed) "")]
+    (when resp.next-page-status
+      (io.stderr:write (string.format "warning: stopped after %d page(s): next page returned HTTP %s\n"
+                                      resp.pages resp.next-page-status)))
     (when (or verbose error?)
       (io.stderr:write (.. "HTTP " resp.status timing "\n"))
       (when verbose
@@ -348,12 +461,19 @@
         (do
           (when (not= nil resp.body)
             (io.stderr:write (.. (render resp.body :json use-color) "\n")))
-          (os.exit 1))
+          (exit-code resp.status false))
         (let [text (format-output resp output use-color ?select)]
           (if text
               (print text)
               (when (not verbose)
-                (io.stderr:write (.. "HTTP " resp.status "\n"))))))))
+                (io.stderr:write (.. "HTTP " resp.status "\n"))))
+          0))))
+
+(fn print-resp [resp output no-color verbose ?select ?elapsed ?ignore-status]
+  "Print a response; returns the process exit code."
+  (if resp.dry-run 0
+      (print-http-resp resp output no-color verbose ?select ?elapsed
+                       ?ignore-status)))
 
 (fn strip-location [msg]
   "Remove Lua error location prefixes (file.lua:N: or [string \"chunk\"]:N:)."
@@ -525,12 +645,21 @@
   (print "  --query.KEY=VAL       Query parameter")
   (print "  --header.KEY=VAL      Per-request header")
   (print "  --timeout=N           Timeout in seconds")
+  (print "  --max-pages=N         Max pages to follow via Link rel=next (default: 25)")
+  (print "  --no-paginate         Return only the first page")
+  (print "  --retry=N             Retries for 408/429/5xx and network errors (default: 2)")
+  (print "  --retry-unsafe        Also retry POST/PUT/PATCH/DELETE")
+  (print "  --retry-max-wait=N    Max seconds to wait between retries (default: 300)")
   (print "  --base-url=URL        Override base URL")
+  (print "  --server.NAME=VAL     Set a server URL variable (e.g. --server.zone=de-fra-1)")
   (print "  --output=json|yaml|raw|status|headers  Output format (default: json)")
   (print "  --select=PATH         Select nested value (e.g. .items[0].name, .items[].{id,name})")
   (print "  --no-color            Disable colored output")
   (print "  -v, --verbose         Show status and response headers")
   (print "  --reload              Re-fetch and re-cache the schema")
+  (print "  --ignore-status       Treat HTTP error responses as output; exit 0")
+  (print "  --dry-run             Print the request instead of sending it")
+  (print "  --curl                Print an equivalent curl command instead of sending")
   (print "  --cache-ttl=N         Schema cache TTL in seconds (default: 3600)")
   (print "")
   (print "Options (az):")
@@ -561,6 +690,23 @@
       (each [k v (pairs cli-ssl)] (tset ssl k v)))
     ssl))
 
+(fn retry-options [profile p config]
+  "Retry settings: CLI flags, then profile, then config, then defaults."
+  (let [pick #(let [v (. p $1)]
+                (if (not= nil v) v
+                    (not= nil (?. profile :retry $2)) (?. profile :retry $2)
+                    (not= nil (?. config :retry $2)) (?. config :retry $2)
+                    $3))]
+    {:attempts (pick :retry :attempts 2)
+     :unsafe (pick :retry-unsafe :unsafe false)
+     :max-wait (pick :retry-max-wait :max-wait 300)}))
+
+(fn paginate-options [profile p config]
+  "Pagination settings, or nil when disabled."
+  (when (not p.no-paginate)
+    {:max-pages (or p.max-pages (?. profile :max-pages) (?. config :max-pages)
+                    25)}))
+
 (fn client-options [profile-name profile p config]
   "Client options shared by op and az: headers (profile + auth), ssl,
 timeout, base-url and the http-fn (request logging, request signing)."
@@ -571,8 +717,10 @@ timeout, base-url and the http-fn (request logging, request signing)."
         headers (collect [k v (pairs (or (?. profile :headers) {}))]
                   (k:lower)
                   v)
-        base-fn (if verbose (wrap-log-request http-mod.request)
-                    http-mod.request)]
+        transport (if p.curl (printing-transport curl-command)
+                      p.dry-run (printing-transport request-text)
+                      http-mod.request)
+        base-fn (if verbose (wrap-log-request transport) transport)]
     (when auth-cfg
       (let [(ok h) (pcall auth.get-headers profile-name auth-cfg ssl)]
         (assert ok (.. "authentication failed: " (tostring h)))
@@ -582,7 +730,19 @@ timeout, base-url and the http-fn (request logging, request signing)."
      :ssl ssl
      :timeout (or p.timeout (?. profile :timeout) (?. config :timeout))
      :base-url (or p.base-url (?. profile :base-url))
-     :http-fn (or (when auth-cfg (auth.wrap-http-fn auth-cfg base-fn)) base-fn)}))
+     :server-vars (let [vars (collect [k v (pairs (or (?. profile :server) {}))]
+                               k
+                               v)]
+                    (each [k v (pairs (or p.server-vars {}))]
+                      (tset vars k v))
+                    vars)
+     :http-fn (let [retrying (retry.wrap (or (when auth-cfg
+                                               (auth.wrap-http-fn auth-cfg
+                                                                  base-fn))
+                                             base-fn)
+                                         (retry-options profile p config))
+                    pagination (paginate-options profile p config)]
+                (if pagination (paginate.wrap retrying pagination) retrying))}))
 
 (fn run-auth [profile-name p config]
   (assert profile-name "Usage: atlas auth <profile> [--logout]")
@@ -594,7 +754,8 @@ timeout, base-url and the http-fn (request logging, request signing)."
       (assert (and auth-cfg auth-cfg.name (not= auth-cfg.name ""))
               (.. "No auth configured for profile: " profile-name))
       (let [ssl (merge-ssl profile p.ssl)]
-        (if (= auth-cfg.name "external-tool")
+        (if (. {:external-tool true :bearer true :basic true :api-key true}
+               auth-cfg.name)
             (let [(ok headers) (pcall auth.get-headers profile-name auth-cfg
                                       ssl)]
               (if ok
@@ -683,6 +844,10 @@ timeout, base-url and the http-fn (request logging, request signing)."
 
 (fn run-arazzo [p]
   ;; p.schema = name-or-file, p.operation = workflow-id, p.path-params = extra positionals
+  (when (or p.dry-run p.curl)
+    (die "--dry-run/--curl are not supported for az: later steps depend on real responses; use -v to log each request"))
+  ;; merged pages would change what step expressions like $response.body#/0 refer to
+  (tset p :no-paginate true)
   (let [name-or-file p.schema
         workflow-id p.operation]
     (when (not name-or-file)
@@ -719,8 +884,8 @@ timeout, base-url and the http-fn (request logging, request signing)."
                              (when v (tset base name v))))
                          (each [k v (pairs (or p.arazzo-inputs-blob {}))]
                            (tset base k v))
-                         (when (and p.body (= (type p.body) :table))
-                           (each [k v (pairs p.body)]
+                         (when p.body
+                           (each [k v (pairs (decode-structured p.body))]
                              (tset base k v)))
                          (let [fields (icollect [_ f (ipairs p.input-fields)] f)]
                            (each [_ f (ipairs p.body-fields)]
@@ -831,7 +996,8 @@ timeout, base-url and the http-fn (request logging, request signing)."
                   (ok-r resp) (pcall op.invoke (op-request op p))
                   elapsed (- (socket.gettime) t0)]
               (if ok-r
-                  (print-resp resp output no-color verbose p.select elapsed)
+                  (os.exit (print-resp resp output no-color verbose p.select
+                                       elapsed p.ignore-status))
                   (die (.. "request failed: " (tostring resp))))))
           (list-ops c)))))
 
@@ -867,4 +1033,10 @@ timeout, base-url and the http-fn (request logging, request signing)."
  : format-output
  : client-options
  : redact-header
- : strip-location}
+ : strip-location
+ : exit-code
+ : retry-options
+ : request-text
+ : curl-command
+ : decode-body
+ : paginate-options}

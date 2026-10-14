@@ -66,6 +66,42 @@
                                                              {:base-url "https://x"}
                                                              "test/fixtures/flow.arazzo.json")
                                       "base-url override is ambiguous: the document has 2 openapi sources"))))
+            (it "gives each source only the server variables it declares"
+                (fn []
+                  (let [dir (os.tmpname)
+                        write (fn [name content]
+                                (let [f (io.open (.. dir "-" name) :w)]
+                                  (f:write content)
+                                  (f:close)))]
+                    (write "a.json"
+                           "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://{zone}.a.test\",\"variables\":{\"zone\":{\"default\":\"z1\"}}}],\"paths\":{\"/x\":{\"get\":{\"operationId\":\"ax\",\"responses\":{}}}}}")
+                    (write "b.json"
+                           "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://b.test\"}],\"paths\":{\"/y\":{\"get\":{\"operationId\":\"by\",\"responses\":{}}}}}")
+                    (let [doc {:sourceDescriptions [{:name "a"
+                                                     :type "openapi"
+                                                     :url (.. dir "-a.json")}
+                                                    {:name "b"
+                                                     :type "openapi"
+                                                     :url (.. dir "-b.json")}]
+                               :workflows []}
+                          clients (arazzo.build-clients doc
+                                                        {:server-vars {:zone "z9"}})]
+                      (os.remove (.. dir "-a.json"))
+                      (os.remove (.. dir "-b.json"))
+                      (assert.are.equal "https://z9.a.test/x"
+                                        (clients.a.ax.url-for))
+                      (assert.are.equal "https://b.test/y"
+                                        (clients.b.by.url-for))))))
+            (it "rejects server variables no source declares"
+                (fn []
+                  (let [doc {:sourceDescriptions [{:name "a"
+                                                   :type "openapi"
+                                                   :url "./petstore.yaml"}]
+                             :workflows []}]
+                    (assert.has.error #(arazzo.build-clients doc
+                                                             {:server-vars {:nope "x"}}
+                                                             "test/fixtures/flow.arazzo.json")
+                                      "no openapi source declares server variable 'nope'"))))
             (it "skips non-openapi sources"
                 (fn []
                   (let [doc {:sourceDescriptions [{:name "ext"

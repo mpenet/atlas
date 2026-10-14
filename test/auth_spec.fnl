@@ -484,3 +484,91 @@
                   (let [auth (reload-auth (pick-values 1 (seq-mock)))]
                     (assert.is_nil (: (auth.token-path "../../evil") :find
                                       "/../" 1 true)))))))
+
+;; ---- static credentials ----
+
+(describe "static auth types"
+          (fn []
+            (let [auth (reload-auth (pick-values 1 (seq-mock)))
+                  home (os.getenv :HOME)]
+              (it "bearer sends the token"
+                  (fn []
+                    (assert.are.same {:authorization "Bearer t0k"}
+                                     (auth.get-headers "p"
+                                                       {:name "bearer"
+                                                        :params {:token "t0k"}}
+                                                       {}))))
+              (it "bearer reads env: values"
+                  (fn []
+                    (assert.are.same {:authorization (.. "Bearer " home)}
+                                     (auth.get-headers "p"
+                                                       {:name "bearer"
+                                                        :params {:token "env:HOME"}}
+                                                       {}))))
+              (it "basic encodes username and password"
+                  (fn []
+                    (assert.are.same {:authorization "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ=="}
+                                     (auth.get-headers "p"
+                                                       {:name "basic"
+                                                        :params {:username "Aladdin"
+                                                                 :password "open sesame"}}
+                                                       {}))))
+              (it "api-key in a header"
+                  (fn []
+                    (assert.are.same {:x-api-key "k1"}
+                                     (auth.get-headers "p"
+                                                       {:name "api-key"
+                                                        :params {:name "X-API-Key"
+                                                                 :in "header"
+                                                                 :value "k1"}}
+                                                       {}))))
+              (it "api-key in the query string is added to every request"
+                  (fn []
+                    (let [cfg {:name "api-key"
+                               :params {:name "api_key"
+                                        :in "query"
+                                        :value "k1"}}
+                          sent []
+                          wrapped (auth.wrap-http-fn cfg
+                                                     (fn [req]
+                                                       (table.insert sent req)
+                                                       {:status 200}))]
+                      (assert.are.same {} (auth.get-headers "p" cfg {}))
+                      (wrapped {:method "GET"
+                                :url "https://x/y"
+                                :query {:a "1"}})
+                      (assert.are.same {:a "1" :api_key "k1"} (. sent 1 :query)))))
+              (it "rejects missing parameters with a clear message"
+                  (fn []
+                    (let [(ok err) (pcall auth.get-headers "p"
+                                          {:name "basic"
+                                           :params {:username "u"}}
+                                          {})]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "basic auth requires params.password"
+                                           1 true)))))
+              (it "rejects unknown auth types"
+                  (fn []
+                    (let [(ok err) (pcall auth.get-headers "p"
+                                          {:name "magic" :params {}} {})]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "unsupported auth type: magic" 1 true))))))))
+
+(describe "api-key query parameter"
+          (fn []
+            (it "is not added twice when the URL already carries it"
+                (fn []
+                  (let [auth (reload-auth (pick-values 1 (seq-mock)))
+                        sent []
+                        wrapped (auth.wrap-http-fn {:name "api-key"
+                                                    :params {:name "api_key"
+                                                             :in "query"
+                                                             :value "K"}}
+                                                   (fn [req]
+                                                     (table.insert sent req)
+                                                     {:status 200}))]
+                    (wrapped {:method "GET"
+                              :url "https://h/items?api_key=K&page=2"})
+                    (assert.is_nil (?. sent 1 :query :api_key)))))))

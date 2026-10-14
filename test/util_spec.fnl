@@ -193,3 +193,22 @@
                   (assert.are.equal "https://ex.com/o.yaml"
                                     (util.resolve-reference "https://ex.com/a.yaml?x=1/2"
                                                             "o.yaml"))))))
+
+(describe "secrets"
+          (fn []
+            (it "recognizes credential-like names"
+                (fn []
+                  (each [_ n (ipairs ["api_key"
+                                      "X-API-Key"
+                                      "access_token"
+                                      "client_secret"
+                                      "sig"
+                                      "signature"
+                                      "password"
+                                      "cookie"])]
+                    (assert.is_true (util.secret-name? n)))
+                  (assert.is_false (util.secret-name? "page"))))
+            (it "redacts secret query parameters in URLs"
+                (fn []
+                  (assert.are.equal "https://h/x?api_key=<redacted>&page=2"
+                                    (util.redact-url "https://h/x?api_key=SECRET&page=2"))))))

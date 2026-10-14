@@ -59,6 +59,7 @@ Returns a table where each key is a kebab-case `operationId` (`getPetById` → `
 | Key | Type | Description |
 |-----|------|-------------|
 | `:base-url` | string | Override `servers[1].url` from the schema |
+| `:server-vars` | table | Values for `servers[1].variables`, e.g. `{:zone "de-fra-1"}`; unknown names and values outside a variable's `enum` raise an error |
 | `:headers` | table | Default headers sent with every request |
 | `:timeout` | number | Default timeout in seconds |
 | `:ssl` | table | luasec SSL options (`cafile`, `certificate`, `key`, `verify`, …) |
@@ -72,7 +73,12 @@ Returns a table where each key is a kebab-case `operationId` (`getPetById` → `
 3. If `servers[1].url` is a root-relative path (e.g. `/api/v1`) and the schema was loaded from a URL, the origin of that URL is prepended
 4. If none of these produce an absolute URL, `atlas.client` raises an error — pass `:base-url` explicitly
 
-Server URL variable substitution (`{variable}`) is applied using `default` values from `servers[1].variables`.
+Server URL variables (`{variable}`) take their value from `:server-vars`, falling back to the `default` in `servers[1].variables`:
+
+```fennel
+(atlas.client exoscale-spec {:server-vars {:zone "de-fra-1"}})
+;; https://api-{zone}.exoscale.com/v2 → https://api-de-fra-1.exoscale.com/v2
+```
 
 ## Calling operations
 
@@ -163,7 +169,15 @@ Atlas inspects the schema to set `Content-Type` and `Accept` automatically:
 
 Client-level and per-request headers override these; header names are matched case-insensitively.
 
-The request body is encoded to match `Content-Type`: tables are sent as JSON, or form-encoded for `application/x-www-form-urlencoded`. String bodies are sent as-is, so other formats (XML, plain text) work by passing an already-serialized string.
+The request body is encoded to match `Content-Type`: tables are sent as JSON, form-encoded for `application/x-www-form-urlencoded`, or as `multipart/form-data` parts. String bodies are sent as-is, so other formats (XML, plain text, binary) work by passing an already-serialized string. `op.content-type` tells you which type an operation uses.
+
+Multipart file parts are tables with `:filename`, `:content` and an optional `:content-type` (default `application/octet-stream`):
+
+```fennel
+(client.upload-form.invoke
+  {:body {:description "avatar"
+          :file {:filename "photo.png" :content png-bytes :content-type "image/png"}}})
+```
 
 ## $ref resolution
 
@@ -209,6 +223,23 @@ The function receives a single table and must return a `{:status :headers :body}
 
 The default `atlas.http.request` function handles query-string encoding, content-type aware body encoding, timeouts and luasec SSL options — your replacement must handle all of these itself. `atlas.http.encode-body` and `atlas.http.decode-response` are exported if you want to reuse the default encoding.
 
+## Retries and pagination
+
+Both are opt-in `http-fn` wrappers, composable with your own:
+
+```fennel
+(local http (require :atlas.http))
+(local retry (require :atlas.retry))
+(local paginate (require :atlas.paginate))
+
+(atlas.client schema
+              {:http-fn (-> http.request
+                            (retry.wrap {:attempts 3})       ; 408/429/5xx + network errors, Retry-After aware
+                            (paginate.wrap {:max-pages 10}))}) ; follows Link rel="next" on GET arrays
+```
+
+`retry.wrap` options: `:attempts` (extra tries), `:unsafe` (also retry non-GET/HEAD/OPTIONS), `:max-wait` (cap per wait, seconds). A paginated response has `:pages`, and `:next-page-status` when a later page failed.
+
 ## Operation metadata
 
 Each operation on the client exposes metadata fields:
@@ -222,6 +253,7 @@ Each operation on the client exposes metadata fields:
 (. client.get-pet-by-id :path)         ;; "/pet/{petId}"
 (. client.get-pet-by-id :method)       ;; "get"
 (. client.get-pet-by-id :body-schema)  ;; requestBody schema for the chosen content type
+(. client.add-pet :content-type)       ;; "application/json" (nil without requestBody)
 (. client.get-pet-by-id :fnl/docstring) ;; multi-line Fennel REPL documentation
 (. client.get-pet-by-id :cli/help)     ;; multi-line CLI-oriented help string
 ```

@@ -84,6 +84,7 @@ tables override earlier ones regardless of case."
     (setmetatable {:body-schema (?. op-spec :requestBody :content content-type
                                     :schema)
                    :cli/help (doc.build-cli path method op-spec)
+                   :content-type content-type
                    :fnl/docstring (doc.build path method op-spec)
                    :has-body? has-body?
                    :invoke invoke
@@ -96,25 +97,47 @@ tables override earlier ones regardless of case."
                    :url-for url-for}
                   {:__call (fn [_ ...] (call-positional ...))})))
 
+(fn sorted [items]
+  (doto (icollect [_ x (ipairs items)] x)
+    table.sort))
+
+(fn expand-server-url [server overrides]
+  "Server URL with {variables} replaced by overrides or their defaults.
+Overrides must name declared variables and respect their enum."
+  (let [variables (or server.variables {})]
+    (each [name value (pairs overrides)]
+      (let [spec (. variables name)]
+        (when (not spec)
+          (error (string.format "unknown server variable '%s' (known: %s)" name
+                                (table.concat (sorted (icollect [k (pairs variables)]
+                                                        k))
+                                              ", ")) 0))
+        (when (and spec.enum
+                   (not (accumulate [found false _ allowed (ipairs spec.enum)
+                                     &until found]
+                          (= (tostring allowed) (tostring value)))))
+          (error (string.format "server variable %s: '%s' is not one of %s"
+                                name (tostring value)
+                                (table.concat spec.enum ", "))
+                 0))))
+    (accumulate [url server.url name spec (pairs variables)]
+      (util.replace-all url (.. "{" name "}")
+                        (tostring (or (. overrides name) spec.default))))))
+
 (fn client [schema ?opts]
   "Build an API client from an OpenAPI 3.x schema.
 
 schema — parsed schema table, local file path, or http(s):// URL
-?opts — {:base-url \"https://...\" :headers {} :http-fn custom-fn}
-base-url defaults to schema.servers[1].url"
+?opts — {:base-url \"https://...\" :server-vars {:name value} :headers {} :http-fn custom-fn}
+base-url defaults to schema.servers[1].url with :server-vars applied"
   (let [source-url (or (when (= (type schema) :string)
                          schema) (?. ?opts :source-url))
         schema (if (= (type schema) :string)
                    (load-schema schema)
                    schema)
         server (and schema.servers (. schema.servers 1))
-        server-url (when server
-                     (var u server.url)
-                     (each [k v (pairs (or server.variables {}))]
-                       (set u
-                            (util.replace-all u (.. "{" k "}")
-                                              (tostring v.default))))
-                     u)
+        server-url (when (and server (not (?. ?opts :base-url)))
+                     (expand-server-url server (or (?. ?opts :server-vars) {})))
         base-url (or (?. ?opts :base-url)
                      (when (and server-url (server-url:match "^https?://"))
                        server-url)

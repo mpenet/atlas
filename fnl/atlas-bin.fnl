@@ -43,6 +43,10 @@
 
 (require :atlas.coerce)
 
+(require :atlas.retry)
+
+(require :atlas.paginate)
+
 (require :atlas.yaml)
 
 (require :atlas.negotiate)

@@ -40,3 +40,14 @@
                 (fn []
                   (assert.are.equal "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
                                     (digest.pkce-challenge "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"))))))
+
+(describe "digest.base64"
+          (fn []
+            (it "encodes with the standard alphabet and padding (RFC 4648 vectors)"
+                (fn []
+                  (assert.are.equal "" (digest.base64 ""))
+                  (assert.are.equal "Zg==" (digest.base64 "f"))
+                  (assert.are.equal "Zm8=" (digest.base64 "fo"))
+                  (assert.are.equal "Zm9v" (digest.base64 "foo"))
+                  (assert.are.equal "Zm9vYmFy" (digest.base64 "foobar"))
+                  (assert.are.equal "+/8=" (digest.base64 "\251\255"))))))

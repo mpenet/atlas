@@ -30,6 +30,13 @@
                                                         "wf"
                                                         "--max-gotos=500"])
                                        :max-gotos))))
+            (it "collects --server.NAME=VAL"
+                (fn []
+                  (assert.are.same {:zone "de-fra-1"}
+                                   (. (cli.parse-args ["op"
+                                                       "api"
+                                                       "--server.zone=de-fra-1"])
+                                      :server-vars))))
             (it "rejects unknown options"
                 (fn []
                   (assert.has.error #(cli.parse-args ["op" "api" "--qeury.x=1"])
@@ -173,6 +180,16 @@
                                                  :output "bearer-token"}}}
                         opts (cli.client-options "p" profile {:ssl {}} {})]
                     (assert.are.same {:authorization "Bearer tok"} opts.headers))))
+            (it "merges profile server vars with CLI ones, CLI winning"
+                (fn []
+                  (let [opts (cli.client-options "p"
+                                                 {:server {:zone "ch-gva-2"
+                                                           :version "v2"}}
+                                                 {:ssl {}
+                                                  :server-vars {:zone "de-fra-1"}}
+                                                 {})]
+                    (assert.are.same {:zone "de-fra-1" :version "v2"}
+                                     opts.server-vars))))
             (it "falls back to config timeout"
                 (fn []
                   (assert.are.equal 1
@@ -216,3 +233,230 @@
                 (fn []
                   (assert.are.equal "GET http://h:8080/x failed: timeout"
                                     (cli.strip-location "GET http://h:8080/x failed: timeout"))))))
+
+(describe "cli.exit-code"
+          (fn []
+            (it "maps status classes"
+                (fn []
+                  (assert.are.equal 0 (cli.exit-code 200 false))
+                  (assert.are.equal 0 (cli.exit-code 304 false))
+                  (assert.are.equal 4 (cli.exit-code 404 false))
+                  (assert.are.equal 5 (cli.exit-code 503 false))))
+            (it "returns 0 for any status with --ignore-status"
+                (fn [] (assert.are.equal 0 (cli.exit-code 500 true))))
+            (it "parses --ignore-status"
+                (fn []
+                  (assert.is_true (. (cli.parse-args ["op"
+                                                      "a"
+                                                      "--ignore-status"])
+                                     :ignore-status))))))
+
+(describe "cli retry options"
+          (fn []
+            (it "parses retry flags"
+                (fn []
+                  (let [p (cli.parse-args ["op"
+                                           "a"
+                                           "--retry=5"
+                                           "--retry-unsafe"
+                                           "--retry-max-wait=10"])]
+                    (assert.are.equal 5 p.retry)
+                    (assert.is_true p.retry-unsafe)
+                    (assert.are.equal 10 p.retry-max-wait))))
+            (it "defaults to 2 safe retries capped at 300s"
+                (fn []
+                  (assert.are.same {:attempts 2 :unsafe false :max-wait 300}
+                                   (cli.retry-options nil {} {}))))
+            (it "prefers CLI over profile over config"
+                (fn []
+                  (assert.are.same {:attempts 0 :unsafe true :max-wait 30}
+                                   (cli.retry-options {:retry {:attempts 4
+                                                               :unsafe true}}
+                                                      {:retry 0}
+                                                      {:retry {:attempts 9
+                                                               :max-wait 30}}))))))
+
+(describe "dry-run rendering"
+          (fn []
+            (let [req {:method "POST"
+                       :url "https://h/pets"
+                       :query {:dry "1"}
+                       :headers {:content-type "application/json"
+                                 :authorization "Bearer s3cret"}
+                       :body {:name "it's"}}]
+              (it "describes the request with credentials redacted"
+                  (fn []
+                    (assert.are.equal "POST https://h/pets?dry=1\nauthorization: Bearer <redacted>\ncontent-type: application/json\n\n{\"name\":\"it's\"}"
+                                      (cli.request-text req))))
+              (it "renders a runnable curl command"
+                  (fn []
+                    (assert.are.equal "curl -X POST 'https://h/pets?dry=1' -H 'authorization: Bearer s3cret' -H 'content-type: application/json' --data-raw '{\"name\":\"it'\\''s\"}'"
+                                      (cli.curl-command req))))
+              (it "omits the body when there is none"
+                  (fn []
+                    (assert.are.equal "curl -X GET 'https://h/x'"
+                                      (cli.curl-command {:method "GET"
+                                                         :url "https://h/x"
+                                                         :headers {}})))))
+            (it "parses the flags"
+                (fn []
+                  (let [p (cli.parse-args ["op" "a" "--dry-run" "--curl"])]
+                    (assert.is_true p.dry-run)
+                    (assert.is_true p.curl))))))
+
+(describe "cli body decoding"
+          (fn []
+            (it "parses JSON or YAML for JSON operations"
+                (fn []
+                  (assert.are.same {:a 1}
+                                   (cli.decode-body "{\"a\": 1}"
+                                                    "application/json"))
+                  (assert.are.same {:a 1 :b "x"}
+                                   (cli.decode-body "a: 1\nb: x\n"
+                                                    "application/json"))))
+            (it "parses structured input for form operations"
+                (fn []
+                  (assert.are.same {:a "1"}
+                                   (cli.decode-body "a: \"1\""
+                                                    "application/x-www-form-urlencoded"))))
+            (it "rejects unparseable input for JSON operations"
+                (fn []
+                  (let [(ok err) (pcall cli.decode-body "{oops"
+                                        "application/json")]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "invalid body" 1
+                                         true)))))
+            (it "sends other content types byte-for-byte"
+                (fn []
+                  (assert.are.equal "\137PNG\0"
+                                    (cli.decode-body "\137PNG\0" "image/png"))
+                  (assert.are.equal "{not json"
+                                    (cli.decode-body "{not json" "text/plain"))))
+            (it "keeps --body as given when there is no requestBody content type"
+                (fn []
+                  (assert.are.same {:a 1} (cli.decode-body "{\"a\":1}" nil))))
+            (it "reads -d values raw"
+                (fn []
+                  (assert.are.equal "a: 1"
+                                    (. (cli.parse-args ["op"
+                                                        "x"
+                                                        "y"
+                                                        "-d"
+                                                        "a: 1"])
+                                       :body))))))
+
+(describe "cli multipart fields"
+          (fn []
+            (it "turns @path fields into file parts and @@ into a literal @"
+                (fn []
+                  (let [path (os.tmpname)
+                        f (io.open path :wb)]
+                    (f:write "hello")
+                    (f:close)
+                    (let [req (cli.op-request {:path-params []
+                                               :has-body? true
+                                               :content-type "multipart/form-data"}
+                                              {:path-params []
+                                               :query {}
+                                               :headers {}
+                                               :body-fields [["file"
+                                                              (.. "@" path)]
+                                                             ["handle" "@@rex"]]})]
+                      (os.remove path)
+                      (assert.are.equal "hello" req.body.file.content)
+                      (assert.are.equal (path:match "[^/]+$")
+                                        req.body.file.filename)
+                      (assert.are.equal "@rex" req.body.handle)))))))
+
+(describe "dry-run with encoded bodies"
+          (fn []
+            (it "shows the multipart content type with its boundary"
+                (fn []
+                  (let [text (cli.request-text {:method "POST"
+                                                :url "https://h/u"
+                                                :headers {:content-type "multipart/form-data"}
+                                                :body {:a "1"}})]
+                    (assert.is_truthy (text:find "content-type: multipart/form-data; boundary=atlas-"
+                                                 1 true)))))
+            (it "refuses to inline binary bodies in curl"
+                (fn []
+                  (let [(ok err) (pcall cli.curl-command
+                                        {:method "POST"
+                                         :url "https://h/u"
+                                         :headers {:content-type "image/png"}
+                                         :body "\137PNG\0"})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "cannot inline a binary body" 1 true)))))))
+
+(describe "cli pagination options"
+          (fn []
+            (it "parses pagination flags"
+                (fn []
+                  (let [p (cli.parse-args ["op"
+                                           "a"
+                                           "--max-pages=3"
+                                           "--no-paginate"])]
+                    (assert.are.equal 3 p.max-pages)
+                    (assert.is_true p.no-paginate))))
+            (it "defaults to 25 pages"
+                (fn []
+                  (assert.are.same {:max-pages 25}
+                                   (cli.paginate-options nil {} {}))))
+            (it "prefers CLI over profile over config"
+                (fn []
+                  (assert.are.same {:max-pages 7}
+                                   (cli.paginate-options {:max-pages 7} {}
+                                                         {:max-pages 9}))
+                  (assert.are.same {:max-pages 2}
+                                   (cli.paginate-options {:max-pages 7}
+                                                         {:max-pages 2} {}))))
+            (it "is disabled by --no-paginate"
+                (fn []
+                  (assert.is_nil (cli.paginate-options nil {:no-paginate true}
+                                                       {}))))))
+
+(describe "review round 2"
+          (fn []
+            (it "sends valid JSON bodies byte-for-byte"
+                (fn []
+                  (let [op {:path-params []
+                            :has-body? true
+                            :content-type "application/json"}
+                        req #(cli.op-request op
+                                             {:path-params []
+                                              :query {}
+                                              :headers {}
+                                              :body-fields []
+                                              :body $})]
+                    (assert.are.equal "\"hello\"" (. (req "\"hello\"") :body))
+                    (assert.are.equal "null" (. (req "null") :body))
+                    (assert.are.equal "{\"n\": 12345678901234567890}"
+                                      (. (req "{\"n\": 12345678901234567890}")
+                                         :body)))))
+            (it "converts YAML input to JSON text"
+                (fn []
+                  (let [op {:path-params []
+                            :has-body? true
+                            :content-type "application/json"}
+                        r (cli.op-request op
+                                          {:path-params []
+                                           :query {}
+                                           :headers {}
+                                           :body-fields []
+                                           :body "a: 1"})]
+                    (assert.are.same {:a 1} r.body))))
+            (it "redacts secret query parameters in --dry-run"
+                (fn []
+                  (assert.is_truthy (: (cli.request-text {:method "GET"
+                                                          :url "https://h/x"
+                                                          :query {:api_key "S"}
+                                                          :headers {}})
+                                       :find "api_key=<redacted>" 1 true))))
+            (it "uses --data-raw so a leading @ is not read as a file"
+                (fn []
+                  (assert.is_truthy (: (cli.curl-command {:method "POST"
+                                                          :url "https://h/x"
+                                                          :headers {:content-type "text/plain"}
+                                                          :body "@/etc/passwd"})
+                                       :find "--data-raw '@/etc/passwd'" 1 true))))))
