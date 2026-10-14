@@ -9,8 +9,31 @@ LUA_TARGETS = $(FNL_SOURCES:$(FNL_DIR)/%.fnl=$(LUA_DIR)/%.lua)
 # ---- OS detection ----
 UNAME_S := $(shell uname -s)
 
+# ---- dependencies built from source (DEPS_FROM_SOURCE=1) ----
+# For release binaries with a known minimum macOS version: Lua, OpenSSL and
+# libyaml are built from pinned, checksummed sources for
+# MACOSX_DEPLOYMENT_TARGET, instead of using the system's or Homebrew's
+# (which target the machine they were built on).
+DEPS_FROM_SOURCE ?=
+MACOSX_DEPLOYMENT_TARGET ?= 12.0
+LUA_VERSION      = 5.4.9
+LUA_SHA256       = 2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6
+OPENSSL_VERSION  = 3.5.9
+OPENSSL_SHA256   = 603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
+LIBYAML_VERSION  = 0.2.5
+LIBYAML_SHA256   = c642ae9b75fee120b2d96c712538bd2cf283228d2337df2cf2988e3c02678ef4
+ifneq ($(DEPS_FROM_SOURCE),)
+  NATIVE_BUILD   = build/native-src
+  DEPS_PREFIX    = $(abspath $(NATIVE_BUILD)/deps)
+  LUA_INC        := $(DEPS_PREFIX)/include
+  LUA_LIB        := $(DEPS_PREFIX)/lib/liblua.a
+  OPENSSL_PREFIX := $(DEPS_PREFIX)
+  LIBYAML_INC    := $(DEPS_PREFIX)/include
+  export MACOSX_DEPLOYMENT_TARGET
+endif
+
 # ---- binary build paths ----
-NATIVE_BUILD     = build/native
+NATIVE_BUILD     ?= build/native
 SOCKET_SRC       = $(NATIVE_BUILD)/luasocket/src
 CURL_PREFIX      = $(abspath $(NATIVE_BUILD)/curl)
 LYAML_SRC        = $(NATIVE_BUILD)/lyaml/ext/yaml
@@ -31,8 +54,8 @@ LUA_LIB         ?= $(or $(wildcard $(_LUA_LIBDIR)/liblua5.4.a),\
                          $(_LUA_LIBDIR)/liblua.a)
 OPENSSL_PREFIX  ?= $(shell pkg-config --variable=prefix openssl 2>/dev/null)
 LIBYAML_INC     ?= $(shell pkg-config --variable=includedir yaml-0.1 2>/dev/null)
-_LIBYAML_LIBDIR := $(shell pkg-config --variable=libdir yaml-0.1 2>/dev/null)
-_OPENSSL_LIBDIR := $(shell pkg-config --variable=libdir openssl 2>/dev/null)
+_LIBYAML_LIBDIR := $(if $(DEPS_FROM_SOURCE),$(DEPS_PREFIX)/lib,$(shell pkg-config --variable=libdir yaml-0.1 2>/dev/null))
+_OPENSSL_LIBDIR := $(if $(DEPS_FROM_SOURCE),$(DEPS_PREFIX)/lib,$(shell pkg-config --variable=libdir openssl 2>/dev/null))
 _ZLIB_LIBDIR    := $(shell pkg-config --variable=libdir zlib 2>/dev/null)
 
 # The binary links OpenSSL, libyaml and zlib statically, so it runs without
@@ -127,9 +150,29 @@ install: binary
 # the stamp names the libcurl version, so changing it rebuilds the libraries
 NATIVE_STAMP = $(NATIVE_BUILD)/.stamp-curl-$(CURL_VERSION)
 
+DEPS_STAMP = $(NATIVE_BUILD)/.deps-lua-$(LUA_VERSION)-openssl-$(OPENSSL_VERSION)-yaml-$(LIBYAML_VERSION)
+
 native-libs: $(NATIVE_STAMP) $(NATIVE_BUILD)/libatlas_curl.a
 
-$(NATIVE_STAMP):
+# fetch URL FILE SHA256: download and check against the pinned checksum
+fetch = curl -fsSL -o $(2) $(1) && echo "$(3)  $(2)" | $(SHA256) -c -
+
+$(DEPS_STAMP):
+	@echo "Building Lua $(LUA_VERSION), OpenSSL $(OPENSSL_VERSION), libyaml $(LIBYAML_VERSION) for macOS $(MACOSX_DEPLOYMENT_TARGET)..."
+	rm -rf $(NATIVE_BUILD)/deps-src && mkdir -p $(NATIVE_BUILD)/deps-src
+	cd $(NATIVE_BUILD)/deps-src && $(call fetch,https://www.lua.org/ftp/lua-$(LUA_VERSION).tar.gz,lua.tar.gz,$(LUA_SHA256)) && tar xzf lua.tar.gz
+	$(MAKE) -C $(NATIVE_BUILD)/deps-src/lua-$(LUA_VERSION) $(if $(filter Darwin,$(UNAME_S)),macosx,linux) > /dev/null
+	$(MAKE) -C $(NATIVE_BUILD)/deps-src/lua-$(LUA_VERSION) install INSTALL_TOP=$(DEPS_PREFIX) > /dev/null
+	cd $(NATIVE_BUILD)/deps-src && $(call fetch,https://pyyaml.org/download/libyaml/yaml-$(LIBYAML_VERSION).tar.gz,yaml.tar.gz,$(LIBYAML_SHA256)) && tar xzf yaml.tar.gz
+	cd $(NATIVE_BUILD)/deps-src/yaml-$(LIBYAML_VERSION) && CFLAGS="-O2 -fPIC" ./configure --prefix=$(DEPS_PREFIX) --disable-shared --enable-static > configure.log 2>&1 || { tail -30 configure.log; exit 1; }
+	$(MAKE) -C $(NATIVE_BUILD)/deps-src/yaml-$(LIBYAML_VERSION) install > /dev/null
+	cd $(NATIVE_BUILD)/deps-src && $(call fetch,https://github.com/openssl/openssl/releases/download/openssl-$(OPENSSL_VERSION)/openssl-$(OPENSSL_VERSION).tar.gz,openssl.tar.gz,$(OPENSSL_SHA256)) && tar xzf openssl.tar.gz
+	cd $(NATIVE_BUILD)/deps-src/openssl-$(OPENSSL_VERSION) && ./config no-shared no-tests no-docs --prefix=$(DEPS_PREFIX) --libdir=lib > configure.log 2>&1 || { tail -30 configure.log; exit 1; }
+	$(MAKE) -C $(NATIVE_BUILD)/deps-src/openssl-$(OPENSSL_VERSION) -j4 > /dev/null
+	$(MAKE) -C $(NATIVE_BUILD)/deps-src/openssl-$(OPENSSL_VERSION) install_sw > /dev/null
+	@touch $@
+
+$(NATIVE_STAMP): $(if $(DEPS_FROM_SOURCE),$(DEPS_STAMP))
 	@mkdir -p $(NATIVE_BUILD)
 	@# extract luasocket
 	@if [ ! -d $(SOCKET_SRC) ]; then \
@@ -218,6 +261,10 @@ check-binary:
 	@# and links nothing but system libraries
 ifeq ($(UNAME_S),Darwin)
 	@! otool -L bin/atlas-bin | tail -n +2 | grep -vE '^\s+(/usr/lib/|/System/Library/)' || (echo "non-system libraries linked above" && false)
+ifneq ($(DEPS_FROM_SOURCE),)
+	@# and runs on the macOS it was built for
+	@otool -l bin/atlas-bin | grep -A4 LC_BUILD_VERSION | grep -q "minos $(MACOSX_DEPLOYMENT_TARGET)" || (otool -l bin/atlas-bin | grep -A4 LC_BUILD_VERSION; echo "expected minos $(MACOSX_DEPLOYMENT_TARGET)" && false)
+endif
 else ifneq ($(STATIC_LDFLAGS),)
 	@ldd bin/atlas-bin 2>&1 | grep -qiE 'not a (valid )?dynamic' || (ldd bin/atlas-bin; echo "expected a fully static binary" && false)
 else

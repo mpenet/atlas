@@ -58,3 +58,26 @@ jobs:
 
       - name: Build and check in Docker
         run: docker build --target builder -t atlas-check .
+
+  macos-binary:
+    # the release build: dependencies from pinned sources, for macOS 12
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: brew install lua pkg-config luarocks libyaml
+
+      - name: Install Lua dependencies
+        run: |
+          luarocks install fennel
+          luarocks install lunajson
+          luarocks install luasocket
+          luarocks install lyaml
+
+      - name: Build binary
+        run: make binary FENNEL=fennel DEPS_FROM_SOURCE=1
+
+      - name: Check binary is self-contained and runs on macOS 12
+        run: make check-binary DEPS_FROM_SOURCE=1
