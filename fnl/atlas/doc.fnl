@@ -1,5 +1,6 @@
 ;; ABOUTME: Renders human-readable help for an operation; the library form is
 ;; ABOUTME: each op's REPL docstring, and the CLI reuses render for its --help.
+(local json (require :atlas.json))
 (local util (require :atlas.util))
 (local negotiate (require :atlas.negotiate))
 
@@ -18,7 +19,7 @@
 (fn type-name [schema]
   "A schema's type for help: \"string\", \"string | null\" (OpenAPI 3.1 type
 arrays), or \"any\"."
-  (let [t (?. schema :type)]
+  (let [t (when (= (type schema) :table) schema.type)]
     (if (= (type t) :table) (table.concat t " | ") (or t :any))))
 
 (fn param-type [p]
@@ -34,7 +35,11 @@ arrays), or \"any\"."
                                             "|")
                               "]")))
     (when (not= nil (?. p :schema :default))
-      (table.insert parts (.. "(default: " (tostring p.schema.default) ")")))
+      (table.insert parts (.. "(default: "
+                              (if (= (type p.schema.default) :table)
+                                  (json.encode p.schema.default)
+                                  (tostring p.schema.default))
+                              ")")))
     (when p.description
       (table.insert parts (.. "— " p.description)))
     (if (> (length parts) 0) (.. " " (table.concat parts " ")) "")))
@@ -92,7 +97,8 @@ params heading and an optional body hint, which differ between CLI and library."
             (local prop (. bschema.properties name))
             (add (string.format "  %-16s %s%s%s" name (type-name prop)
                                 (if (. bschema.required name) " [required]" "")
-                                (if prop.description
+                                (if (and (= (type prop) :table)
+                                         prop.description)
                                     (.. " — " prop.description)
                                     "")))))))
     (add "\nResponses:")
@@ -134,4 +140,4 @@ params heading and an optional body hint, which differ between CLI and library."
 (fn build [path method op-spec]
   (render path method op-spec library-style))
 
-{: build : render : param-extras}
+{: build : render : param-extras : type-name}

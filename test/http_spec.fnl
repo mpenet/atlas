@@ -77,6 +77,18 @@
                     (assert.is_truthy (: (tostring err) :find "timed out"))
                     (assert.is_true (< (- (socket.gettime) t0) 2)))))))
 
+(describe "the transport binding"
+          (fn []
+            (it "refuses strings with an embedded NUL"
+                (fn []
+                  (let [curl (require :atlas.curl)]
+                    (assert.has.error #(curl.perform {:method "GET"
+                                                      :url "http://localhost:1\0@127.0.0.1:2/"})
+                                      "url must not contain NUL bytes")
+                    (assert.has.error #(curl.perform {:method "GET"
+                                                      :url "http://127.0.0.1:1/"
+                                                      :headers ["x-a: b\0c"]})))))))
+
 (describe "http.parse-headers"
           (fn []
             (it "lowercases names and joins repeated headers"

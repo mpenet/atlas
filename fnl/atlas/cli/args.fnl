@@ -20,8 +20,9 @@
        ;; :arg          placeholder for the value in usage (default N or VALUE)
        ;; :shown        how usage displays it, when the default form doesn't fit
        ;; :scope        :op, :az, :auth or :any
-       ;; :also         other commands that accept it, though usage lists it
-       ;;               under :scope
+       ;; :also         other commands that take it
+       ;; :explained    commands that refuse it with an explanation: parsed,
+       ;;               but never offered
        ;; :family       a --PREFIX.NAME=VALUE family (its scope applies to all names)
        [{:names ["--list"] :key :list :scope :op :help "List all operations"}
         {:names ["--help"]
@@ -136,12 +137,12 @@
         {:names ["--dry-run"]
          :key :dry-run
          :scope :op
-         :also [:az :profile]
+         :explained [:az :profile]
          :help "Print the request instead of sending it"}
         {:names ["--curl"]
          :key :curl
          :scope :op
-         :also [:az]
+         :explained [:az]
          :help "Print an equivalent curl command instead of sending"}
         {:names ["--cache-ttl"]
          :key :cache-ttl
@@ -238,6 +239,14 @@ returns (kind key value); kind is a value of field-prefixes."
     :inputs (decode-structured (read-body raw))
     _ raw))
 
+(fn accepted-elsewhere [opt]
+  "Commands besides opt's :scope that the parser lets it through for."
+  (let [commands (icollect [_ c (ipairs (or opt.also []))]
+                   c)]
+    (each [_ c (ipairs (or opt.explained []))]
+      (table.insert commands c))
+    commands))
+
 (local command-scopes {:op :op
                        :az :az
                        :arazzo :az
@@ -307,7 +316,7 @@ returns (kind key value); kind is a value of field-prefixes."
                                     a)
                   opt (or (. option-by-name name)
                           (error (.. "unknown option: " a) 0))]
-              (table.insert used [name opt.scope opt.also])
+              (table.insert used [name opt.scope (accepted-elsewhere opt)])
               (if (not opt.value)
                   (if inline
                       (error (.. name " takes no value") 0)

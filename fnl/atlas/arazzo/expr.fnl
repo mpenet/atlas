@@ -57,8 +57,9 @@ meant a JSON pointer into it: raise saying so."
                  mval-raw)]
     (when (= (type arr) :table)
       (let [found (accumulate [found nil _ item (ipairs arr) &until found]
-                    (when (= (tostring (or (. item mfield) ""))
-                             (tostring (or mval "")))
+                    (when (and (= (type item) :table) (not= item json.null)
+                               (= (tostring (or (. item mfield) ""))
+                                  (tostring (or mval ""))))
                       item))]
         (if (and found rfield) (. found rfield) found)))))
 
@@ -109,7 +110,11 @@ meant a JSON pointer into it: raise saying so."
   (pick-values 1 (s:gsub "{(%$[^}]+)}"
                          (fn [expr]
                            (let [v (resolve-expr ctx expr)]
-                             (if (= v nil) "" (tostring v)))))))
+                             ;; null is no value, like a missing one;
+                             ;; structured values as JSON
+                             (if (or (= v nil) (= v json.null)) ""
+                                 (= (type v) :table) (json.encode v)
+                                 (tostring v)))))))
 
 (local roots {:inputs true
               :statusCode true

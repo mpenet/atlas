@@ -181,14 +181,24 @@ operation, or an Arazzo document's workflow and inputs."
                     (let [kind (. field-prefixes prefix)]
                       (if kind ((field-entries prefix kind context) rest) []))
                     (current:match "^%-")
-                    (icollect [_ o (ipairs (scope-options (match cmd
-                                                            :op :op
-                                                            :az :az
-                                                            :arazzo :az
-                                                            :auth :auth
-                                                            :profile :profile
-                                                            _ :none)))]
-                      (when o.complete {:value o.complete :help o.help}))
+                    (let [scope (match cmd
+                                  :op :op
+                                  :az :az
+                                  :arazzo :az
+                                  :auth :auth
+                                  :profile :profile
+                                  _ :none)
+                          offered (icollect [_ o (ipairs (scope-options scope))]
+                                    (when o.complete
+                                      {:value o.complete :help o.help}))]
+                      ;; the one profile subcommand that takes --dry-run
+                      (when (and (= cmd :profile)
+                                 (= (. positional 2) :import-restish))
+                        (each [_ o (ipairs options)]
+                          (when (= (?. o :names 1) "--dry-run")
+                            (table.insert offered
+                                          {:value "--dry-run" :help o.help}))))
+                      offered)
                     (positional-entries (or ctx.config {}) positional context))
         matching (icollect [_ e (ipairs entries)]
                    (when (= current (e.value:sub 1 (length current)))
@@ -243,7 +253,13 @@ operation, or an Arazzo document's workflow and inputs."
   (print "  compadd -S '' -- ${open[@]}")
   (print "  compadd -- ${closed[@]}")
   (print "}")
-  (print "compdef _atlas atlas"))
+  ;; autoloaded from fpath, the file is _atlas's body: complete now;
+  ;; sourced, register the function
+  (print "if [[ ${zsh_eval_context[-1]} == loadautofunc ]]; then")
+  (print "  _atlas \"$@\"")
+  (print "else")
+  (print "  compdef _atlas atlas")
+  (print "fi"))
 
 (fn run-complete [args]
   "Hidden backend for the shell completion scripts:

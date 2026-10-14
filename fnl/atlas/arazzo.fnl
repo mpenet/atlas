@@ -162,7 +162,8 @@ way are created)."
     (var node value)
     (each [_ k (ipairs keys)]
       (let [key (if (json.array? node) (+ 1 (tonumber k)) k)]
-        (when (not= (type (. node key)) :table)
+        ;; null (shared and read-only) is replaced, like any non-object
+        (when (or (not= (type (. node key)) :table) (= (. node key) json.null))
           (tset node key {}))
         (set node (. node key))))
     (tset node (if (json.array? node) (+ 1 (tonumber last)) last) new)

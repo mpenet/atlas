@@ -854,7 +854,10 @@
                   (assert.are.same ["--dry-run" "--help"]
                                    (complete "profile import-restish x --"))
                   (assert.are.same ["--help" "--logout" "--ssl."]
-                                   (complete "auth p --"))))
+                                   (complete "auth p --"))
+                  (assert.are.same ["--help"] (complete "profile list --"))
+                  (assert.is_nil (: (table.concat (complete "az f --") " ")
+                                    :find "--dry-run" 1 true))))
             (it "completes shells"
                 (fn []
                   (assert.are.same ["bash" "fish" "zsh"]

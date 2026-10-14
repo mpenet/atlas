@@ -52,7 +52,11 @@ static const char *opt_string(lua_State *L, int t, const char *key) {
   }
   if (lua_type(L, -1) != LUA_TSTRING)
     luaL_error(L, "%s must be a string", key);
-  const char *s = lua_tostring(L, -1);
+  size_t len;
+  const char *s = lua_tolstring(L, -1, &len);
+  /* libcurl reads C strings: a NUL would silently cut the rest off */
+  if (strlen(s) != len && strcmp(key, "body") != 0)
+    luaL_error(L, "%s must not contain NUL bytes", key);
   lua_pop(L, 1); /* the string stays alive: t still references it */
   return s;
 }
@@ -94,7 +98,17 @@ static int perform(lua_State *L) {
     lua_Integer n = luaL_len(L, -1);
     for (lua_Integer i = 1; i <= n; i++) {
       lua_rawgeti(L, -1, i);
-      struct curl_slist *next = curl_slist_append(headers, luaL_checkstring(L, -1));
+      if (lua_type(L, -1) != LUA_TSTRING) {
+        curl_slist_free_all(headers);
+        return luaL_error(L, "headers must be strings");
+      }
+      size_t len;
+      const char *line = lua_tolstring(L, -1, &len);
+      if (strlen(line) != len) {
+        curl_slist_free_all(headers);
+        return luaL_error(L, "header must not contain NUL bytes");
+      }
+      struct curl_slist *next = curl_slist_append(headers, line);
       lua_pop(L, 1);
       if (!next) {
         curl_slist_free_all(headers);

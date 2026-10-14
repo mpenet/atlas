@@ -397,6 +397,15 @@
                       (assert.are.equal 0 r.code)
                       (assert.is_truthy (r.out:find "Usage: atlas" 1 true))
                       (assert.is_nil (r.out:find "Bearer" 1 true))))))
+            (it "checks server variables when listing servers"
+                (fn []
+                  (let [r (atlas-run ["op"
+                                      "p"
+                                      "--servers"
+                                      "--server.region=xx"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "unknown server variable 'region'"
+                                                  1 true)))))
             (it "explains bad option values"
                 (fn []
                   (let [r (atlas-run ["op" "p" "get-pet" "3" "--output=yml"])]

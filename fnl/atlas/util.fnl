@@ -81,7 +81,8 @@ dropped. nil for anything else, and for an authority holding a \\, which
 URL parsers read differently: such a URL matches no origin."
   (let [(scheme rest) (url:match "^(%a[%w+.-]*)://(.*)$")
         scheme (and scheme (scheme:lower))]
-    (when (and scheme (. default-ports scheme))
+    ;; control characters (a NUL ends the URL libcurl sees) match no origin
+    (when (and scheme (. default-ports scheme) (not (url:find "%c")))
       (let [authority (rest:match "^([^/?#]*)")
             hostport (or (authority:match "^.*@(.*)$") authority)
             (host port) (if (hostport:match "^%[")
@@ -129,6 +130,12 @@ like credentials or are in the set ?names (lowercase)."
                                  "<redacted>"
                                  value))))))))
 
+(fn without-nulls [v]
+  "v without its null elements or members: null is no value to send."
+  (if (or (not= (type v) :table) (= v json.null)) v (json.array? v)
+      (icollect [_ x (ipairs v)] (when (not= x json.null) x))
+      (collect [k x (pairs v)] (when (not= x json.null) (values k x)))))
+
 (fn form-encode [params]
   "Encode params as application/x-www-form-urlencoded, keys sorted.
 Array values repeat the key (OpenAPI style=form, explode=true)."
@@ -137,7 +144,7 @@ Array values repeat the key (OpenAPI style=form, explode=true)."
     (table.sort keys #(< (tostring $1) (tostring $2)))
     (each [_ k (ipairs keys)]
       (let [v (. params k)
-            vs (if (= (type v) :table) v [v])]
+            vs (if (= (type v) :table) (without-nulls v) [v])]
         (when (and (= (type v) :table) (= nil (. v 1)) (not= nil (next v)))
           (error (.. "'" (tostring k)
                      "' is an object; query and form values must be scalars or lists")
@@ -148,11 +155,12 @@ Array values repeat the key (OpenAPI style=form, explode=true)."
 
 (local delimiters {:form "," :spaceDelimited "%20" :pipeDelimited "|"})
 
-(fn query-pairs [name value style explode]
+(fn query-pairs [name raw style explode]
   "\"key=value\" strings for one query parameter in an OpenAPI style
 (form, spaceDelimited, pipeDelimited, deepObject); values are encoded,
 delimiters are not."
-  (let [k (url-encode name)
+  (let [value (without-nulls raw)
+        k (url-encode name)
         enc url-encode]
     (if (not= (type value) :table) [(.. k "=" (enc value))]
         (not= nil (. value 1))
@@ -240,9 +248,10 @@ with the same name and location."
       (table.insert out p))
     out))
 
-(fn simple-style [v]
+(fn simple-style [raw]
   "A path parameter value in OpenAPI's default simple style: arrays as
 a,b and objects as k1,v1,k2,v2 (keys sorted), each part url-encoded."
+  (local v (without-nulls raw))
   (if (not= (type v) :table) (url-encode v) (not= nil (. v 1))
       (table.concat (icollect [_ x (ipairs v)] (url-encode x)) ",")
       (let [keys (doto (icollect [k (pairs v)] k)

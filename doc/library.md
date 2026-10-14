@@ -203,6 +203,15 @@ All `$ref`s are resolved when the client is built, so parameters, request bodies
 
 Lists a parsed schema's servers and their variables, e.g. to offer a choice before building a client with `:server-index` and `:server-vars`.
 
+## `atlas.server-url`
+
+```fennel
+(atlas.server-url (. (atlas.servers schema) 1) {:zone "de-fra-1"})
+;; => "https://api-de-fra-1.exoscale.com/v2"
+```
+
+A server's URL with its variables replaced by the given values or their defaults. Raises an error for a variable the server doesn't declare or a value outside its `enum`.
+
 ## `atlas.load-schema`
 
 ```fennel

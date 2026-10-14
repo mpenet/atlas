@@ -446,6 +446,17 @@
                       (assert.are.equal "https://api.example.com/items?a=x%20y&b=2"
                                         (. calls 1 :url))
                       (assert.is_nil (. calls 1 :query))))))
+            (it "marks the headers the tool adds as sensitive"
+                (fn []
+                  (let [(http calls) (seq-mock (ok-resp {}))
+                        auth (reload-auth http)
+                        wrapped (auth.wrap-http-fn {:name "external-tool"
+                                                    :params {:commandline "echo '{\"headers\": {\"X-Hmac\": [\"s\"]}}'"}}
+                                                   http.request)]
+                    (wrapped {:method "GET"
+                              :url "https://api.example.com/x"
+                              :headers {}})
+                    (assert.are.same ["X-Hmac"] (. calls 1 :sensitive-headers)))))
             (it "signs the encoded body and leaves the caller's request alone"
                 (fn []
                   (let [(http calls) (seq-mock (ok-resp {}))

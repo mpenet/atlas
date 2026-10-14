@@ -22,7 +22,13 @@ the floating-point range gives nil."
 (fn from-string [s ?schema]
   "Convert s to the type ?schema asks for; without a schema, JSON numbers
 and true/false are converted and everything else stays a string."
-  (match (?. ?schema :type)
+  ;; a 3.1 boolean schema says nothing about the type; of a 3.1 type array,
+  ;; the type that isn't null decides
+  (match (let [t (when (= (type ?schema) :table) ?schema.type)]
+           (if (= (type t) :table)
+               (accumulate [found nil _ x (ipairs t) &until found]
+                 (when (not= x "null") x))
+               t))
     "string" s
     "integer" (or (math.tointeger (json-number s)) s)
     "number" (or (json-number s) s)
@@ -38,6 +44,7 @@ and true/false are converted and everything else stays a string."
 (fn schema-at [schema keys]
   "Schema of the property reached by following keys through object properties."
   (accumulate [cur schema _ k (ipairs keys) &until (= cur nil)]
-    (?. cur :properties k)))
+    (when (= (type cur) :table)
+      (?. cur :properties k))))
 
 {: from-string : schema-at}

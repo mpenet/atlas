@@ -59,9 +59,11 @@ inputs JSON Schema; positional lists inputs that may be passed positionally."
           (add "\nInputs:")
           (each [_ name (ipairs names)]
             (let [prop (. props name)]
-              (add (string.format "  %-16s %s%s" name (or prop.type :any)
+              (add (string.format "  %-16s %s%s" name (doc.type-name prop)
                                   (doc.param-extras {:schema prop
-                                                     :description prop.description}
+                                                     :description (when (= (type prop)
+                                                                           :table)
+                                                                    prop.description)}
                                                     (. required name))))))))
     (let [steps (or wf.steps [])
           width (accumulate [w 0 _ s (ipairs steps)]

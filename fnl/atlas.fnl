@@ -272,4 +272,5 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
  :client client
  :load-schema load-schema
  :parse-schema parse-schema
- :servers servers}
+ :servers servers
+ :server-url expand-server-url}

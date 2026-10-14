@@ -16,6 +16,10 @@
                   ;; such a URL has no origin, so it never matches one
                   (assert.is_nil (util.origin "https://evil.com\\@api.good.com/"))
                   (assert.is_nil (util.origin "http://127.0.0.1:9001\\@127.0.0.1:9002/"))))
+            (it "gives no origin to a URL holding control characters"
+                (fn []
+                  (assert.is_nil (util.origin "http://localhost:1\0@127.0.0.1:2/r.json"))
+                  (assert.is_nil (util.origin "http://a.test\t/x"))))
             (it "drops user info, lowercases, and makes the port explicit"
                 (fn []
                   (assert.are.equal "https://api.good.com:443"

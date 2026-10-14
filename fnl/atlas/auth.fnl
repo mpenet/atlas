@@ -444,8 +444,13 @@ any auth flow; signing tools and query api-keys supply none up front."
             (tset req :body nil)))
         (let [extra (external-signing-headers params req)]
           (when extra
+            ;; what the tool adds is a credential, whatever its name
+            (set req.sensitive-headers
+                 (icollect [_ n (ipairs (or req.sensitive-headers []))]
+                   n))
             (each [k vs (pairs extra)]
-              (tset req.headers k (if (= (type vs) :table) (. vs 1) vs))))
+              (tset req.headers k (if (= (type vs) :table) (. vs 1) vs))
+              (table.insert req.sensitive-headers k)))
           (base-fn req))))))
 
 (fn wrap-http-fn [auth-config base-fn]

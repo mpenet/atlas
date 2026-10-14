@@ -16,7 +16,9 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - The bash completion script treats the candidates it gets (operation names, enum values from the spec…) as data: `compgen -W` expanded `$(...)` in them, so a spec could run commands when completing.
 - On a redirect to another origin, the headers authentication added are dropped whatever their name, and logs and dry runs redact them and a query API key whatever their name; user info in URLs is redacted too.
 - The schema cache directory is private to the user (0700).
-- A URL whose host part holds a backslash matches no origin, so credentials never follow it (libcurl reads `http://a\@b/` as host `b`); retried schema fetches and next-page requests keep the marking of credential headers, so a later cross-origin redirect drops them; `$ref` errors redact the document's URL.
+- Headers added by external-tool signing are marked as credentials: logs and dry runs redact them, and they are dropped on a redirect to another origin.
+- The libcurl binding rejects URLs, header names and values and options that contain a NUL byte, rather than cutting them short.
+- A URL whose host part holds a backslash or a control character (such as a NUL in a `$ref`) matches no origin, so credentials never follow it (libcurl reads `http://a\@b/` as host `b`); retried schema fetches and next-page requests keep the marking of credential headers, so a later cross-origin redirect drops them; `$ref` errors redact the document's URL.
 
 ### Added
 
@@ -25,7 +27,7 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - `atlas profile import-restish [FILE] [--dry-run]` imports Restish configs (v1 `apis.json`, v2 `restish.json`) as profiles.
 - Profiles take `query` (parameters on every request) and `tls.ca_cert`.
 - `az WORKFLOW --help` documents a workflow's inputs and steps.
-- `--servers`, `--server-index` and `--server.NAME=VAL` to list and choose servers; `atlas.servers` in the library.
+- `--servers`, `--server-index` and `--server.NAME=VAL` to list and choose servers; `atlas.servers` and `atlas.server-url` in the library.
 - Short field prefixes `--q.`, `--h.`, `--b.`, `--i.`.
 - Request checks before sending: missing required parameters and invalid JSON bodies are errors, undeclared query names warn; `--no-validate` sends anyway.
 - Shell completion of operations, parameters, body fields, enum values, server variables, Arazzo contexts, workflows and inputs.
@@ -80,6 +82,12 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - `--select` no longer crashes when picking fields (`{a,b}`) from a scalar or from an array mixing objects and scalars.
 - Help lists body properties and responses in a stable order.
 - Arazzo sub-workflow steps honour success criteria, actions and outputs; `dependsOn` runs first; cycles are detected.
+- `json.null` is read-only: Arazzo `replacements` wrote into it, changing every null at once.
+- Coercion of `--q.`/`--b.` values and help handle OpenAPI 3.1 boolean schemas and type arrays (`["integer", "null"]`).
+- Arazzo templates render a null as empty text and objects as JSON; `$find` skips null and scalar elements.
+- Null members of query and form objects are left out instead of being sent as `null`.
+- Completion offers only the options a command takes (`--dry-run` is not offered for `az`); the zsh script also works when autoloaded from `fpath`.
+- `--servers` checks `--server.NAME=VAL` against the server's variables and their allowed values, as requests do.
 - Many more; see the commit history.
 
 ## [1.0.0-alpha14] - 2026-07-06

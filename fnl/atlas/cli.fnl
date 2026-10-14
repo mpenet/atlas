@@ -355,10 +355,18 @@ invalid body unless --no-validate."
       (when (= (type schema) :table)
         (set opts.source-url raw-schema))
       (if p.servers
-          (print (format-servers (atlas.servers (if (= (type schema) :string)
-                                                    (atlas.load-schema schema)
-                                                    schema))
-                                 (or opts.server-index 1) opts.server-vars))
+          (let [servers (atlas.servers (if (= (type schema) :string)
+                                           (atlas.load-schema schema)
+                                           schema))
+                index (or opts.server-index 1)
+                selected (. servers index)
+                (ok err) (if selected
+                             (pcall atlas.server-url selected
+                                    (or opts.server-vars {}))
+                             true)]
+            (when (not ok)
+              (die (tostring err)))
+            (print (format-servers servers index opts.server-vars)))
           (let [(ok c) (pcall atlas.client schema opts)
                 c (if ok c (die (.. "failed to build client: " (tostring c))))
                 op (when p.operation

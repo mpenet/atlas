@@ -7,7 +7,11 @@
 
 ;; JSON null where Lua's nil can't stand for it: in arrays, and in objects
 ;; when the data is shown or sent as is
-(local null (setmetatable {} {:__tostring #"null"}))
+(local null
+       (setmetatable {}
+                     {:__tostring #"null"
+                      ;; one null is shared by every decoded value
+                      :__newindex #(error "json.null is read-only" 2)}))
 
 (fn array [t]
   "t marked as a JSON array, so that it encodes as one even when empty."

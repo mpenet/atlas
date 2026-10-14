@@ -200,3 +200,53 @@
                     (assert.is_nil (select-path data ".a[]"))
                     (assert.is_nil (select-path data ".a.{x}"))
                     (assert.is_nil (select-path data ".a.b")))))))
+
+(describe "JSON null, further"
+          (fn []
+            (local expr (require :atlas.arazzo.expr))
+            (local util (require :atlas.util))
+            (local coerce (require :atlas.coerce))
+            (local doc (require :atlas.doc))
+            (it "can't be written into"
+                (fn []
+                  (assert.has.error #(tset json.null :b 5))
+                  (assert.is_nil (rawget json.null :b))))
+            (it "leaves null object members out of queries, paths and forms"
+                (fn []
+                  (let [o (json.decode "{\"a\":null,\"b\":1}" true)]
+                    (assert.are.equal "f[b]=1"
+                                      (util.query-string {:f o}
+                                                         {:f {:style "deepObject"}}))
+                    (assert.are.equal "b=1" (util.query-string {:f o}))
+                    (assert.are.equal "/x/1"
+                                      (util.resolve-path "/x/{p}"
+                                                         {:p (json.decode "[1,null]"
+                                                                          true)}))
+                    (assert.are.equal "a=1"
+                                      (util.form-encode {:a (json.decode "[1,null]")})))))
+            (it "renders in templates like a missing value; objects as JSON"
+                (fn []
+                  (let [ctx {:inputs {:n json.null
+                                      :o (json.decode "{\"k\":1}")}}]
+                    (assert.are.equal "v=" (expr.eval ctx "v={$inputs.n}"))
+                    (assert.are.equal "v={\"k\":1}"
+                                      (expr.eval ctx "v={$inputs.o}")))))
+            (it "and $find skips elements that aren't objects"
+                (fn []
+                  (assert.are.same {:x 1}
+                                   (expr.eval {:response {:body (json.decode "[1,null,{\"x\":1}]"
+                                                                             true)}}
+                                              "$find($response.body, x, 1)"))))
+            (it "boolean and type-array schemas work for fields and help"
+                (fn []
+                  (assert.are.equal "123"
+                                    (coerce.from-string "123"
+                                                        {:type ["string"
+                                                                "null"]}))
+                  (assert.are.equal 1 (coerce.from-string "1" true))
+                  (assert.is_nil (coerce.schema-at {:properties {:meta true}}
+                                                   [:meta :x]))
+                  (assert.is_string (doc.build "/x" "post"
+                                               {:requestBody {:content {"application/json" {:schema {:properties {:meta true
+                                                                                                                  :d {:type "object"
+                                                                                                                      :default {:a 1}}}}}}}}))))))
