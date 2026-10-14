@@ -43,6 +43,8 @@
 
 (require :atlas.coerce)
 
+(require :atlas.validate)
+
 (require :atlas.retry)
 
 (require :atlas.paginate)
@@ -66,6 +68,16 @@
 (require :atlas.arazzo.expr)
 
 (require :atlas.arazzo)
+
+(require :atlas.cli.request)
+
+(require :atlas.cli.args)
+
+(require :atlas.cli.output)
+
+(require :atlas.cli.settings)
+
+(require :atlas.cli.complete)
 
 (require :atlas.cli)
 

@@ -21,8 +21,12 @@
   (let [parts []]
     (when required? (table.insert parts "[required]"))
     (when (?. p :schema :enum)
-      (table.insert parts (.. "[" (table.concat p.schema.enum "|") "]")))
-    (when (?. p :schema :default)
+      (table.insert parts (.. "["
+                              (table.concat (icollect [_ v (ipairs p.schema.enum)]
+                                              (tostring v))
+                                            "|")
+                              "]")))
+    (when (not= nil (?. p :schema :default))
       (table.insert parts (.. "(default: " (tostring p.schema.default) ")")))
     (when p.description
       (table.insert parts (.. "— " p.description)))
@@ -92,10 +96,10 @@ params heading and an optional body hint, which differ between CLI and library."
                    (when op-spec.requestBody
                      (table.insert parts "[-d JSON|@file|@-]"))
                    (when (> (length query-params) 0)
-                     (table.insert parts "[--query.KEY=VAL ...]"))
+                     (table.insert parts "[--q.KEY=VAL ...]"))
                    (.. "atlas <profile-or-schema> " (table.concat parts " "))))
-        :query-heading "Query params (--query.KEY=VAL):"
-        :body-hint "  Use -d JSON, --body=@file, --body=@- for stdin, or --body.KEY=VAL for individual fields"})
+        :query-heading "Query params (--q.KEY=VAL):"
+        :body-hint "  Use -d JSON, --body=@file, --body=@- for stdin, or --b.KEY=VAL for individual fields"})
 
 (fn invoke-usage [name op-spec path-params query-params]
   (let [parts []]
@@ -133,4 +137,60 @@ params heading and an optional body hint, which differ between CLI and library."
 (fn build [path method op-spec]
   (render path method op-spec library-style))
 
-{: build : build-cli}
+(fn step-target [step]
+  "What a workflow step calls, for display."
+  (if step.operationId (tostring step.operationId)
+      step.workflowId (.. "workflow " step.workflowId)
+      step.operationPath (let [ptr (or (step.operationPath:match "#/paths/(.+)$")
+                                       "")
+                               (path method) (ptr:match "^(.+)/([^/]+)$")]
+                           (if path
+                               (.. (method:upper) " "
+                                   (pick-values 1
+                                                (-> path (: :gsub "~1" "/")
+                                                    (: :gsub "~0" "~"))))
+                               step.operationPath))
+      "?"))
+
+(fn build-workflow [wf inputs-schema positional]
+  "Help text for an Arazzo workflow. inputs-schema is the workflow's resolved
+inputs JSON Schema; positional lists inputs that may be passed positionally."
+  (let [lines []
+        add #(table.insert lines $)
+        required (collect [_ r (ipairs (or (?. inputs-schema :required) []))]
+                   r
+                   true)
+        props (or (?. inputs-schema :properties) {})
+        names (icollect [name (pairs props)] name)]
+    (table.sort names (fn [a b]
+                        (if (= (. required a) (. required b)) (< a b)
+                            (= true (. required a)))))
+    (add wf.workflowId)
+    (when (and wf.summary (not= wf.summary "")) (add (.. "\n" wf.summary)))
+    (when (and wf.description (not= wf.description "")
+               (not= wf.description wf.summary))
+      (add wf.description))
+    (add (.. "\nUsage: atlas az <name-or-file> " wf.workflowId
+             (table.concat (icollect [_ n (ipairs positional)] (.. " <" n ">")))
+             " [-i KEY=VAL ...]"))
+    (if (= 0 (length names))
+        (add "\nInputs: none")
+        (do
+          (add "\nInputs:")
+          (each [_ name (ipairs names)]
+            (let [prop (. props name)]
+              (add (string.format "  %-16s %s%s" name (or prop.type :any)
+                                  (param-extras {:schema prop
+                                                 :description prop.description}
+                                                (. required name))))))))
+    (let [steps (or wf.steps [])
+          width (accumulate [w 0 _ s (ipairs steps)]
+                  (math.max w (length (tostring s.stepId))))]
+      (when (> (length steps) 0)
+        (add "\nSteps:")
+        (each [i step (ipairs steps)]
+          (add (string.format (.. "  %d. %-" (+ width 2) "s %s") i
+                              (tostring step.stepId) (step-target step))))))
+    (table.concat lines "\n")))
+
+{: build : build-cli : build-workflow}

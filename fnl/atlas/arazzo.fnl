@@ -49,6 +49,9 @@ Relative source URLs resolve against ?location, the document's own path or URL."
     (when (and (?. ?opts :base-url) (> (length sources) 1))
       (error (.. "base-url override is ambiguous: the document has "
                  (length sources) " openapi sources") 0))
+    (when (and (?. ?opts :server-index) (> (length sources) 1))
+      (error (.. "server-index is ambiguous: the document has "
+                 (length sources) " openapi sources") 0))
     (let [server-vars (or (?. ?opts :server-vars) {})
           used {}]
       (each [_ src (ipairs sources)]
@@ -323,6 +326,28 @@ target; a :value on the reference overrides the target parameter's value."
        :steps ctx.steps
        :step-order step-order})))
 
+;; ---- introspection ----
+
+(fn positional-inputs [wf]
+  "Input names used as path parameters by the workflow's steps, in first-use
+order; the CLI accepts these as positional arguments."
+  (let [seen {}
+        names []]
+    (each [_ step (ipairs (or wf.steps []))]
+      (each [_ param (ipairs (or step.parameters []))]
+        (when (= param.in :path)
+          (let [input-name (and (= (type param.value) :string)
+                                (param.value:match "^%$inputs%.(.+)$"))]
+            (when (and input-name (not (. seen input-name)))
+              (tset seen input-name true)
+              (table.insert names input-name))))))
+    names))
+
+(fn workflow-inputs [doc wf]
+  "The workflow's inputs JSON Schema with $refs resolved, or nil."
+  (when wf.inputs
+    (util.deref-deep doc wf.inputs)))
+
 ;; ---- public API ----
 
 (fn run [path workflow-id inputs ?opts]
@@ -337,4 +362,6 @@ target; a :value on the reference overrides the target parameter's value."
 {:build-clients build-clients
  :load-doc load-doc
  :run run
- :run-workflow run-workflow}
+ :run-workflow run-workflow
+ :positional-inputs positional-inputs
+ :workflow-inputs workflow-inputs}

@@ -102,6 +102,19 @@
                                                              {:server-vars {:nope "x"}}
                                                              "test/fixtures/flow.arazzo.json")
                                       "no openapi source declares server variable 'nope'"))))
+            (it "rejects a server-index when several openapi sources exist"
+                (fn []
+                  (let [doc {:sourceDescriptions [{:name "a"
+                                                   :type "openapi"
+                                                   :url "./petstore.yaml"}
+                                                  {:name "b"
+                                                   :type "openapi"
+                                                   :url "./petstore.yaml"}]
+                             :workflows []}]
+                    (assert.has.error #(arazzo.build-clients doc
+                                                             {:server-index 2}
+                                                             "test/fixtures/flow.arazzo.json")
+                                      "server-index is ambiguous: the document has 2 openapi sources"))))
             (it "skips non-openapi sources"
                 (fn []
                   (let [doc {:sourceDescriptions [{:name "ext"
@@ -1116,3 +1129,30 @@
                       (arazzo.run-workflow doc "wf" {} clients2
                                            {:max-gotos 100})
                       (assert.are.equal 60 (c2.val))))))))
+
+(describe "workflow introspection"
+          (fn []
+            (it "lists inputs used as path parameters, in first-use order"
+                (fn []
+                  (let [wf {:steps [{:parameters [{:in :path
+                                                   :name "b"
+                                                   :value "$inputs.second"}
+                                                  {:in :query
+                                                   :name "q"
+                                                   :value "$inputs.query"}]}
+                                    {:parameters [{:in :path
+                                                   :name "a"
+                                                   :value "$inputs.first"}
+                                                  {:in :path
+                                                   :name "c"
+                                                   :value "$inputs.second"}]}]}]
+                    (assert.are.same ["second" "first"]
+                                     (arazzo.positional-inputs wf)))))
+            (it "resolves $ref'd inputs schemas against the document"
+                (fn []
+                  (let [doc {:components {:inputs {:create {:type "object"
+                                                            :properties {:zip {:type "string"}}}}}}
+                        wf {:inputs {:$ref "#/components/inputs/create"}}]
+                    (assert.are.same {:type "object"
+                                      :properties {:zip {:type "string"}}}
+                                     (arazzo.workflow-inputs doc wf)))))))

@@ -1,6 +1,16 @@
 ;; ABOUTME: Specs for CLI argument parsing, request building, output formatting and options.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local cli (require :atlas.cli))
+(local cli ;; the CLI is split across modules; the specs test it as one package
+       (let [merged {}]
+         (each [_ m (ipairs [:atlas.cli
+                             :atlas.cli.args
+                             :atlas.cli.request
+                             :atlas.cli.output
+                             :atlas.cli.settings
+                             :atlas.cli.complete])]
+           (each [k v (pairs (require m))]
+             (tset merged k v)))
+         merged))
 
 (describe "cli.parse-args"
           (fn []
@@ -460,3 +470,253 @@
                                                           :headers {:content-type "text/plain"}
                                                           :body "@/etc/passwd"})
                                        :find "--data-raw '@/etc/passwd'" 1 true))))))
+
+(describe "cli server listing and choice"
+          (fn []
+            (it "parses --server-index and --servers"
+                (fn []
+                  (let [p (cli.parse-args ["op"
+                                           "a"
+                                           "--server-index=2"
+                                           "--servers"])]
+                    (assert.are.equal 2 p.server-index)
+                    (assert.is_true p.servers))))
+            (it "takes server-index from the profile unless given on the command line"
+                (fn []
+                  (assert.are.equal 2
+                                    (. (cli.client-options nil
+                                                           {:server-index 2}
+                                                           {:ssl {}} {})
+                                       :server-index))
+                  (assert.are.equal 3
+                                    (. (cli.client-options nil
+                                                           {:server-index 2}
+                                                           {:ssl {}
+                                                            :server-index 3}
+                                                           {})
+                                       :server-index))))
+            (it "formats servers, marking the selection and effective values"
+                (fn []
+                  (let [servers [{:url "https://api-{zone}.test/v2"
+                                  :variables {:zone {:default "ch-gva-2"
+                                                     :enum ["ch-gva-2"
+                                                            "de-fra-1"]}}}
+                                 {:url "/api"
+                                  :description "relative"
+                                  :variables {}}]]
+                    (assert.are.equal (.. "* 1. https://api-{zone}.test/v2\n"
+                                          "       zone = de-fra-1  (default: ch-gva-2; one of: ch-gva-2, de-fra-1)\n"
+                                          "  2. /api — relative")
+                                      (cli.format-servers servers 1
+                                                          {:zone "de-fra-1"})))))
+            (it "shows empty string values visibly"
+                (fn []
+                  (let [text (cli.format-servers [{:url "https://{env}x.test"
+                                                   :variables {:env {:default ""
+                                                                     :enum [""
+                                                                            "pp"]}}}]
+                                                 1 {})]
+                    (assert.is_truthy (text:find "env = \"\"  (default: \"\"; one of: \"\", pp)"
+                                                 1 true)))))))
+
+(describe "cli short aliases"
+          (fn []
+            (it "accepts --q. --h. --b. --i. like their long forms"
+                (fn []
+                  (let [short (cli.parse-args ["op"
+                                               "a"
+                                               "x"
+                                               "--q.status=ok"
+                                               "--h.x-trace=t"
+                                               "--b.pet.name=Rex"
+                                               "--i.zone=z"])
+                        long (cli.parse-args ["op"
+                                              "a"
+                                              "x"
+                                              "--query.status=ok"
+                                              "--header.x-trace=t"
+                                              "--body.pet.name=Rex"
+                                              "--input.zone=z"])]
+                    (assert.are.same long.query short.query)
+                    (assert.are.same long.headers short.headers)
+                    (assert.are.same long.body-fields short.body-fields)
+                    (assert.are.same long.input-fields short.input-fields)
+                    (assert.are.same {:status "ok"} short.query))))
+            (it "keeps field order across short and long forms"
+                (fn []
+                  (assert.are.same [["a" "1"] ["b" "2"]]
+                                   (. (cli.parse-args ["op"
+                                                       "a"
+                                                       "x"
+                                                       "--b.a=1"
+                                                       "--body.b=2"])
+                                      :body-fields))))
+            (it "still rejects unknown dotted prefixes"
+                (fn []
+                  (assert.has.error #(cli.parse-args ["op" "a" "--x.y=1"])
+                                    "unknown option: --x.y=1")))))
+
+(describe "cli.check-params"
+          (fn []
+            (let [op {:operation-id "listPets"
+                      :parameters [{:name "status" :in "query" :required true}
+                                   {:name "limit" :in "query"}
+                                   {:name "X-Org" :in "header" :required true}]}]
+              (it "reports missing required query and header params"
+                  (fn []
+                    (let [(errors) (cli.check-params op {:query {} :headers {}})]
+                      (assert.are.same ["missing required query parameter 'status' (--q.status=…)"
+                                        "missing required header 'X-Org' (--h.X-Org=…)"]
+                                       errors))))
+              (it "accepts headers in any case, including ones from the profile"
+                  (fn []
+                    (let [(errors) (cli.check-params op
+                                                     {:query {:status "a"}
+                                                      :headers {:x-org "1"}})]
+                      (assert.are.same [] errors))))
+              (it "warns about undeclared query names, listing the declared ones"
+                  (fn []
+                    (let [(_ warnings) (cli.check-params op
+                                                         {:query {:status "a"
+                                                                  :stauts "b"}
+                                                          :headers {:x-org "1"}})]
+                      (assert.are.same ["list-pets does not declare query parameter 'stauts' (declared: limit, status)"]
+                                       warnings))))
+              (it "does not warn about extra headers"
+                  (fn []
+                    (let [(_ warnings) (cli.check-params op
+                                                         {:query {:status "a"}
+                                                          :headers {:x-org "1"
+                                                                    :x-trace "t"}})]
+                      (assert.are.same [] warnings)))))
+            (it "parses --no-validate"
+                (fn []
+                  (assert.is_true (. (cli.parse-args ["op" "a" "--no-validate"])
+                                     :no-validate))))))
+
+(describe "cli.check-body"
+          (fn []
+            (let [op {:content-type "application/json"
+                      :body-schema {:type "object"
+                                    :required ["name"]
+                                    :properties {:name {:type "string"}}}}]
+              (it "validates table bodies"
+                  (fn []
+                    (assert.are.same ["body.name: required"]
+                                     (cli.check-body op {:size 1}))))
+              (it "validates JSON text bodies"
+                  (fn []
+                    (assert.are.same ["body.name: expected string, got integer"]
+                                     (cli.check-body op "{\"name\": 1}"))))
+              (it "accepts valid bodies and absent ones"
+                  (fn []
+                    (assert.are.same [] (cli.check-body op {:name "Rex"}))
+                    (assert.are.same [] (cli.check-body op nil)))))
+            (it "skips non-JSON operations"
+                (fn []
+                  (assert.are.same []
+                                   (cli.check-body {:content-type "multipart/form-data"
+                                                    :body-schema {:required ["file"]}}
+                                                   {}))))))
+
+(local completion-schema
+       {:openapi "3.0.0"
+        :info {}
+        :servers [{:url "https://api-{zone}.test"
+                   :variables {:zone {:default "a" :enum ["a" "b"]}}}]
+        :paths {"/pets" {:get {:operationId "listPets"
+                               :summary "List pets"
+                               :parameters [{:name "status"
+                                             :in "query"
+                                             :schema {:enum ["available"
+                                                             "sold"]}}
+                                            {:name "limit" :in "query"}
+                                            {:name "X-Org" :in "header"}]
+                               :responses {}}
+                         :post {:operationId "addPet"
+                                :requestBody {:content {:application/json {:schema {:properties {:name {:type "string"}
+                                                                                                 :tier {:enum ["small"
+                                                                                                               "large"]}}}}}}
+                                :responses {}}}}})
+
+(local completion-ctx
+       {:config {:profiles {:exo {:schema "S"} :warp {:schema "W"}}
+                 :arazzo {:flows {:file "F"}}}
+        :load-schema (fn [_] completion-schema)
+        :load-doc (fn [_]
+                    {:workflows [{:workflowId "createPet"
+                                  :inputs {:properties {:zone {:enum ["z1"
+                                                                      "z2"]}
+                                                        :name {}}}}
+                                 {:workflowId "deletePet"}]})})
+
+(fn complete [line]
+  (cli.complete-line line completion-ctx))
+
+(describe "cli.complete-line"
+          (fn []
+            (it "completes subcommands"
+                (fn []
+                  (assert.are.same ["auth" "az" "completion" "op" "profile"]
+                                   (complete ""))))
+            (it "filters by the current word"
+                (fn []
+                  (assert.are.same ["auth" "az"] (complete "a"))
+                  (assert.are.same ["az"] (complete "az"))))
+            (it "completes profiles after op, auth and profile show"
+                (fn []
+                  (assert.are.same ["exo" "warp"] (complete "op "))
+                  (assert.are.same ["exo"] (complete "auth e"))
+                  (assert.are.same ["exo" "warp"] (complete "profile show "))))
+            (it "completes operation names"
+                (fn []
+                  (assert.are.same ["add-pet" "list-pets"] (complete "op exo "))))
+            (it "completes declared query params with the prefix as typed"
+                (fn []
+                  (assert.are.same ["--q.limit=" "--q.status="]
+                                   (complete "op exo list-pets --q."))
+                  (assert.are.same ["--query.status="]
+                                   (complete "op exo list-pets --query.st"))))
+            (it "completes enum values"
+                (fn []
+                  (assert.are.same ["--q.status=available" "--q.status=sold"]
+                                   (complete "op exo list-pets --q.status="))
+                  (assert.are.same ["--b.tier=large"]
+                                   (complete "op exo add-pet --b.tier=l"))))
+            (it "completes headers and body properties"
+                (fn []
+                  (assert.are.same ["--h.X-Org="]
+                                   (complete "op exo list-pets --h."))
+                  (assert.are.same ["--b.name=" "--b.tier="]
+                                   (complete "op exo add-pet --b."))))
+            (it "completes server variables and their values"
+                (fn []
+                  (assert.are.same ["--server.zone="]
+                                   (complete "op exo --server."))
+                  (assert.are.same ["--server.zone=a" "--server.zone=b"]
+                                   (complete "op exo list-pets --server.zone="))))
+            (it "completes flags"
+                (fn []
+                  (assert.are.same ["--retry-max-wait="
+                                    "--retry-unsafe"
+                                    "--retry="]
+                                   (complete "op exo list-pets --retr"))))
+            (it "completes arazzo contexts, workflows and inputs"
+                (fn []
+                  (assert.are.same ["flows"] (complete "az "))
+                  (assert.are.same ["createPet" "deletePet"]
+                                   (complete "az flows "))
+                  (assert.are.same ["--i.name=" "--i.zone="]
+                                   (complete "az flows createPet --i."))
+                  (assert.are.same ["--i.zone=z1" "--i.zone=z2"]
+                                   (complete "az flows createPet --i.zone="))))
+            (it "completes shells"
+                (fn []
+                  (assert.are.same ["bash" "fish" "zsh"]
+                                   (complete "completion "))))
+            (it "returns nothing rather than failing when a schema cannot load"
+                (fn []
+                  (assert.are.same []
+                                   (cli.complete-line "op exo "
+                                                      {:config completion-ctx.config
+                                                       :load-schema #(error "offline")}))))))

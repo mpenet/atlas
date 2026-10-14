@@ -59,6 +59,7 @@ Returns a table where each key is a kebab-case `operationId` (`getPetById` → `
 | Key | Type | Description |
 |-----|------|-------------|
 | `:base-url` | string | Override `servers[1].url` from the schema |
+| `:server-index` | number | Which of `servers` to use, 1-based (default 1) |
 | `:server-vars` | table | Values for `servers[1].variables`, e.g. `{:zone "de-fra-1"}`; unknown names and values outside a variable's `enum` raise an error |
 | `:headers` | table | Default headers sent with every request |
 | `:timeout` | number | Default timeout in seconds |
@@ -183,6 +184,17 @@ Multipart file parts are tables with `:filename`, `:content` and an optional `:c
 
 All `$ref` pointers in the schema are resolved recursively before the client is built. Circular references are detected and replaced with an empty table. This means parameters, request bodies, and response schemas that use `$ref` work transparently — you do not need to pre-resolve the schema yourself.
 
+## `atlas.servers`
+
+```fennel
+(atlas.servers schema)
+;; => [{:url "https://api-{zone}.exoscale.com/v2"
+;;      :description nil
+;;      :variables {:zone {:default "ch-gva-2" :enum ["ch-gva-2" "de-fra-1" …]}}}]
+```
+
+Lists a parsed schema's servers and their variables, e.g. to offer a choice before building a client with `:server-index` and `:server-vars`.
+
 ## `atlas.load-schema`
 
 ```fennel
@@ -239,6 +251,16 @@ Both are opt-in `http-fn` wrappers, composable with your own:
 ```
 
 `retry.wrap` options: `:attempts` (extra tries), `:unsafe` (also retry non-GET/HEAD/OPTIONS), `:max-wait` (cap per wait, seconds). A paginated response has `:pages`, and `:next-page-status` when a later page failed.
+
+## Validation
+
+`atlas.validate.check` returns a list of `"path: problem"` strings for a decoded value against a JSON Schema (the subset OpenAPI bodies use; `pattern` and `format` are not checked). Combined with an operation's `:body-schema`:
+
+```fennel
+(local validate (require :atlas.validate))
+(validate.check client.create-instance.body-schema body :body)
+;; => ["body.instance-type: required" "body.disk-size: expected integer, got string"]
+```
 
 ## Operation metadata
 

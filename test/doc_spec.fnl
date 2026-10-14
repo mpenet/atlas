@@ -95,3 +95,48 @@
                         (assert.is_truthy (result:find "(get-owner-pet ownerId petId)"
                                                        1 true))
                         (assert.is_truthy (result:find "the pet" 1 true))))))))
+
+(local {: build-workflow} (require :atlas.doc))
+
+(local workflow
+       {:workflowId "createAndWait"
+        :summary "Create a resource and wait until ready"
+        :description "Polls until the operation finishes."
+        :steps [{:stepId "create" :operationId "createResource"}
+                {:stepId "poll"
+                 :operationPath "{$sourceDescriptions.api.url}#/paths/~1ops~1{id}/get"}
+                {:stepId "notify" :workflowId "sendNotice"}]})
+
+(local inputs {:type "object"
+               :required ["id" "name"]
+               :properties {:id {:type "string" :description "resource id"}
+                            :name {:type "string"}
+                            :size {:type "integer" :default 0}
+                            :dry {:type "boolean"
+                                  :enum [true false]
+                                  :default false}}})
+
+(describe "doc.build-workflow"
+          (fn []
+            (let [text (build-workflow workflow inputs ["id"])]
+              (it "starts with id and summary"
+                  (fn []
+                    (assert.is_truthy (text:find "^createAndWait\n\nCreate a resource and wait until ready\nPolls until the operation finishes%.\n"))))
+              (it "shows usage with positional inputs"
+                  (fn []
+                    (assert.is_truthy (text:find "Usage: atlas az <name-or-file> createAndWait <id> [-i KEY=VAL ...]"
+                                                 1 true))))
+              (it "lists inputs sorted, required first, with details"
+                  (fn []
+                    (assert.is_truthy (text:find "Inputs:\n  id               string [required] — resource id\n  name             string [required]\n  dry              boolean [true|false] (default: false)\n  size             integer (default: 0)\n"
+                                                 1 true))))
+              (it "lists steps with what they call"
+                  (fn []
+                    (assert.is_truthy (text:find "Steps:\n  1. create   createResource\n  2. poll     GET /ops/{id}\n  3. notify   workflow sendNotice"
+                                                 1 true)))))
+            (it "says when a workflow takes no inputs"
+                (fn []
+                  (assert.is_truthy (: (build-workflow {:workflowId "w"
+                                                        :steps []}
+                                                       nil [])
+                                       :find "Inputs: none" 1 true))))))

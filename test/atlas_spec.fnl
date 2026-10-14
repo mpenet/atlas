@@ -194,6 +194,24 @@
                                                                        :petId 1}
                                                                 :query {:x "y"}}))
                     (assert.are.equal 0 (length calls)))))
+            (it "exposes declared parameters, path-level ones merged"
+                (fn []
+                  (let [c (atlas.client (schema {"/p/{id}" {:parameters [{:name "id"
+                                                                          :in "path"
+                                                                          :required true}]
+                                                            :get {:operationId "getP"
+                                                                  :parameters [{:name "q"
+                                                                                :in "query"
+                                                                                :required true
+                                                                                :schema {:type "string"}}]
+                                                                  :responses {}}}})
+                                        {:http-fn (mock-http)})]
+                    (assert.are.same [{:name "id" :in "path" :required true}
+                                      {:name "q"
+                                       :in "query"
+                                       :required true
+                                       :schema {:type "string"}}]
+                                     c.get-p.parameters))))
             (it "exposes the negotiated request content type"
                 (fn []
                   (let [c (atlas.client pets-schema {:http-fn (mock-http)})]
@@ -323,3 +341,51 @@
                                          :server-vars {:zone "de-fra-1"}})]
                     (c.get-x.invoke)
                     (assert.are.equal "https://b/x" (. calls 1 :url)))))))
+
+(local multi-server-schema
+       {:openapi "3.0.0"
+        :info {}
+        :servers [{:url "https://{env}root.internal.test/api"
+                   :variables {:env {:default "" :enum ["" "pp"]}}}
+                  {:url "https://{env}root.service.test/api"
+                   :description "service network"
+                   :variables {:env {:default "" :enum ["" "pp"]}}}
+                  {:url "/api"}]
+        :paths {"/x" {:get {:operationId "getX" :responses {}}}}})
+
+(describe "server choice"
+          (fn []
+            (it "uses the first server by default"
+                (fn []
+                  (let [(http calls) (mock-http)
+                        c (atlas.client multi-server-schema {:http-fn http})]
+                    (c.get-x.invoke)
+                    (assert.are.equal "https://root.internal.test/api/x"
+                                      (. calls 1 :url)))))
+            (it "selects a server by index, with its variables"
+                (fn []
+                  (let [(http calls) (mock-http)
+                        c (atlas.client multi-server-schema
+                                        {:http-fn http
+                                         :server-index 2
+                                         :server-vars {:env "pp"}})]
+                    (c.get-x.invoke)
+                    (assert.are.equal "https://pproot.service.test/api/x"
+                                      (. calls 1 :url)))))
+            (it "rejects an index out of range"
+                (fn []
+                  (let [(ok err) (pcall atlas.client multi-server-schema
+                                        {:http-fn (mock-http) :server-index 4})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "server index 4 out of range (schema has 3 servers)"
+                                         1 true)))))
+            (it "lists servers with their variables"
+                (fn []
+                  (let [servers (atlas.servers multi-server-schema)]
+                    (assert.are.equal 3 (length servers))
+                    (assert.are.equal "service network"
+                                      (. servers 2 :description))
+                    (assert.are.same {:default "" :enum ["" "pp"]}
+                                     (. servers 1 :variables :env))
+                    (assert.are.same {} (. servers 3 :variables)))))))

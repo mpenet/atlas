@@ -91,6 +91,7 @@ tables override earlier ones regardless of case."
                    :method method
                    :n-path n-path
                    :operation-id op-spec.operationId
+                   :parameters op-spec.parameters
                    :path path
                    :path-params param-names
                    :summary (op-summary op-spec)
@@ -124,18 +125,33 @@ Overrides must name declared variables and respect their enum."
       (util.replace-all url (.. "{" name "}")
                         (tostring (or (. overrides name) spec.default))))))
 
+(fn servers [schema]
+  "The schema's servers as [{:url :description :variables {name {:default :enum :description}}}]."
+  (icollect [_ s (ipairs (or schema.servers []))]
+    {:url s.url
+     :description s.description
+     :variables (collect [name v (pairs (or s.variables {}))]
+                  name
+                  {:default v.default :enum v.enum :description v.description})}))
+
 (fn client [schema ?opts]
   "Build an API client from an OpenAPI 3.x schema.
 
 schema — parsed schema table, local file path, or http(s):// URL
-?opts — {:base-url \"https://...\" :server-vars {:name value} :headers {} :http-fn custom-fn}
+?opts — {:base-url \"https://...\" :server-index n :server-vars {:name value} :headers {} :http-fn custom-fn}
 base-url defaults to schema.servers[1].url with :server-vars applied"
   (let [source-url (or (when (= (type schema) :string)
                          schema) (?. ?opts :source-url))
         schema (if (= (type schema) :string)
                    (load-schema schema)
                    schema)
-        server (and schema.servers (. schema.servers 1))
+        servers (or schema.servers [])
+        index (or (?. ?opts :server-index) 1)
+        server (when (and (not (?. ?opts :base-url)) (> (length servers) 0))
+                 (assert (. servers index)
+                         (string.format "server index %s out of range (schema has %d servers)"
+                                        (tostring index) (length servers)))
+                 (. servers index))
         server-url (when (and server (not (?. ?opts :base-url)))
                      (expand-server-url server (or (?. ?opts :server-vars) {})))
         base-url (or (?. ?opts :base-url)
@@ -158,4 +174,4 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
                 (make-operation client-opts schema path methods method op-spec)))))
     client))
 
-{:client client :load-schema load-schema}
+{:client client :load-schema load-schema :servers servers}

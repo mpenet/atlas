@@ -1,490 +1,49 @@
-;; ABOUTME: The atlas command line: argument parsing, profiles, op/az/auth/profile
-;; ABOUTME: subcommands, output formatting and shell completion.
+;; ABOUTME: The atlas command line: dispatches the op, az, auth, profile and
+;; ABOUTME: completion subcommands.
 (local atlas (require :atlas))
 (local arazzo (require :atlas.arazzo))
 (local auth (require :atlas.auth))
-(local cache (require :atlas.cache))
-(local coerce (require :atlas.coerce))
-(local retry (require :atlas.retry))
-(local paginate (require :atlas.paginate))
-(local util (require :atlas.util))
-(local yaml (require :atlas.yaml))
-(local http-mod (require :atlas.http))
-(local json (require :lunajson))
+(local help (require :atlas.doc))
 (local pretty-mod (require :atlas.pretty))
 (local socket (require :socket))
+(local {: decode-structured
+        : decode-body
+        : build-body
+        : op-request
+        : check-params
+        : check-body} (require :atlas.cli.request))
 
-(fn config-path []
-  (.. (util.config-dir) "/config.json"))
+(local {: parse-args} (require :atlas.cli.args))
+(local {: redact-header
+        : list-ops
+        : request-text
+        : curl-command
+        : render
+        : format-output
+        : exit-code
+        : print-resp
+        : strip-location
+        : die
+        : format-servers
+        : print-arazzo-result
+        : list-arazzo-workflows} (require :atlas.cli.output))
 
-(fn load-config []
-  (let [f (io.open (config-path) :r)]
-    (if f
-        (let [(ok cfg) (pcall json.decode (f:read :*a))]
-          (f:close)
-          (if ok cfg (error (.. "corrupt config: " (config-path)))))
-        {})))
+(local {: load-config
+        : resolve-profile
+        : merge-ssl
+        : retry-options
+        : paginate-options
+        : client-options
+        : load-schema-cached} (require :atlas.cli.settings))
 
-(fn read-file [path]
-  (let [f (assert (io.open path :rb))
-        content (f:read :*a)]
-    (f:close)
-    content))
+(local {: usage
+        : complete-line
+        : completion-fish
+        : completion-bash
+        : completion-zsh
+        : run-complete} (require :atlas.cli.complete))
 
-(fn read-body [s]
-  "Raw body text: inline, @path for a file, @- for stdin."
-  (if (= s "@-") (io.read :*a)
-      (s:match "^@(.+)") (read-file (s:match "^@(.+)"))
-      s))
-
-(fn decode-structured [raw]
-  (let [(ok parsed) (pcall yaml.decode raw)]
-    (assert (and ok (not= nil parsed))
-            (.. "invalid body (expected JSON or YAML): " (tostring parsed)))
-    parsed))
-
-(fn decode-body [raw content-type]
-  "Decode a raw body for an operation's content type: JSON, form and
-multipart operations take JSON or YAML; any other type is sent as-is."
-  (if (or (= nil content-type) (content-type:match "json")
-          (content-type:match "^application/x%-www%-form%-urlencoded")
-          (content-type:match "^multipart/form%-data"))
-      (decode-structured raw)
-      raw))
-
-(fn merge-profiles [base child]
-  (let [result (collect [k v (pairs base)] k v)]
-    (each [k v (pairs child)]
-      (if (and (= k :headers) (= (type v) :table)
-               (= (type (. result k)) :table))
-          (let [merged (collect [hk hv (pairs (. result k))]
-                         hk
-                         hv)]
-            (each [hk hv (pairs v)] (tset merged hk hv))
-            (tset result k merged))
-          (tset result k v)))
-    result))
-
-(fn resolve-profile [name profiles ?seen]
-  (let [seen (or ?seen {})
-        p (. profiles name)]
-    (assert p (.. "Profile not found: " name))
-    (assert (not (. seen name)) (.. "Circular extends: " name))
-    (tset seen name true)
-    (if p.extends
-        (let [base (resolve-profile p.extends profiles seen)
-              child (collect [k v (pairs p)] k v)]
-          (tset child :extends nil)
-          (merge-profiles base child))
-        p)))
-
-(fn redact-header [name value]
-  "Value safe to print for header name: credentials are masked."
-  (let [n (name:lower)]
-    (if (or (= n "authorization") (= n "proxy-authorization"))
-        (let [(scheme) (: (tostring value) :match "^(%S+)%s")]
-          (if scheme (.. scheme " <redacted>") "<redacted>"))
-        (util.secret-name? n)
-        "<redacted>"
-        value)))
-
-(fn wrap-log-request [http-fn]
-  (fn [req]
-    (io.stderr:write (.. "> " (or req.method "?") " " (or req.url "?") "\n"))
-    (when req.body
-      (io.stderr:write (.. "> body: "
-                           (if (= (type req.body) :table)
-                               (json.encode req.body)
-                               (tostring req.body))
-                           "\n")))
-    (when (and req.headers (next req.headers))
-      (each [k v (pairs req.headers)]
-        (io.stderr:write (.. "> " k ": " (tostring (redact-header k v)) "\n"))))
-    (http-fn req)))
-
-(fn set-nested [t keys v]
-  (var cur t)
-  (for [i 1 (- (length keys) 1)]
-    (let [k (. keys i)]
-      (when (not= (type (. cur k)) :table)
-        (tset cur k {}))
-      (set cur (. cur k))))
-  (tset cur (. keys (length keys)) v))
-
-(fn build-body [fields ?schema ?base]
-  "Apply [KEY.PATH VAL] fields onto ?base, coercing each value by ?schema."
-  (assert (or (= ?base nil) (= (type ?base) :table))
-          "--body.KEY=VAL fields require --body to be a JSON object")
-  (let [body (or ?base {})]
-    (each [_ [path v] (ipairs fields)]
-      (let [keys (icollect [k (path:gmatch "[^.]+")] k)]
-        (set-nested body keys
-                    (coerce.from-string v (coerce.schema-at ?schema keys)))))
-    body))
-
-(fn parse-args [args]
-  (let [r {:path-params []
-           :query {}
-           :headers {}
-           :ssl {}
-           :server-vars {}
-           :body-fields []
-           :input-fields []}
-        positional (fn [a]
-                     (if (not r.cmd) (tset r :cmd a)
-                         (not r.schema) (tset r :schema a)
-                         (not r.operation) (tset r :operation a)
-                         (table.insert r.path-params a)))
-        value-after (fn [flag i]
-                      (or (. args (+ i 1))
-                          (error (.. flag " requires a value") 0)))]
-    (var i 1)
-    (var options-done false)
-    (while (<= i (length args))
-      (let [a (. args i)]
-        (if options-done
-            (positional a)
-            (= a "--")
-            (set options-done true)
-            (a:match "^%-%-query%.(.-)=(.*)")
-            (let [(k v) (a:match "^%-%-query%.(.-)=(.*)")]
-              (tset r.query k v))
-            (a:match "^%-%-header%.(.-)=(.*)")
-            (let [(k v) (a:match "^%-%-header%.(.-)=(.*)")]
-              (tset r.headers k v))
-            (a:match "^%-%-server%.(.-)=(.+)")
-            (let [(k v) (a:match "^%-%-server%.(.-)=(.+)")]
-              (tset r.server-vars k v))
-            (a:match "^%-%-ssl%.(.-)=(.+)")
-            (let [(k v) (a:match "^%-%-ssl%.(.-)=(.+)")]
-              (tset r.ssl k v))
-            (a:match "^%-%-body%.(.-)=(.*)")
-            (let [(k v) (a:match "^%-%-body%.(.-)=(.*)")]
-              (table.insert r.body-fields [k v]))
-            (a:match "^%-%-body=(.*)")
-            (let [(v) (a:match "^%-%-body=(.*)")]
-              (tset r :body (read-body v)))
-            (= a :-d)
-            (do
-              (tset r :body (read-body (value-after a i)))
-              (set i (+ i 1)))
-            (a:match "^%-%-schema=(.+)")
-            (let [(v) (a:match "^%-%-schema=(.+)")]
-              (tset r :schema-url v))
-            (a:match "^%-%-retry=(%d+)$")
-            (tset r :retry (tonumber (a:match "^%-%-retry=(%d+)$")))
-            (a:match "^%-%-retry%-max%-wait=(%d+)$")
-            (tset r :retry-max-wait
-                  (tonumber (a:match "^%-%-retry%-max%-wait=(%d+)$")))
-            (a:match "^%-%-max%-pages=(%d+)$")
-            (tset r :max-pages (tonumber (a:match "^%-%-max%-pages=(%d+)$")))
-            (= a :--no-paginate)
-            (tset r :no-paginate true)
-            (= a :--retry-unsafe)
-            (tset r :retry-unsafe true)
-            (a:match "^%-%-timeout=(.+)")
-            (let [(v) (a:match "^%-%-timeout=(.+)")]
-              (tset r :timeout (tonumber v)))
-            (a:match "^%-%-base%-url=(.+)")
-            (let [(v) (a:match "^%-%-base%-url=(.+)")]
-              (tset r :base-url v))
-            (a:match "^%-%-output=(.+)")
-            (let [(v) (a:match "^%-%-output=(.+)")]
-              (tset r :output v))
-            (= a :--list)
-            (tset r :list true)
-            (= a :--help)
-            (tset r :help true)
-            (= a :--no-color)
-            (tset r :no-color true)
-            (= a :--reload)
-            (tset r :reload true)
-            (= a :--dry-run)
-            (tset r :dry-run true)
-            (= a :--curl)
-            (tset r :curl true)
-            (= a :--ignore-status)
-            (tset r :ignore-status true)
-            (= a :--logout)
-            (tset r :logout true)
-            (or (= a :-v) (= a :--verbose))
-            (tset r :verbose true)
-            (a:match "^%-%-cache%-ttl=(.+)")
-            (let [(v) (a:match "^%-%-cache%-ttl=(.+)")]
-              (tset r :cache-ttl (tonumber v)))
-            (a:match "^%-%-complete%-ops=(.+)")
-            (let [(v) (a:match "^%-%-complete%-ops=(.+)")]
-              (tset r :complete-ops v))
-            (a:match "^%-%-select=(.+)")
-            (let [(v) (a:match "^%-%-select=(.+)")]
-              (tset r :select v))
-            (a:match "^%-%-input%.(.-)=(.*)")
-            (let [(k v) (a:match "^%-%-input%.(.-)=(.*)")]
-              (table.insert r.input-fields [k v]))
-            (= a :-i)
-            (let [kv (value-after a i)
-                  (k v) (kv:match "^(.-)=(.*)")]
-              (assert k (.. "invalid -i argument (expected KEY=VAL): "
-                            (tostring kv)))
-              (table.insert r.input-fields [k v])
-              (set i (+ i 1)))
-            (a:match "^%-i(.-)=(.*)")
-            (let [(k v) (a:match "^%-i(.-)=(.*)")]
-              (table.insert r.input-fields [k v]))
-            (a:match "^%-%-inputs=(.*)")
-            (let [(v) (a:match "^%-%-inputs=(.*)")]
-              (tset r :arazzo-inputs-blob (decode-structured (read-body v))))
-            (a:match "^%-%-arazzo%-output=(.+)")
-            (let [(v) (a:match "^%-%-arazzo%-output=(.+)")]
-              (tset r :arazzo-output v))
-            (a:match "^%-%-max%-gotos=(%d+)$")
-            (tset r :max-gotos (tonumber (a:match "^%-%-max%-gotos=(%d+)$")))
-            (a:match "^%-%-profile=(.+)")
-            (let [(v) (a:match "^%-%-profile=(.+)")]
-              (tset r :profile v))
-            (not (a:match "^%-"))
-            (positional a)
-            (error (.. "unknown option: " a) 0)))
-      (set i (+ i 1)))
-    r))
-
-(fn file-part [value]
-  "Multipart value for a CLI field: @path reads a file part, @@ escapes @."
-  (if (and (= (type value) :string) (value:match "^@@"))
-      (value:sub 2)
-      (and (= (type value) :string) (value:match "^@(.+)"))
-      (let [path (value:sub 2)]
-        {:filename (path:match "[^/]+$") :content (read-file path)})
-      value))
-
-(fn op-request [op p]
-  "Build an op.invoke request from parsed CLI args."
-  (let [json-op? (and op.content-type (op.content-type:match "json"))
-        valid-json? #(pcall json.decode $)
-        given (if (not= (type p.body) :string) p.body
-                  ;; valid JSON goes out byte-for-byte: scalars, null and
-                  ;; number formatting survive
-                  (and json-op? (not (next p.body-fields)) (valid-json? p.body))
-                  p.body (let [v (decode-body p.body op.content-type)]
-                          (if (and json-op? (not= (type v) :table))
-                              (json.encode v)
-                              v)))
-        multipart? (and op.content-type
-                        (op.content-type:match "^multipart/form%-data"))
-        body (if (next p.body-fields)
-                 (let [b (build-body p.body-fields op.body-schema given)]
-                   (if multipart?
-                       (collect [k v (pairs b)] k (file-part v))
-                       b))
-                 given)]
-    {:path (collect [i name (ipairs op.path-params)] name (. p.path-params i))
-     :query (when (next p.query) p.query)
-     :headers (when (next p.headers) p.headers)
-     :body (when op.has-body? body)}))
-
-(fn op? [v]
-  (and (= (type v) :table) (not= nil (. v :has-body?))))
-
-(fn list-ops [c]
-  (let [ops []]
-    (each [k v (pairs c)]
-      (when (op? v)
-        (table.insert ops {:k k :summary (. v :summary)})))
-    (table.sort ops (fn [a b] (< a.k b.k)))
-    (let [width (accumulate [w 0 _ op (ipairs ops)]
-                  (math.max w (length op.k)))]
-      (each [_ op (ipairs ops)]
-        (print (if op.summary
-                   (string.format (.. "%-" width "s  %s") op.k op.summary)
-                   op.k))))))
-
-(fn select-path [data path]
-  (var cur data)
-  (var i 1)
-  (let [n (length path)]
-    (while (and cur (<= i n))
-      (let [c (path:sub i i)]
-        (if (= c :.)
-            (set i (+ i 1))
-            (= c "[")
-            (let [(j-iter) (path:match "^%[%]()" i)]
-              (if j-iter
-                  (let [rest (path:sub j-iter)
-                        result []]
-                    (when (= (type cur) :table)
-                      (each [_ v (ipairs cur)]
-                        (table.insert result
-                                      (if (> (length rest) 0)
-                                          (select-path v rest)
-                                          v))))
-                    (set cur result)
-                    (set i (+ n 1)))
-                  (let [(idx j) (path:match "^%[(%d+)%]()" i)]
-                    (if idx
-                        (do
-                          (set cur (. cur (+ 1 (tonumber idx))))
-                          (set i j))
-                        (do
-                          (set cur nil)
-                          (set i (+ n 1)))))))
-            (= c "{")
-            (let [(fields-str j) (path:match "^{([^}]+)}()" i)]
-              (if fields-str
-                  (let [fields []
-                        rest (path:sub j)
-                        apply (fn [obj]
-                                (if (= (type obj) :table)
-                                    (let [out {}]
-                                      (each [_ f (ipairs fields)]
-                                        (tset out f (. obj f)))
-                                      (if (> (length rest) 0)
-                                          (select-path out rest)
-                                          out))
-                                    obj))]
-                    (each [f (fields-str:gmatch "[^,]+")]
-                      (table.insert fields (f:match "^%s*(.-)%s*$")))
-                    (if (= (type cur) :table)
-                        (let [is-arr (= (type (. cur 1)) :table)]
-                          (if is-arr
-                              (let [result []]
-                                (each [_ v (ipairs cur)]
-                                  (table.insert result (apply v)))
-                                (set cur result))
-                              (set cur (apply cur))))
-                        (set cur nil))
-                    (set i (+ n 1)))
-                  (do
-                    (set cur nil)
-                    (set i (+ n 1)))))
-            (let [(key j) (path:match "^([^%.%[{]+)()" i)]
-              (if key
-                  (do
-                    (set cur (. cur key))
-                    (set i j))
-                  (do
-                    (set cur nil)
-                    (set i (+ n 1)))))))))
-  cur)
-
-(fn sorted-headers [headers]
-  (let [names (icollect [k (pairs (or headers {}))]
-                k)]
-    (table.sort names)
-    (icollect [_ k (ipairs names)]
-      [k (tostring (. headers k))])))
-
-(fn request-text [req]
-  "Human-readable request, credentials redacted."
-  (let [(url payload headers) (http-mod.encode-request req)
-        lines [(.. req.method " " (util.redact-url url))]]
-    (each [_ [k v] (ipairs (sorted-headers headers))]
-      (table.insert lines (.. k ": " (redact-header k v))))
-    (when payload
-      (table.insert lines "")
-      (table.insert lines payload))
-    (table.concat lines "\n")))
-
-(fn curl-command [req]
-  "Runnable curl command reproducing the request."
-  (let [(url payload headers) (http-mod.encode-request req)
-        parts ["curl" "-X" req.method (util.shell-quote url)]]
-    (assert (not (and payload (payload:find "\0" 1 true)))
-            "--curl cannot inline a binary body; use --dry-run to inspect it")
-    (each [_ [k v] (ipairs (sorted-headers headers))]
-      (table.insert parts "-H")
-      (table.insert parts (util.shell-quote (.. k ": " v))))
-    (when payload
-      (table.insert parts "--data-raw")
-      (table.insert parts (util.shell-quote payload)))
-    (table.concat parts " ")))
-
-(fn printing-transport [render]
-  "Transport that prints each request instead of sending it."
-  (fn [req]
-    (print (render req))
-    {:status 0 :headers {} :dry-run true}))
-
-(fn render [v fmt use-color]
-  "Render a decoded value as yaml or (default) json."
-  (if (= fmt :yaml)
-      (let [s (pretty-mod.yaml v 0 use-color)]
-        (if (s:match "^\n") (s:sub 2) s))
-      (pretty-mod.pretty v 0 use-color)))
-
-(fn header-lines [headers]
-  (let [names (icollect [k (pairs (or headers {}))]
-                k)]
-    (table.sort names)
-    (table.concat (icollect [_ k (ipairs names)]
-                    (.. k ": " (tostring (. headers k))))
-                  "\n")))
-
-(fn format-output [resp output use-color ?select]
-  "Text to print for a successful response, or nil when there is nothing to show."
-  (let [body (if (and ?select resp.body) (select-path resp.body ?select)
-                 resp.body)]
-    (match (or output :json)
-      :status (tostring resp.status)
-      :headers (header-lines resp.headers)
-      :raw (if ?select
-               (when (not= nil body)
-                 (if (= (type body) :table) (render body :json false)
-                     (tostring body)))
-               (when (and resp.raw (> (length resp.raw) 0))
-                 resp.raw))
-      fmt (when (not= nil body) (render body fmt use-color)))))
-
-(fn exit-code [status ignore-status]
-  "Process exit code for an HTTP status: 4 for 4xx, 5 for 5xx, else 0."
-  (if (or ignore-status (< status 400)) 0
-      (< status 500) 4
-      5))
-
-(fn print-http-resp [resp
-                     output
-                     no-color
-                     verbose
-                     ?select
-                     ?elapsed
-                     ?ignore-status]
-  (let [error? (and resp.status (>= resp.status 400) (not ?ignore-status))
-        use-color (not no-color)
-        timing (if ?elapsed (string.format "  %.3fs" ?elapsed) "")]
-    (when resp.next-page-status
-      (io.stderr:write (string.format "warning: stopped after %d page(s): next page returned HTTP %s\n"
-                                      resp.pages resp.next-page-status)))
-    (when (or verbose error?)
-      (io.stderr:write (.. "HTTP " resp.status timing "\n"))
-      (when verbose
-        (io.stderr:write (.. (header-lines resp.headers) "\n\n"))))
-    (if error?
-        (do
-          (when (not= nil resp.body)
-            (io.stderr:write (.. (render resp.body :json use-color) "\n")))
-          (exit-code resp.status false))
-        (let [text (format-output resp output use-color ?select)]
-          (if text
-              (print text)
-              (when (not verbose)
-                (io.stderr:write (.. "HTTP " resp.status "\n"))))
-          0))))
-
-(fn print-resp [resp output no-color verbose ?select ?elapsed ?ignore-status]
-  "Print a response; returns the process exit code."
-  (if resp.dry-run 0
-      (print-http-resp resp output no-color verbose ?select ?elapsed
-                       ?ignore-status)))
-
-(fn strip-location [msg]
-  "Remove Lua error location prefixes (file.lua:N: or [string \"chunk\"]:N:)."
-  (let [(s) (: (tostring msg) :gsub "[^%s:]+%.lua:%d+: " "")
-        (s) (s:gsub "%[string \"[^\"]*\"%]:%d+: " "")]
-    s))
-
-(fn die [msg]
-  (io.stderr:write (.. (strip-location (tostring msg)) "\n"))
-  (os.exit 1))
-
+;; ---- profile subcommands ----
 ;; ---- profile subcommands ----
 
 (fn profile-list [config]
@@ -507,242 +66,6 @@ multipart operations take JSON or YAML; any other type is sent as-is."
     :show (profile-show config name)
     _ (die (.. "Unknown profile subcommand: " (tostring subcmd)
                "\nUsage: atlas profile <list|show> [name]"))))
-
-(fn complete-ops [schema-or-profile]
-  (let [config (load-config)
-        profiles (or (?. config :profiles) {})
-        profile (when (. profiles schema-or-profile)
-                  (resolve-profile schema-or-profile profiles {}))
-        schema (or (?. profile :schema) schema-or-profile)
-        opts {:headers (or (?. profile :headers) {})}
-        (ok c) (pcall atlas.client schema opts)]
-    (when ok
-      (each [k v (pairs c)]
-        (when (op? v) (print k))))))
-
-(fn completion-fish []
-  (print "# atlas fish completion — source this or put in ~/.config/fish/completions/atlas.fish")
-  (print "")
-  (print "complete -c atlas -f")
-  (print "")
-  (print "# count non-flag positional args before cursor")
-  (print "function __atlas_num_args")
-  (print "    set -l n 0")
-  (print "    for t in (commandline -opc)[2..]")
-  (print "        string match -qr '^-' -- $t; or set n (math $n + 1)")
-  (print "    end")
-  (print "    echo $n")
-  (print "end")
-  (print "")
-  (print "# ── first positional: subcommand ─────────────────────────────────────────────")
-  (print "complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a op         -d 'Run an API operation'")
-  (print "complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a az         -d 'Run an Arazzo workflow'")
-  (print "complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a profile    -d 'Manage profiles'")
-  (print "complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a auth       -d 'Authenticate a profile'")
-  (print "complete -c atlas -n 'test (__atlas_num_args) -eq 0' -a completion -d 'Print shell completion script'")
-  (print "")
-  (print "# ── op <profile>: second positional ──────────────────────────────────────────")
-  (print "complete -c atlas -n '__fish_seen_subcommand_from op; and test (__atlas_num_args) -eq 1' -a '(atlas profile list 2>/dev/null | cut -f1)' -d Profile")
-  (print "")
-  (print "# ── op <profile> <operation>: third positional ───────────────────────────────")
-  (print "complete -c atlas -n '__fish_seen_subcommand_from op; and test (__atlas_num_args) -eq 2' -a '(atlas op --complete-ops=(commandline -opc)[3] 2>/dev/null)'")
-  (print "")
-  (print "# ── profile subcommands ──────────────────────────────────────────────────────")
-  (print "complete -c atlas -n '__fish_seen_subcommand_from profile; and test (__atlas_num_args) -eq 1' -a list -d 'List profiles'")
-  (print "complete -c atlas -n '__fish_seen_subcommand_from profile; and test (__atlas_num_args) -eq 1' -a show -d 'Show resolved profile'")
-  (print "complete -c atlas -n '__fish_seen_subcommand_from profile; and __fish_seen_subcommand_from show' -a '(atlas profile list 2>/dev/null | cut -f1)'")
-  (print "")
-  (print "# ── auth <profile> ───────────────────────────────────────────────────────────")
-  (print "complete -c atlas -n '__fish_seen_subcommand_from auth; and test (__atlas_num_args) -eq 1' -a '(atlas profile list 2>/dev/null | cut -f1)'")
-  (print "")
-  (print "# ── completion <shell> ───────────────────────────────────────────────────────")
-  (print "complete -c atlas -n '__fish_seen_subcommand_from completion; and test (__atlas_num_args) -eq 1' -a 'fish bash zsh'")
-  (print "")
-  (print "# ── flags ────────────────────────────────────────────────────────────────────")
-  (print "complete -c atlas -l list      -d 'List all operations'")
-  (print "complete -c atlas -l help      -d 'Show operation documentation'")
-  (print "complete -c atlas -l no-color  -d 'Disable colored output'")
-  (print "complete -c atlas -s v -l verbose -d 'Show status and response headers'")
-  (print "complete -c atlas -l reload    -d 'Re-fetch and re-cache the schema'")
-  (print "complete -c atlas -l output    -r -d 'Output format' -a 'json yaml raw status headers'")
-  (print "complete -c atlas -l select    -r -d 'Select nested value (.items[0].name)'")
-  (print "complete -c atlas -l timeout   -r -d 'Timeout in seconds'")
-  (print "complete -c atlas -l cache-ttl -r -d 'Schema cache TTL in seconds'")
-  (print "complete -c atlas -l base-url  -r -d 'Override base URL'")
-  (print "complete -c atlas -l body      -r -d 'Request body (JSON, @file, @-)'")
-  (print "complete -c atlas -s d         -r -d 'Request body (JSON, @file, @-)'")
-  (print "complete -c atlas -l logout    -d 'Clear cached token (for auth subcommand)'"))
-
-(fn completion-bash []
-  (print "# atlas bash completion — add to ~/.bashrc: source <(atlas completion bash)")
-  (print "_atlas_complete() {")
-  (print "  local cur=\"${COMP_WORDS[COMP_CWORD]}\"")
-  (print "  local cmd=\"${COMP_WORDS[1]}\"")
-  (print "  local second=\"${COMP_WORDS[2]}\"")
-  (print "  if [ $COMP_CWORD -eq 1 ]; then")
-  (print "    COMPREPLY=($(compgen -W 'op az profile auth completion' -- \"$cur\"))")
-  (print "  elif [ $COMP_CWORD -eq 2 ]; then")
-  (print "    case \"$cmd\" in")
-  (print "      op)         COMPREPLY=($(compgen -W \"$(atlas profile list 2>/dev/null | cut -f1)\" -- \"$cur\")) ;;")
-  (print "      profile)    COMPREPLY=($(compgen -W 'list show' -- \"$cur\")) ;;")
-  (print "      auth)       COMPREPLY=($(compgen -W \"$(atlas profile list 2>/dev/null | cut -f1)\" -- \"$cur\")) ;;")
-  (print "      completion) COMPREPLY=($(compgen -W 'fish bash zsh' -- \"$cur\")) ;;")
-  (print "    esac")
-  (print "  elif [ $COMP_CWORD -eq 3 ]; then")
-  (print "    case \"$cmd\" in")
-  (print "      op)      COMPREPLY=($(compgen -W \"$(atlas op --complete-ops=$second 2>/dev/null)\" -- \"$cur\")) ;;")
-  (print "      profile) if [ \"$second\" = 'show' ]; then")
-  (print "                 COMPREPLY=($(compgen -W \"$(atlas profile list 2>/dev/null | cut -f1)\" -- \"$cur\"))")
-  (print "               fi ;;")
-  (print "    esac")
-  (print "  fi")
-  (print "}")
-  (print "complete -F _atlas_complete atlas"))
-
-(fn completion-zsh []
-  (print "# atlas zsh completion — add to fpath or source directly")
-  (print "#compdef atlas")
-  (print "_atlas() {")
-  (print "  local state cmd=${words[2]} second=${words[3]}")
-  (print "  _arguments '1:command:->cmd' '2:arg:->second' '3:arg:->third'")
-  (print "  case $state in")
-  (print "    cmd)")
-  (print "      compadd op az profile auth completion ;;")
-  (print "    second)")
-  (print "      case $cmd in")
-  (print "        op)         compadd $(atlas profile list 2>/dev/null | cut -f1) ;;")
-  (print "        profile)    compadd list show ;;")
-  (print "        auth)       compadd $(atlas profile list 2>/dev/null | cut -f1) ;;")
-  (print "        completion) compadd fish bash zsh ;;")
-  (print "      esac ;;")
-  (print "    third)")
-  (print "      case $cmd in")
-  (print "        op) compadd $(atlas op --complete-ops=$second 2>/dev/null) ;;")
-  (print "        profile) if [ \"$second\" = 'show' ]; then")
-  (print "                   compadd $(atlas profile list 2>/dev/null | cut -f1)")
-  (print "                 fi ;;")
-  (print "      esac ;;")
-  (print "  esac")
-  (print "}")
-  (print "_atlas"))
-
-(fn usage []
-  (print "Usage: atlas <command> [args...] [options]")
-  (print "")
-  (print "Commands:")
-  (print "  op  <profile-or-schema> [operation] [path-params...]  Run an API operation")
-  (print "  az  <name-or-file> [workflow-id] [path-params...]     Run an Arazzo workflow")
-  (print "  profile <list|show> [name]                            Manage profiles")
-  (print "  auth    <profile> [--logout]                          Authenticate a profile")
-  (print "  completion <fish|bash|zsh>                            Print shell completion")
-  (print "")
-  (print "Options (op):")
-  (print "  --list                List all operations")
-  (print "  --help                Show operation documentation")
-  (print "  --body=JSON           Request body (inline JSON, @file, @-)")
-  (print "  -d JSON               Alias for --body")
-  (print "  --body.KEY=VAL        Build request body from individual fields")
-  (print "  --query.KEY=VAL       Query parameter")
-  (print "  --header.KEY=VAL      Per-request header")
-  (print "  --timeout=N           Timeout in seconds")
-  (print "  --max-pages=N         Max pages to follow via Link rel=next (default: 25)")
-  (print "  --no-paginate         Return only the first page")
-  (print "  --retry=N             Retries for 408/429/5xx and network errors (default: 2)")
-  (print "  --retry-unsafe        Also retry POST/PUT/PATCH/DELETE")
-  (print "  --retry-max-wait=N    Max seconds to wait between retries (default: 300)")
-  (print "  --base-url=URL        Override base URL")
-  (print "  --server.NAME=VAL     Set a server URL variable (e.g. --server.zone=de-fra-1)")
-  (print "  --output=json|yaml|raw|status|headers  Output format (default: json)")
-  (print "  --select=PATH         Select nested value (e.g. .items[0].name, .items[].{id,name})")
-  (print "  --no-color            Disable colored output")
-  (print "  -v, --verbose         Show status and response headers")
-  (print "  --reload              Re-fetch and re-cache the schema")
-  (print "  --ignore-status       Treat HTTP error responses as output; exit 0")
-  (print "  --dry-run             Print the request instead of sending it")
-  (print "  --curl                Print an equivalent curl command instead of sending")
-  (print "  --cache-ttl=N         Schema cache TTL in seconds (default: 3600)")
-  (print "")
-  (print "Options (az):")
-  (print "  -i KEY=VAL            Workflow input (short form)")
-  (print "  --input.KEY=VAL       Workflow input (long form)")
-  (print "  --inputs=JSON         All inputs as a JSON object (or @file)")
-  (print "  --arazzo-output=MODE  final (default), steps, progress, full")
-  (print "  --max-gotos=N         Max visits per goto target before aborting (default: 50)")
-  (print "")
-  (print "Config: ~/.config/atlas/config.json"))
-
-(fn tls->ssl [tls]
-  (when tls
-    (let [ssl {}]
-      (when tls.cert (tset ssl :certificate tls.cert))
-      (when tls.key (tset ssl :key tls.key))
-      (when tls.insecure (tset ssl :verify "none"))
-      (when (next ssl) ssl))))
-
-(fn merge-ssl [profile cli-ssl]
-  (let [ssl (collect [k v (pairs (or (?. profile :ssl) {}))]
-              k
-              v)
-        tls (tls->ssl (?. profile :tls))]
-    (when tls
-      (each [k v (pairs tls)] (tset ssl k v)))
-    (when cli-ssl
-      (each [k v (pairs cli-ssl)] (tset ssl k v)))
-    ssl))
-
-(fn retry-options [profile p config]
-  "Retry settings: CLI flags, then profile, then config, then defaults."
-  (let [pick #(let [v (. p $1)]
-                (if (not= nil v) v
-                    (not= nil (?. profile :retry $2)) (?. profile :retry $2)
-                    (not= nil (?. config :retry $2)) (?. config :retry $2)
-                    $3))]
-    {:attempts (pick :retry :attempts 2)
-     :unsafe (pick :retry-unsafe :unsafe false)
-     :max-wait (pick :retry-max-wait :max-wait 300)}))
-
-(fn paginate-options [profile p config]
-  "Pagination settings, or nil when disabled."
-  (when (not p.no-paginate)
-    {:max-pages (or p.max-pages (?. profile :max-pages) (?. config :max-pages)
-                    25)}))
-
-(fn client-options [profile-name profile p config]
-  "Client options shared by op and az: headers (profile + auth), ssl,
-timeout, base-url and the http-fn (request logging, request signing)."
-  (let [ssl (merge-ssl profile p.ssl)
-        verbose (or p.verbose (?. profile :verbose) (?. config :verbose))
-        auth-cfg (let [a (?. profile :auth)]
-                   (when (and a a.name (not= a.name "")) a))
-        headers (collect [k v (pairs (or (?. profile :headers) {}))]
-                  (k:lower)
-                  v)
-        transport (if p.curl (printing-transport curl-command)
-                      p.dry-run (printing-transport request-text)
-                      http-mod.request)
-        base-fn (if verbose (wrap-log-request transport) transport)]
-    (when auth-cfg
-      (let [(ok h) (pcall auth.get-headers profile-name auth-cfg ssl)]
-        (assert ok (.. "authentication failed: " (tostring h)))
-        (each [k v (pairs h)]
-          (tset headers (k:lower) v))))
-    {:headers headers
-     :ssl ssl
-     :timeout (or p.timeout (?. profile :timeout) (?. config :timeout))
-     :base-url (or p.base-url (?. profile :base-url))
-     :server-vars (let [vars (collect [k v (pairs (or (?. profile :server) {}))]
-                               k
-                               v)]
-                    (each [k v (pairs (or p.server-vars {}))]
-                      (tset vars k v))
-                    vars)
-     :http-fn (let [retrying (retry.wrap (or (when auth-cfg
-                                               (auth.wrap-http-fn auth-cfg
-                                                                  base-fn))
-                                             base-fn)
-                                         (retry-options profile p config))
-                    pagination (paginate-options profile p config)]
-                (if pagination (paginate.wrap retrying pagination) retrying))}))
 
 (fn run-auth [profile-name p config]
   (assert profile-name "Usage: atlas auth <profile> [--logout]")
@@ -774,74 +97,6 @@ timeout, base-url and the http-fn (request logging, request signing)."
                     (print (.. "Authenticated: " profile-name))
                     (die (tostring result))))))))))
 
-(fn executed-steps [result]
-  "Step ids in the order they first ran."
-  (let [seen {}]
-    (icollect [_ id (ipairs result.step-order)]
-      (when (not (. seen id))
-        (tset seen id true)
-        id))))
-
-(fn print-arazzo-result [result mode output no-color]
-  (let [render #(render $ output (not no-color))]
-    (match (or mode :final)
-      :final (when (next (or result.outputs {}))
-               (print (render result.outputs)))
-      :steps (do
-               (let [ordered (executed-steps result)]
-                 (each [_ step-id (ipairs ordered)]
-                   (let [step (. result.steps step-id)]
-                     (print (.. "--- " step-id " ---"))
-                     (when step.response
-                       (print (render step.response.body))))))
-               (when (next (or result.outputs {}))
-                 (print "--- outputs ---")
-                 (print (render result.outputs))))
-      :progress (when (next (or result.outputs {}))
-                  (print (render result.outputs)))
-      :full (do
-              (let [ordered (executed-steps result)]
-                (each [_ step-id (ipairs ordered)]
-                  (let [step (. result.steps step-id)]
-                    (print (.. "--- " step-id " request ---"))
-                    (when step.op-ref (print (.. "operation: " step.op-ref)))
-                    (when (and step.request step.request.body)
-                      (print (render step.request.body)))
-                    (print (.. "--- " step-id " response"
-                               (if (and step.response step.response.status)
-                                   (.. " HTTP " step.response.status)
-                                   "") " ---"))
-                    (when step.response (print (render step.response.body))))))
-              (when (next (or result.outputs {}))
-                (print "--- outputs ---")
-                (print (render result.outputs)))))))
-
-(fn list-arazzo-workflows [doc]
-  (let [wfs (or doc.workflows [])]
-    (when (= (length wfs) 0)
-      (print "(no workflows)"))
-    (let [width (accumulate [w 0 _ wf (ipairs wfs)]
-                  (math.max w (length wf.workflowId)))]
-      (each [_ wf (ipairs wfs)]
-        (print (if wf.summary
-                   (string.format (.. "%-" width "s  %s") wf.workflowId
-                                  wf.summary)
-                   wf.workflowId))))))
-
-(fn workflow-path-param-names [wf]
-  "Return ordered list of input names that are path params in any step."
-  (let [seen {}
-        names []]
-    (each [_ step (ipairs (or wf.steps []))]
-      (each [_ param (ipairs (or step.parameters []))]
-        (when (= param.in :path)
-          (let [input-name (and (= (type param.value) :string)
-                                (param.value:match "^%$inputs%.(.+)$"))]
-            (when (and input-name (not (. seen input-name)))
-              (tset seen input-name true)
-              (table.insert names input-name))))))
-    names))
-
 (fn run-arazzo [p]
   ;; p.schema = name-or-file, p.operation = workflow-id, p.path-params = extra positionals
   (when (or p.dry-run p.curl)
@@ -872,9 +127,16 @@ timeout, base-url and the http-fn (request logging, request signing)."
       (assert ok (tostring doc))
       (if (not workflow-id)
           (list-arazzo-workflows doc)
+          p.help
+          (let [wf (accumulate [found nil _ w (ipairs (or doc.workflows []))]
+                     (if (= w.workflowId workflow-id) w found))]
+            (if wf
+                (print (help.build-workflow wf (arazzo.workflow-inputs doc wf)
+                                            (arazzo.positional-inputs wf)))
+                (die (.. "Unknown workflow: " workflow-id))))
           (let [wf (accumulate [found nil _ w (ipairs (or doc.workflows []))]
                      (if (= w.workflowId workflow-id) w found))
-                pp-names (if wf (workflow-path-param-names wf) [])
+                pp-names (if wf (arazzo.positional-inputs wf) [])
                 inputs (let [base (collect [k v (pairs (or (?. named :inputs)
                                                            {}))]
                                     k
@@ -890,7 +152,9 @@ timeout, base-url and the http-fn (request logging, request signing)."
                          (let [fields (icollect [_ f (ipairs p.input-fields)] f)]
                            (each [_ f (ipairs p.body-fields)]
                              (table.insert fields f))
-                           (build-body fields (?. wf :inputs) base)))
+                           (build-body fields
+                                       (when wf (arazzo.workflow-inputs doc wf))
+                                       base)))
                 mode (or p.arazzo-output (if p.verbose :progress :final))
                 no-color (or p.no-color (?. config :no-color))
                 output (or p.output (?. config :output))
@@ -940,14 +204,6 @@ timeout, base-url and the http-fn (request logging, request signing)."
                   (print-arazzo-result result mode output no-color)
                   (die (tostring result)))))))))
 
-(fn load-schema-cached [url ttl reload? ssl headers]
-  (let [cached (when (not reload?) (cache.get url ttl))]
-    (if cached
-        cached
-        (let [schema (atlas.load-schema url ssl headers)]
-          (cache.put url schema)
-          schema))))
-
 (fn run-op [p]
   (when (not p.schema)
     (let [config (load-config)
@@ -977,6 +233,12 @@ timeout, base-url and the http-fn (request logging, request signing)."
                    raw-schema)]
     (when (= (type schema) :table)
       (tset opts :source-url raw-schema))
+    (when p.servers
+      (let [loaded (if (= (type schema) :string) (atlas.load-schema schema)
+                       schema)]
+        (print (format-servers (atlas.servers loaded) (or opts.server-index 1)
+                               (or opts.server-vars {})))
+        (os.exit 0)))
     (let [(ok-c c) (pcall atlas.client schema opts)]
       (when (not ok-c)
         (die (.. "failed to build client: " (tostring c))))
@@ -992,22 +254,39 @@ timeout, base-url and the http-fn (request logging, request signing)."
           p.operation
           (let [op (. c p.operation)]
             (when (not op) (die (.. "Unknown operation: " p.operation)))
-            (let [t0 (socket.gettime)
-                  (ok-r resp) (pcall op.invoke (op-request op p))
-                  elapsed (- (socket.gettime) t0)]
-              (if ok-r
-                  (os.exit (print-resp resp output no-color verbose p.select
-                                       elapsed p.ignore-status))
-                  (die (.. "request failed: " (tostring resp))))))
+            (let [request (op-request op p)
+                  all-headers (collect [k v (pairs (or opts.headers {}))]
+                                k
+                                v)]
+              (each [k v (pairs (or request.headers {}))]
+                (tset all-headers k v))
+              (let [(param-errors warnings) (check-params op
+                                                          {:query request.query
+                                                           :headers all-headers})
+                    errors (icollect [_ e (ipairs param-errors)] e)]
+                (each [_ e (ipairs (check-body op request.body))]
+                  (table.insert errors e))
+                (each [_ w (ipairs warnings)]
+                  (io.stderr:write (.. "warning: " w "\n")))
+                (when (and (next errors) (not p.no-validate))
+                  (die (.. (table.concat errors "\n")
+                           "\n(use --no-validate to send anyway)"))))
+              (let [t0 (socket.gettime)
+                    (ok-r resp) (pcall op.invoke request)
+                    elapsed (- (socket.gettime) t0)]
+                (if ok-r
+                    (os.exit (print-resp resp output no-color verbose p.select
+                                         elapsed p.ignore-status))
+                    (die (.. "request failed: " (tostring resp)))))))
           (list-ops c)))))
 
 (fn run [args]
+  (when (= (. args 1) "__complete")
+    (run-complete args)
+    (os.exit 0))
   (let [p (parse-args args)]
     (when (not p.cmd)
       (usage)
-      (os.exit 0))
-    (when p.complete-ops
-      (complete-ops p.complete-ops)
       (os.exit 0))
     (match p.cmd
       :completion (match p.schema
@@ -1039,4 +318,10 @@ timeout, base-url and the http-fn (request logging, request signing)."
  : request-text
  : curl-command
  : decode-body
- : paginate-options}
+ : paginate-options
+ : format-servers
+ : check-params
+ : check-body
+ : complete-line}
+
+{: main}

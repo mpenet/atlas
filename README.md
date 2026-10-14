@@ -43,12 +43,12 @@ luarocks install atlas-oai
 # CLI
 atlas op https://petstore3.swagger.io/api/v3/openapi.json --list
 atlas op https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
-atlas op myapi find-pets-by-status --query.status=available --select=.pets[].{id,name}
+atlas op myapi find-pets-by-status --q.status=available --select=.pets[].{id,name}
 
 # Arazzo — multi-step workflow
 atlas az myapi create-and-wait \
-  --body.name=myresource \
-  --body.size=10 \
+  --b.name=myresource \
+  --b.size=10 \
   -v
 ```
 
