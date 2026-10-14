@@ -37,6 +37,10 @@ _ZLIB_LIBDIR    := $(shell pkg-config --variable=libdir zlib 2>/dev/null)
 
 # The binary links OpenSSL, libyaml and zlib statically, so it runs without
 # them installed; only system libraries stay dynamic (check-binary enforces it).
+# STATIC_LDFLAGS=-static links those too, for a fully static binary: right
+# with musl (the Linux release build), wrong with glibc, whose resolver
+# needs its shared libraries.
+STATIC_LDFLAGS ?=
 ifeq ($(UNAME_S),Darwin)
   SYSTEM_LDFLAGS = -framework CoreFoundation -framework Security -framework SystemConfiguration
   # zlib ships with macOS
@@ -173,7 +177,7 @@ $(NATIVE_BUILD)/libatlas_curl.a: c/atlas_curl.c $(NATIVE_STAMP)
 
 binary: build native-libs
 	LUA_PATH="./$(LUA_DIR)/?.lua;./$(LUA_DIR)/?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" \
-	CC_OPTS="$(CURL_PREFIX)/lib/libcurl.a $(OPENSSL_LDFLAGS) $(ZLIB_LDFLAGS) $(LIBYAML_LDFLAGS) $(SYSTEM_LDFLAGS)" \
+	CC_OPTS="$(CURL_PREFIX)/lib/libcurl.a $(OPENSSL_LDFLAGS) $(ZLIB_LDFLAGS) $(LIBYAML_LDFLAGS) $(SYSTEM_LDFLAGS) $(STATIC_LDFLAGS)" \
 	$(FENNEL) --compile-binary fnl/atlas-bin.fnl \
 	  bin/atlas-bin \
 	  $(LUA_LIB) \
@@ -214,6 +218,8 @@ check-binary:
 	@# and links nothing but system libraries
 ifeq ($(UNAME_S),Darwin)
 	@! otool -L bin/atlas-bin | tail -n +2 | grep -vE '^\s+(/usr/lib/|/System/Library/)' || (echo "non-system libraries linked above" && false)
+else ifneq ($(STATIC_LDFLAGS),)
+	@ldd bin/atlas-bin 2>&1 | grep -qiE 'not a (valid )?dynamic' || (ldd bin/atlas-bin; echo "expected a fully static binary" && false)
 else
 	@! ldd bin/atlas-bin | grep -vE 'linux-vdso|ld-linux|/lib(c|m|dl|pthread|rt)\.so' || (echo "non-system libraries linked above" && false)
 endif

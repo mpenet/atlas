@@ -239,7 +239,7 @@ make install
 make corpus
 ```
 
-`make build` and `make test` also compile the libcurl binding, which needs the libcurl headers (`curl-config` on `PATH`). `make binary` requires a C compiler, `fennel`, `lua`, `luarocks`, `openssl`, `libyaml`, `pkg-config`, `unzip` and `curl`; it downloads the libcurl sources (checked against a pinned checksum) and statically links Lua, luasocket, libcurl, lyaml, OpenSSL and libyaml — the resulting binary depends only on system libraries (glibc on Linux).
+`make build` and `make test` also compile the libcurl binding, which needs the libcurl headers (`curl-config` on `PATH`). `make binary` requires a C compiler, `fennel`, `lua`, `luarocks`, `openssl`, `libyaml`, `pkg-config`, `unzip` and `curl`; it downloads the libcurl sources (checked against a pinned checksum) and statically links Lua, luasocket, libcurl, lyaml, OpenSSL and libyaml — the resulting binary depends only on system libraries. `make binary STATIC_LDFLAGS=-static` links those too; the Linux release binaries are built that way against musl (see the `Dockerfile`), so they run on any distribution.
 
 ## Releasing
 

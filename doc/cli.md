@@ -32,7 +32,7 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 gh attestation verify atlas-macos-arm64 --repo mpenet/atlas
 ```
 
-The binary embeds Lua, luasocket, libcurl, libyaml and OpenSSL. The Linux binaries depend only on glibc. HTTPS needs the system's CA certificates (the `ca-certificates` package on minimal Linux images); see [TLS and proxies](#tls-and-proxies).
+The binary embeds Lua, luasocket, libcurl, libyaml and OpenSSL. The Linux binaries are fully static (built against musl), so they run on any distribution, old or new. HTTPS needs the system's CA certificates (the `ca-certificates` package on minimal Linux images); see [TLS and proxies](#tls-and-proxies).
 
 ### From source
 

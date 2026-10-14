@@ -49,7 +49,7 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - `--output` and `--arazzo-output` reject unknown values.
 - Building a client is linear in the size of the spec: Stripe's went from not finishing to 0.07 s, Kubernetes' from 1 s to 0.01 s.
 - The `ssl` options are `cafile`, `capath`, `certificate`, `key` and `verify`; other luasec options are no longer used.
-- The binaries link OpenSSL, libyaml, zlib and libcurl statically; the Linux binary no longer needs libssl or libyaml installed.
+- The binaries link OpenSSL, libyaml, zlib and libcurl statically. The Linux binaries are fully static, built against musl: they run on any distribution (the previous ones needed glibc 2.34 or later, libssl 3 and libyaml).
 - YAML is read with YAML 1.2 core schema semantics; mapping keys keep their source text.
 - `$ref` resolution handles JSON Pointer escapes, references into other files and URLs, and path items; an unresolved reference is an error.
 - Authentication happens only when a request is sent, never for `--help`, `--list`, `--servers` or `--dry-run`.
