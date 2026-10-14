@@ -478,3 +478,33 @@
                                                            {:type :regex
                                                             :context "$response.body#/msg"
                                                             :condition "world"}))))))))
+
+(describe "names with dots"
+          (fn []
+            (let [ctx {:inputs {:user {:name "Ann"} "a.b" 1}
+                       :steps {:s {:outputs {:pet {:name "Rex"} "x.y" 2}}}
+                       :workflows {:w {:outputs {:r {:id 3}}}}}]
+              (it "reach into a value with a JSON pointer"
+                  (fn []
+                    (assert.are.equal "Rex"
+                                      (expr.eval ctx
+                                                 "$steps.s.outputs.pet#/name"))
+                    (assert.are.equal "Ann"
+                                      (expr.eval ctx "$inputs.user#/name"))
+                    (assert.are.equal 3
+                                      (expr.eval ctx
+                                                 "$workflows.w.outputs.r#/id"))))
+              (it "name inputs and outputs whose names contain dots"
+                  (fn []
+                    (assert.are.equal 1 (expr.eval ctx "$inputs.a.b"))
+                    (assert.are.equal 2 (expr.eval ctx "$steps.s.outputs.x.y"))))
+              (it "point to the JSON pointer form instead of ignoring the rest"
+                  (fn []
+                    (assert.has.error #(expr.eval ctx
+                                                  "$steps.s.outputs.pet.name")
+                                      "$steps.s.outputs.pet.name: there is no output 'pet.name'; for a value inside 'pet' use $steps.s.outputs.pet#/name")
+                    (assert.has.error #(expr.eval ctx "$inputs.user.name")
+                                      "$inputs.user.name: there is no input 'user.name'; for a value inside 'user' use $inputs.user#/name")
+                    (assert.has.error #(expr.eval ctx
+                                                  "$workflows.w.outputs.r.id")
+                                      "$workflows.w.outputs.r.id: there is no output 'r.id'; for a value inside 'r' use $workflows.w.outputs.r#/id"))))))

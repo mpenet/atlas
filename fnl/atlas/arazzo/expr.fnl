@@ -22,6 +22,21 @@
   (let [ptr (expr:match "#(.+)$")]
     (if ptr (json-pointer value ptr) value)))
 
+(fn named [entries parts from kind expr]
+  "The entry of entries named by parts from index from on, rejoined with dots
+(names may contain dots), with expr's #/pointer applied. When no entry has
+that name but one is named by its first part, the expression most likely
+meant a JSON pointer into it: raise saying so."
+  (let [name (table.concat parts "." from)
+        value (?. entries name)]
+    (when (and (= nil value) (> (length parts) from)
+               (not= nil (?. entries (. parts from))))
+      (error (string.format "%s: there is no %s '%s'; for a value inside '%s' use $%s#/%s"
+                            expr kind name (. parts from)
+                            (table.concat parts "." 1 from)
+                            (table.concat parts "/" (+ from 1))) 0))
+    (with-pointer value expr)))
+
 (fn message-value [msg parts expr]
   "Resolve body or header access on a request/response; parts = [body|header name]."
   (match (. parts 1)
@@ -56,7 +71,7 @@
                 rest-from #(icollect [i p (ipairs parts)] (when (>= i $) p))]
             (match (. parts 1)
               :inputs
-              (with-pointer (?. ctx :inputs (. parts 2)) expr)
+              (named ctx.inputs parts 2 :input expr)
               :statusCode
               (?. ctx :response :status)
               :url
@@ -70,15 +85,14 @@
               :steps
               (let [step (?. ctx :steps (. parts 2))]
                 (match (. parts 3)
-                  :outputs (with-pointer (?. step :outputs (. parts 4)) expr)
+                  :outputs (named (?. step :outputs) parts 4 :output expr)
                   :response (message-value (?. step :response) (rest-from 4)
                                            expr)
                   :request (message-value (?. step :request) (rest-from 4) expr)))
               :workflows
               (match (. parts 3)
-                :outputs (with-pointer (?. ctx :workflows (. parts 2) :outputs
-                                           (. parts 4))
-                           expr))
+                :outputs (named (?. ctx :workflows (. parts 2) :outputs) parts
+                                4 :output expr))
               ;; a sentinel table so the caller can look up the client
               :sourceDescriptions
               {:__source (. parts 2) :__operationId (. parts 3)}

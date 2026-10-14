@@ -316,20 +316,28 @@ nil when a failure is left unhandled."
         success? (+ i 1)
         nil)))
 
-(fn run-workflow [doc workflow-id inputs clients ?opts]
+(fn with-input-defaults [doc wf inputs]
+  "inputs plus the default of each declared input that wasn't given."
+  (let [given (collect [k v (pairs (or inputs {}))]
+                k
+                v)
+        schema (when wf.inputs ((refs.resolver doc) wf.inputs))]
+    (each [name prop (pairs (or (?. schema :properties) {}))]
+      (when (and (= nil (. given name)) (not= nil (?. prop :default)))
+        (tset given name prop.default)))
+    given))
+
+(fn run-workflow [doc workflow-id given-inputs clients ?opts]
   (let [wf (or (find-workflow doc workflow-id)
                (error (.. "workflow not found: " workflow-id) 0))
         opts (enter-workflow workflow-id ?opts)
-        ctx {:inputs (or inputs {})
-             :request nil
-             :response nil
-             :steps {}
-             :workflows {}}
+        inputs (with-input-defaults doc wf given-inputs)
+        ctx {:inputs inputs :request nil :response nil :steps {} :workflows {}}
         run {: doc
              : wf
              : clients
              : ctx
-             :inputs (or inputs {})
+             : inputs
              :steps (or wf.steps [])
              :step-index (collect [i s (ipairs (or wf.steps []))]
                            s.stepId

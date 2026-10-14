@@ -39,6 +39,16 @@
                :arazzo {:flows {:file "test/fixtures/cli-flow.arazzo.json"
                                 :profile "yaml"}}})
 
+(var current-config config)
+
+(fn with-config [cfg f]
+  "Runs f with cfg as the CLI config."
+  (set current-config cfg)
+  (let [(ok result) (pcall f)]
+    (set current-config config)
+    (assert ok result)
+    result))
+
 (fn atlas-run [args ?routes]
   "Run the CLI in-process; returns {:code :out :err :requests}."
   (let [(transport requests) (routes-transport (or ?routes {}))
@@ -52,7 +62,7 @@
                                                   (tostring v))
                                                 "\t"))))
     (set io.stderr {:write (fn [_ s] (table.insert err s))})
-    (let [(ok code) (pcall cli.run args {: transport : config})]
+    (let [(ok code) (pcall cli.run args {: transport :config current-config})]
       (set _G.print real-print)
       (set io.stderr real-stderr)
       (assert ok code)
@@ -324,6 +334,12 @@
             (it "rejects unknown commands with exit 1"
                 (fn []
                   (assert.are.equal 1 (. (atlas-run ["frobnicate"]) :code))))
+            (it "lists the schema a profile inherits"
+                (fn []
+                  (let [r (with-config {:profiles {:base {:schema "s.json"}
+                                                   :child {:extends "base"}}}
+                            #(atlas-run ["profile" "list"]))]
+                    (assert.are.equal "base\ts.json\nchild\ts.json" r.out))))
             (it "shows a profile, or fails when it does not exist"
                 (fn []
                   (let [r (atlas-run ["profile" "show" "yaml"])]

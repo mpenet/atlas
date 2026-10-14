@@ -49,6 +49,9 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - A schema URL answering with an HTML page is reported as such instead of being read as a file path.
 - Empty JSON arrays came out as `{}`: printed that way, and re-sent that way, so `-d '{"tags":[]}'` sent `{"tags":{}}`. Arrays now stay arrays, empty or not, through decoding, printing, YAML, validation and encoding; validation also stopped treating an empty object as an array.
 - JSON request bodies are encoded exactly and the same way every time: integers above 2^53 (IDs) are no longer rounded, floats are written in their shortest exact form (`0.1`, not `0.10000000000000001`), and object keys are sorted, so `--dry-run` and `--curl` output is reproducible.
+- Arazzo: workflow inputs take the `default` their schema declares when not given (help already showed it).
+- Arazzo: `$steps.ID.outputs.pet.name` (and the same for `$inputs` and `$workflows`) silently meant `outputs.pet`; names may contain dots, so it now names the output `pet.name`, and when there is none but there is a `pet`, the error points to the JSON pointer form `$steps.ID.outputs.pet#/name`.
+- `atlas profile list` shows the schema a profile inherits through `extends`.
 - Colours are only used when stdout is a terminal, and never when `NO_COLOR` is set: piping `atlas` into `jq` or a file gave escape codes.
 - YAML documents could be misread or rejected at random ("control characters are not allowed") when the garbage collector freed the text while libyaml was still reading it.
 - An operationId defined twice (Cloudflare has one) no longer hides one of the two operations.

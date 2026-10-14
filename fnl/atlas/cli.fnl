@@ -73,7 +73,8 @@
     (if (= (next profiles) nil)
         (print "No profiles configured.")
         (each [_ name (ipairs (sorted-names profiles))]
-          (print (.. name "\t" (or (. profiles name :schema) "(no schema)")))))))
+          (print (.. name "\t"
+                     (or (?. (find-profile config name) :schema) "(no schema)")))))))
 
 (fn profile-show [config name]
   (let [p (find-profile config name)]

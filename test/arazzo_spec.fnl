@@ -685,6 +685,31 @@
                     (assert.are.equal 200
                                       (. result.steps :step1 :response :status)))))))
 
+(describe "workflow input defaults"
+          (fn []
+            (it "fill inputs that were not given"
+                (fn []
+                  (let [seen []
+                        clients {:api (make-client {:op (fn [req]
+                                                          (table.insert seen
+                                                                        req.query)
+                                                          (ok-resp {}))})}
+                        doc (doto (one-step-doc {:operationId "op"
+                                                 :parameters [{:name "status"
+                                                               :in "query"
+                                                               :value "$inputs.status"}
+                                                              {:name "limit"
+                                                               :in "query"
+                                                               :value "$inputs.limit"}]})
+                              (tset :workflows 1 :inputs
+                                    {:type "object"
+                                     :properties {:status {:type "string"
+                                                           :default "available"}
+                                                  :limit {:type "integer"
+                                                          :default 10}}}))]
+                    (arazzo.run-workflow doc "wf" {:limit 3} clients {})
+                    (assert.are.same [{:status "available" :limit 3}] seen))))))
+
 (describe "run-workflow parameters"
           (fn []
             (it "passes path params by name regardless of order"
