@@ -11,9 +11,12 @@
 
 (local http (require :atlas.http))
 
-(fn load-schema [path ?ssl ?headers]
-  "Load an OpenAPI schema (JSON or YAML) from a local file path or http(s):// URL."
-  (let [content (http.fetch-text path {:headers ?headers :ssl ?ssl})
+(fn load-schema [path ?opts]
+  "Load an OpenAPI schema (JSON or YAML) from a local file path or http(s):// URL.
+?opts — {:ssl luasec-options :headers {}} for fetching a URL"
+  (let [content (http.fetch-text path
+                                 {:headers (?. ?opts :headers)
+                                  :ssl (?. ?opts :ssl)})
         (ok parsed) (pcall yaml.decode content)]
     (assert ok (string.format "failed to parse schema from '%s': %s" path
                               (tostring parsed)))
@@ -35,25 +38,46 @@ tables override earlier ones regardless of case."
         (and d (not= d "")) d
         nil)))
 
-(fn make-operation [client-opts deref path path-item method op-spec]
+(fn positional-request [op args]
+  "The invoke request for a positional call: path params in template order,
+then the body when the operation has one, then an opts table."
+  (let [n-path (length op.path-params)
+        opts (or (. args (+ n-path (if op.has-body 2 1))) {})]
+    {:path (collect [i name (ipairs op.path-params)] name (. args i))
+     :body (when op.has-body (. args (+ n-path 1)))
+     :query opts.query
+     :headers opts.headers
+     :timeout opts.timeout}))
+
+(local operation-mt {:__call (fn [op ...]
+                               (op.invoke (positional-request op [...])))
+                     ;; the REPL docstring is rendered on first access only
+                     :__index (fn [op key]
+                                (when (= key :fnl/docstring)
+                                  (let [text (doc.build op.path op.method
+                                                        op.spec)]
+                                    (rawset op key text)
+                                    text)))})
+
+(fn operation-url [base-url path req]
+  ;; servers often end in / while paths start with one
+  (.. (pick-values 1 (base-url:gsub "/+$" ""))
+      (util.resolve-path path (or req.path {}))))
+
+(fn make-operation [client-opts deref name path path-item method op-spec]
   (let [op-spec (doto (deref op-spec)
                   (tset :parameters
                         (util.merge-parameters (deref path-item.parameters)
                                                (deref op-spec.parameters))))
-        param-names (util.extract-path-params path)
-        n-path (length param-names)
-        has-body? (not= nil op-spec.requestBody)
         content-type (negotiate.pick-content-type op-spec)
         negotiated {:accept (negotiate.pick-accept op-spec)
                     :content-type content-type}
-        base-url-for (fn [req]
-                       ;; servers often end in / while paths start with one
-                       (.. (pick-values 1 (client-opts.base-url:gsub "/+$" ""))
-                           (util.resolve-path path (or req.path {}))))
         url-for (fn [?req]
                   "Full request URL for {:path {name v} :query {}}."
                   (let [req (or ?req {})]
-                    (util.append-query (base-url-for req) (or req.query {}))))
+                    (util.append-query (operation-url client-opts.base-url path
+                                                      req)
+                                       (or req.query {}))))
         invoke (fn [?req]
                  "Call the operation with {:path {name v} :query {} :headers {} :body v :timeout n}."
                  (let [req (or ?req {})]
@@ -68,35 +92,32 @@ tables override earlier ones regardless of case."
                                          :ssl client-opts.ssl
                                          :timeout (or req.timeout
                                                       client-opts.timeout)
-                                         :url (base-url-for req)})))
-        call-positional (fn [...]
-                          (let [args [...]
-                                opts (or (. args (+ n-path (if has-body? 2 1)))
-                                         {})]
-                            (invoke {:path (collect [i name (ipairs param-names)]
-                                             name
-                                             (. args i))
-                                     :body (when has-body?
-                                             (. args (+ n-path 1)))
-                                     :query opts.query
-                                     :headers opts.headers
-                                     :timeout opts.timeout})))]
+                                         :url (operation-url client-opts.base-url
+                                                             path req)})))
+        param-names (util.extract-path-params path)]
     (setmetatable {:body-schema (?. op-spec :requestBody :content content-type
                                     :schema)
-                   :cli/help (doc.build-cli path method op-spec)
                    :content-type content-type
-                   :fnl/docstring (doc.build path method op-spec)
-                   :has-body? has-body?
-                   :invoke invoke
-                   :method method
-                   :n-path n-path
+                   :has-body (not= nil op-spec.requestBody)
+                   : invoke
+                   : method
+                   : name
                    :operation-id op-spec.operationId
                    :parameters op-spec.parameters
-                   :path path
+                   : path
                    :path-params param-names
+                   :spec op-spec
                    :summary (op-summary op-spec)
-                   :url-for url-for}
-                  {:__call (fn [_ ...] (call-positional ...))})))
+                   : url-for} operation-mt)))
+
+(local http-methods {:get true
+                     :put true
+                     :post true
+                     :delete true
+                     :options true
+                     :head true
+                     :patch true
+                     :trace true})
 
 (fn sorted [items]
   (doto (icollect [_ x (ipairs items)] x)
@@ -139,18 +160,17 @@ Overrides must name declared variables and respect their enum."
 
 schema — parsed schema table, local file path, or http(s):// URL
 ?opts — {:base-url \"https://...\" :server-index n :server-vars {:name value} :headers {} :http-fn custom-fn
-         :load-schema (fn [location ssl headers]) to fetch schema documents yourself}
+         :load-schema (fn [location {:ssl :headers}]) to fetch schema documents yourself}
 base-url defaults to schema.servers[1].url with :server-vars applied"
   (let [source-url (or (when (= (type schema) :string)
                          schema) (?. ?opts :source-url))
-        ssl (?. ?opts :ssl)
-        headers (?. ?opts :headers)
+        load-opts {:ssl (?. ?opts :ssl) :headers (?. ?opts :headers)}
         load (or (?. ?opts :load-schema) load-schema)
         schema (if (= (type schema) :string)
-                   (load schema ssl headers)
+                   (load schema load-opts)
                    schema)
         deref (refs.resolver schema
-                             {:base source-url :load #(load $ ssl headers)})
+                             {:base source-url :load #(load $ load-opts)})
         servers (or schema.servers [])
         index (or (?. ?opts :server-index) 1)
         server (when (and (not (?. ?opts :base-url)) (> (length servers) 0))
@@ -176,10 +196,13 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
     (each [path item (pairs (or schema.paths {}))]
       (let [path-item (if (. item "$ref") (deref item) item)]
         (each [method op-spec (pairs path-item)]
-          (when (and (= (type op-spec) :table) op-spec.operationId)
-            (tset client (util.camel->kebab op-spec.operationId)
-                  (make-operation client-opts deref path path-item method
-                                  op-spec))))))
+          (when (and (. http-methods method) (= (type op-spec) :table))
+            (let [name (util.operation-name method path op-spec)]
+              ;; a derived name never shadows an operationId
+              (when (or op-spec.operationId (= nil (. client name)))
+                (tset client name
+                      (make-operation client-opts deref name path path-item
+                                      method op-spec))))))))
     client))
 
 {:client client :load-schema load-schema :servers servers}

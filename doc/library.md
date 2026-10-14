@@ -52,7 +52,7 @@ Builds a client from a schema. `schema` is one of (YAML is read as YAML 1.2, so 
 - A local file path — read and parsed
 - An already-parsed Lua table
 
-Returns a table where each key is a kebab-case `operationId` (`getPetById` → `get-pet-by-id`). Each value is an operation: call `op.invoke` with a request table (recommended), or call the operation directly with positional arguments as a shorthand. See [Calling operations](#calling-operations).
+Returns a table where each key is a kebab-case `operationId` (`getPetById` → `get-pet-by-id`). An operation without `operationId` is named after its method and path (`GET /pets/{petId}` → `get-pets-pet-id`), unless an `operationId` already takes that name. Each value is an operation: call `op.invoke` with a request table (recommended), or call the operation directly with positional arguments as a shorthand. See [Calling operations](#calling-operations).
 
 ### Options
 
@@ -65,7 +65,8 @@ Returns a table where each key is a kebab-case `operationId` (`getPetById` → `
 | `:timeout` | number | Default timeout in seconds |
 | `:ssl` | table | luasec SSL options (`cafile`, `certificate`, `key`, `verify`, …) |
 | `:http-fn` | function | Custom HTTP backend — see [HTTP adapter](#http-adapter) |
-| `:source-url` | string | Original URL of the schema, used to resolve relative server URLs |
+| `:source-url` | string | Location of a schema passed as a parsed table, used to resolve relative server URLs and external `$ref`s |
+| `:load-schema` | function | `(fn [location {:ssl :headers}])` returning a parsed document; replaces `atlas.load-schema` for the schema and its external `$ref`s |
 
 ### Base URL resolution
 
@@ -203,7 +204,7 @@ Lists a parsed schema's servers and their variables, e.g. to offer a choice befo
 ## `atlas.load-schema`
 
 ```fennel
-(atlas.load-schema path ?ssl ?headers)
+(atlas.load-schema path ?opts)
 ```
 
 Fetches and parses a schema. Used internally by `atlas.client` but exposed for cases where you want the raw parsed table:
@@ -213,7 +214,7 @@ Fetches and parses a schema. Used internally by `atlas.client` but exposed for c
 (local client (atlas.client schema {:base-url "https://staging.example.com"}))
 ```
 
-For HTTPS schemas, `?ssl` is a luasec options table. `?headers` are sent with the fetch request (useful for authenticated schema endpoints).
+`?opts` is `{:ssl luasec-options :headers {}}`: for HTTPS schemas, `:ssl` is a luasec options table, and `:headers` are sent with the fetch request (useful for authenticated schema endpoints).
 
 ## HTTP adapter
 
@@ -275,16 +276,16 @@ Each operation on the client exposes metadata fields:
 
 ```fennel
 (. client.get-pet-by-id :summary)      ;; "Find pet by ID" (or nil)
-(. client.get-pet-by-id :has-body?)    ;; true if operation has requestBody
-(. client.get-pet-by-id :n-path)       ;; number of path parameters
+(. client.get-pet-by-id :has-body)    ;; true if operation has requestBody
 (. client.get-pet-by-id :path-params)  ;; ["petId"], in template order
 (. client.get-pet-by-id :operation-id) ;; "getPetById"
+(. client.get-pet-by-id :name)         ;; "get-pet-by-id", its key in the client
 (. client.get-pet-by-id :path)         ;; "/pet/{petId}"
 (. client.get-pet-by-id :method)       ;; "get"
 (. client.get-pet-by-id :body-schema)  ;; requestBody schema for the chosen content type
 (. client.add-pet :content-type)       ;; "application/json" (nil without requestBody)
-(. client.get-pet-by-id :fnl/docstring) ;; multi-line Fennel REPL documentation
-(. client.get-pet-by-id :cli/help)     ;; multi-line CLI-oriented help string
+(. client.get-pet-by-id :fnl/docstring) ;; multi-line Fennel REPL documentation (rendered on first access)
+(. client.get-pet-by-id :spec)         ;; the operation object from the schema, $refs resolved
 ```
 
 ## Fennel REPL integration

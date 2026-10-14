@@ -85,7 +85,7 @@ multipart operations take JSON or YAML; any other type is sent as-is."
     {:path (collect [i name (ipairs op.path-params)] name (. p.path-params i))
      :query (when (next p.query) p.query)
      :headers (when (next p.headers) p.headers)
-     :body (when op.has-body? body)}))
+     :body (when op.has-body body)}))
 
 (fn check-params [op request]
   "Check request query/headers against the operation's declared parameters.
@@ -117,8 +117,7 @@ query names are warnings. Header names match case-insensitively."
         (when (not (. declared-query name))
           (table.insert warnings
                         (string.format "%s does not declare query parameter '%s' (declared: %s)"
-                                       (util.camel->kebab (tostring op.operation-id))
-                                       name
+                                       op.name name
                                        (if (= 0 (length declared)) "none"
                                            (table.concat declared ", ")))))))
     (values errors warnings)))

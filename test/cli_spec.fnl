@@ -97,7 +97,7 @@
 
 (describe "cli.op-request"
           (fn []
-            (let [op {:path-params ["ownerId" "petId"] :has-body? true}]
+            (let [op {:path-params ["ownerId" "petId"] :has-body true}]
               (it "maps positional path params to names without coercion"
                   (fn []
                     (let [req (cli.op-request op
@@ -403,7 +403,7 @@
                     (f:write "hello")
                     (f:close)
                     (let [req (cli.op-request {:path-params []
-                                               :has-body? true
+                                               :has-body true
                                                :content-type "multipart/form-data"}
                                               {:path-params []
                                                :query {}
@@ -470,7 +470,7 @@
             (it "sends valid JSON bodies byte-for-byte"
                 (fn []
                   (let [op {:path-params []
-                            :has-body? true
+                            :has-body true
                             :content-type "application/json"}
                         req #(cli.op-request op
                                              {:path-params []
@@ -486,7 +486,7 @@
             (it "converts YAML input to JSON text"
                 (fn []
                   (let [op {:path-params []
-                            :has-body? true
+                            :has-body true
                             :content-type "application/json"}
                         r (cli.op-request op
                                           {:path-params []
@@ -597,7 +597,7 @@
 
 (describe "cli.check-params"
           (fn []
-            (let [op {:operation-id "listPets"
+            (let [op {:name "list-pets"
                       :parameters [{:name "status" :in "query" :required true}
                                    {:name "limit" :in "query"}
                                    {:name "X-Org" :in "header" :required true}]}]
@@ -901,3 +901,37 @@
             (it "completes the profile subcommand"
                 (fn []
                   (assert.are.same ["import-restish"] (complete "profile im"))))))
+
+(describe "cli.select-path"
+          (fn []
+            (let [data {:items [{:id 1 :name "a" :tags ["x"]}
+                                {:id 2 :name "b" :tags ["y" "z"]}]
+                        :meta {:count 2 :page {:next "n"}}}]
+              (it "follows fields"
+                  (fn []
+                    (assert.are.equal "n"
+                                      (cli.select-path data ".meta.page.next"))))
+              (it "indexes arrays 0-based"
+                  (fn []
+                    (assert.are.equal "b"
+                                      (cli.select-path data ".items[1].name"))))
+              (it "iterates arrays and continues the path on each element"
+                  (fn []
+                    (assert.are.same [1 2] (cli.select-path data ".items[].id"))
+                    (assert.are.same [["x"] ["y" "z"]]
+                                     (cli.select-path data ".items[].tags"))))
+              (it "picks fields from an object or from each element"
+                  (fn []
+                    (assert.are.same {:count 2}
+                                     (cli.select-path data ".meta.{count}"))
+                    (assert.are.same [{:id 1 :name "a"} {:id 2 :name "b"}]
+                                     (cli.select-path data
+                                                      ".items[].{id, name}"))
+                    (assert.are.same [{:id 1} {:id 2}]
+                                     (cli.select-path data ".items.{id}"))))
+              (it "returns nil for missing paths"
+                  (fn []
+                    (assert.is_nil (cli.select-path data ".nope.deeper"))
+                    (assert.is_nil (cli.select-path data ".items[9].name"))))
+              (it "returns the data for an empty path"
+                  (fn [] (assert.are.same data (cli.select-path data "")))))))

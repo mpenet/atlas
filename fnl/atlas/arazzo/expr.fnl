@@ -209,74 +209,83 @@
                       ">" (> a b)
                       ">=" (>= a b)))))
 
+;; The evaluator works on a parser table:
+;; {:tokens [...] :pos index :ctx runtime-context :condition source-text}
+
+(local comparison-ops {"==" true
+                       "!=" true
+                       "<" true
+                       "<=" true
+                       ">" true
+                       ">=" true})
+
+(fn fail [parser message]
+  (error (.. message " in condition: " parser.condition)))
+
+(fn peek [parser]
+  (. parser.tokens parser.pos))
+
+(fn op? [parser text]
+  (let [t (peek parser)]
+    (and t (= t.kind :op) (= t.text text))))
+
+(fn advance [parser]
+  (set parser.pos (+ parser.pos 1))
+  (. parser.tokens (- parser.pos 1)))
+
+(var parse-or nil)
+
+(fn parse-value [parser]
+  (let [t (advance parser)]
+    (if (= t nil) (fail parser "unexpected end")
+        (and (= t.kind :op) (= t.text "("))
+        (let [v (parse-or parser)]
+          (if (op? parser ")") (advance parser) (fail parser "missing )"))
+          v) (= t.kind :expr) (resolve-expr parser.ctx t.text)
+        (= t.kind :literal) t.value (fail parser (.. "unexpected '" t.text "'")))))
+
+(fn parse-cmp [parser]
+  (let [left (parse-value parser)
+        t (peek parser)]
+    (if (and t (= t.kind :op) (. comparison-ops t.text))
+        (let [op (. (advance parser) :text)
+              right (parse-value parser)]
+          (match op
+            "==" (equal? left right)
+            "!=" (not (equal? left right))
+            _ (ordered op left right)))
+        left)))
+
+(fn parse-unary [parser]
+  (if (op? parser "!")
+      (do
+        (advance parser)
+        (not (truthy? (parse-unary parser))))
+      (parse-cmp parser)))
+
+(fn parse-and [parser]
+  (var v (truthy? (parse-unary parser)))
+  (while (op? parser "&&")
+    (advance parser)
+    (let [r (truthy? (parse-unary parser))]
+      (set v (and v r))))
+  v)
+
+(set parse-or (fn [parser]
+                (var v (parse-and parser))
+                (while (op? parser "||")
+                  (advance parser)
+                  (let [r (parse-and parser)]
+                    (set v (or v r))))
+                v))
+
 (fn eval-condition [ctx condition]
   "Evaluate a simple condition string; raises on syntax errors."
-  (let [tokens (tokenize condition)
-        fail #(error (.. $ " in condition: " condition))]
-    (var pos 1)
-
-    (fn peek [] (. tokens pos))
-
-    (fn op? [text]
-      (let [t (peek)] (and t (= t.kind :op) (= t.text text))))
-
-    (fn advance [] (set pos (+ pos 1)) (. tokens (- pos 1)))
-
-    (var parse-or nil)
-
-    (fn parse-value []
-      (let [t (advance)]
-        (if (= t nil) (fail "unexpected end")
-            (and (= t.kind :op) (= t.text "("))
-            (let [v (parse-or)]
-              (if (op? ")") (advance) (fail "missing )"))
-              v) (= t.kind :expr) (resolve-expr ctx t.text)
-            (= t.kind :literal) t.value (fail (.. "unexpected '" t.text "'")))))
-
-    (fn parse-cmp []
-      (let [left (parse-value)
-            t (peek)]
-        (if (and t (= t.kind :op) (. {"==" true
-                                      "!=" true
-                                      "<" true
-                                      "<=" true
-                                      ">" true
-                                      ">=" true}
-                                     t.text))
-            (let [op (. (advance) :text)
-                  right (parse-value)]
-              (match op
-                "==" (equal? left right)
-                "!=" (not (equal? left right))
-                _ (ordered op left right)))
-            left)))
-
-    (fn parse-unary []
-      (if (op? "!")
-          (do
-            (advance)
-            (not (truthy? (parse-unary))))
-          (parse-cmp)))
-
-    (fn parse-and []
-      (var v (truthy? (parse-unary)))
-      (while (op? "&&")
-        (advance)
-        (let [r (truthy? (parse-unary))]
-          (set v (and v r))))
-      v)
-
-    (set parse-or (fn []
-                    (var v (parse-and))
-                    (while (op? "||")
-                      (advance)
-                      (let [r (parse-and)]
-                        (set v (or v r))))
-                    v))
-    (let [result (parse-or)]
-      (when (peek)
-        (fail (.. "unexpected '" (token-text (peek)) "'")))
-      (truthy? result))))
+  (let [parser {:tokens (tokenize condition) :pos 1 : ctx : condition}
+        result (parse-or parser)]
+    (when (peek parser)
+      (fail parser (.. "unexpected '" (token-text (peek parser)) "'")))
+    (truthy? result)))
 
 ;; ---- criterion evaluation ----
 

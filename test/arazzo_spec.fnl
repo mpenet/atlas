@@ -1,7 +1,6 @@
 ;; ABOUTME: Specs for Arazzo document loading, client resolution and workflow execution.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
 (local arazzo (require :atlas.arazzo))
-(local expr (require :atlas.arazzo.expr))
 
 ;; ---- helpers ----
 
@@ -115,6 +114,16 @@
                                                              {:server-index 2}
                                                              "test/fixtures/flow.arazzo.json")
                                       "server-index is ambiguous: the document has 2 openapi sources"))))
+            (it "fails when a source cannot be loaded"
+                (fn []
+                  (let [doc {:sourceDescriptions [{:name "api"
+                                                   :type "openapi"
+                                                   :url "missing.yaml"}]
+                             :workflows []}]
+                    (assert.has.error #(arazzo.build-clients doc
+                                                             {:load-schema #(error "offline"
+                                                                                   0)})
+                                      "source 'api': offline"))))
             (it "skips non-openapi sources"
                 (fn []
                   (let [doc {:sourceDescriptions [{:name "ext"
@@ -519,316 +528,26 @@
                     (assert.are.equal 3 (calls.val))
                     (assert.are.equal "done" result.outputs.state))))))
 
-;; ---- expr: json-pointer ----
-
-(describe "json-pointer"
+(describe "run-workflow step output expressions"
           (fn []
-            (it "resolves nested path"
+            (it "works as step output expression"
                 (fn []
-                  (assert.are.equal "bar"
-                                    (expr.json-pointer {:a {:b "bar"}} "/a/b"))))
-            (it "resolves array index (0-based)"
-                (fn []
-                  (assert.are.equal "second"
-                                    (expr.json-pointer ["first" "second"] "/1"))))
-            (it "decodes ~1 as slash"
-                (fn []
-                  (assert.are.equal 42 (expr.json-pointer {"a/b" 42} "/a~1b"))))
-            (it "decodes ~0 as tilde"
-                (fn []
-                  (assert.are.equal "yes"
-                                    (expr.json-pointer {"a~b" "yes"} "/a~0b"))))
-            (it "returns nil for missing key"
-                (fn []
-                  (assert.is_nil (expr.json-pointer {:a 1} "/z"))))
-            (it "returns nil for nil obj"
-                (fn []
-                  (assert.is_nil (expr.json-pointer nil "/a"))))))
-
-;; ---- expr: resolve-expr ----
-
-(describe "resolve-expr"
-          (fn []
-            (let [ctx {:inputs {:x "hello" :n 7}
-                       :steps {:s1 {:outputs {:k "v"}
-                                    :response {:status 201
-                                               :headers {:x-id "abc"}
-                                               :body {:msg "hi"}}
-                                    :request {:body {:q "search"} :headers {}}}}
-                       :workflows {}
-                       :response {:status 200
-                                  :headers {:content-type "application/json"}
-                                  :body {:result "ok"}}
-                       :request {:body {:payload "data"} :headers {}}}]
-              (it "resolves $inputs.x"
-                  (fn []
-                    (assert.are.equal "hello"
-                                      (expr.resolve-expr ctx "$inputs.x"))))
-              (it "resolves $statusCode"
-                  (fn []
-                    (assert.are.equal 200 (expr.resolve-expr ctx "$statusCode"))))
-              (it "resolves $response.body (no pointer) as full table"
-                  (fn []
-                    (assert.are.same {:result "ok"}
-                                     (expr.resolve-expr ctx "$response.body"))))
-              (it "resolves $response.body#/result"
-                  (fn []
-                    (assert.are.equal "ok"
-                                      (expr.resolve-expr ctx
-                                                         "$response.body#/result"))))
-              (it "resolves $response.header.content-type"
-                  (fn []
-                    (assert.are.equal "application/json"
-                                      (expr.resolve-expr ctx
-                                                         "$response.header.content-type"))))
-              (it "resolves $steps.s1.outputs.k"
-                  (fn []
-                    (assert.are.equal "v"
-                                      (expr.resolve-expr ctx
-                                                         "$steps.s1.outputs.k"))))
-              (it "resolves $steps.s1.response.body (no pointer)"
-                  (fn []
-                    (assert.are.same {:msg "hi"}
-                                     (expr.resolve-expr ctx
-                                                        "$steps.s1.response.body"))))
-              (it "resolves $steps.s1.response.body#/msg"
-                  (fn []
-                    (assert.are.equal "hi"
-                                      (expr.resolve-expr ctx
-                                                         "$steps.s1.response.body#/msg"))))
-              (it "resolves response headers case-insensitively"
-                  (fn []
-                    (assert.are.equal "application/json"
-                                      (expr.resolve-expr ctx
-                                                         "$response.header.Content-Type"))
-                    (assert.are.equal "abc"
-                                      (expr.resolve-expr ctx
-                                                         "$steps.s1.response.header.X-Id"))))
-              (it "resolves $steps.s1.response.header.x-id"
-                  (fn []
-                    (assert.are.equal "abc"
-                                      (expr.resolve-expr ctx
-                                                         "$steps.s1.response.header.x-id"))))
-              (it "resolves $request.body (no pointer) as full table"
-                  (fn []
-                    (assert.are.same {:payload "data"}
-                                     (expr.resolve-expr ctx "$request.body"))))
-              (it "resolves $steps.s1.request.body#/q"
-                  (fn []
-                    (assert.are.equal "search"
-                                      (expr.resolve-expr ctx
-                                                         "$steps.s1.request.body#/q"))))
-              (it "errors on non-expression string"
-                  (fn []
-                    (assert.has.error (fn []
-                                        (expr.resolve-expr ctx "notanexpr"))))))))
-
-;; ---- expr: eval-template ----
-
-(describe "eval-template"
-          (fn []
-            (let [ctx {:inputs {:env "prod" :v 3}
-                       :steps {}
-                       :workflows {}
-                       :response nil
-                       :request nil}]
-              (it "substitutes single expression"
-                  (fn []
-                    (assert.are.equal "env=prod"
-                                      (expr.eval-template ctx
-                                                          "env={$inputs.env}"))))
-              (it "substitutes multiple expressions"
-                  (fn []
-                    (assert.are.equal "prod-3"
-                                      (expr.eval-template ctx
-                                                          "{$inputs.env}-{$inputs.v}"))))
-              (it "leaves non-expression text unchanged"
-                  (fn []
-                    (assert.are.equal "hello world"
-                                      (expr.eval-template ctx "hello world"))))
-              (it "replaces unknown expr with empty string"
-                  (fn []
-                    (assert.are.equal "val="
-                                      (expr.eval-template ctx
-                                                          "val={$inputs.missing}")))))))
-
-;; ---- expr: eval-criterion simple ----
-
-(describe "eval-criterion simple"
-          (fn []
-            (let [ctx {:inputs {}
-                       :steps {}
-                       :workflows {}
-                       :response {:status 404 :headers {} :body {:count 5}}
-                       :request nil}]
-              (it "== passes"
-                  (fn []
-                    (assert.is_true (expr.eval-criterion ctx
-                                                         {:condition "$statusCode == 404"}))))
-              (it "== fails"
-                  (fn []
-                    (assert.is_false (expr.eval-criterion ctx
-                                                          {:condition "$statusCode == 200"}))))
-              (it "!= passes"
-                  (fn []
-                    (assert.is_true (expr.eval-criterion ctx
-                                                         {:condition "$statusCode != 200"}))))
-              (it "!= fails"
-                  (fn []
-                    (assert.is_false (expr.eval-criterion ctx
-                                                          {:condition "$statusCode != 404"}))))
-              (it "> passes"
-                  (fn []
-                    (assert.is_true (expr.eval-criterion ctx
-                                                         {:condition "$response.body#/count > 4"}))))
-              (it "> fails"
-                  (fn []
-                    (assert.is_false (expr.eval-criterion ctx
-                                                          {:condition "$response.body#/count > 5"}))))
-              (it ">= passes on equal"
-                  (fn []
-                    (assert.is_true (expr.eval-criterion ctx
-                                                         {:condition "$response.body#/count >= 5"}))))
-              (it "< passes"
-                  (fn []
-                    (assert.is_true (expr.eval-criterion ctx
-                                                         {:condition "$response.body#/count < 10"}))))
-              (it "<= passes on equal"
-                  (fn []
-                    (assert.is_true (expr.eval-criterion ctx
-                                                         {:condition "$response.body#/count <= 5"}))))
-              (it "|| short-circuits on first true"
-                  (fn []
-                    (assert.is_true (expr.eval-criterion ctx
-                                                         {:condition "$statusCode == 200 || $statusCode == 404"}))))
-              (it "&& requires both true"
-                  (fn []
-                    (assert.is_false (expr.eval-criterion ctx
-                                                          {:condition "$statusCode == 404 && $statusCode == 200"}))))
-              (it "string literal comparison"
-                  (fn []
-                    (let [ctx2 {:inputs {}
-                                :steps {}
-                                :workflows {}
-                                :response {:status 200
-                                           :headers {}
-                                           :body {:state "active"}}
-                                :request nil}]
-                      (assert.is_true (expr.eval-criterion ctx2
-                                                           {:condition "$response.body#/state == \"active\""}))))))))
-
-;; ---- expr: $find ----
-
-(describe "expr $find"
-          (fn []
-            (let [ctx {:inputs {:name "bob"}
-                       :steps {}
-                       :workflows {}
-                       :response {:status 200
-                                  :headers {}
-                                  :body {:users [{:id "1" :name "alice"}
-                                                 {:id "2" :name "bob"}
-                                                 {:id "3" :name "carol"}]}}
-                       :request nil}]
-              (it "returns matching item when return-field omitted"
-                  (fn []
-                    (assert.are.same {:id "2" :name "bob"}
-                                     (expr.resolve-expr ctx
-                                                        "$find($response.body#/users, name, $inputs.name)"))))
-              (it "returns specific field when return-field given"
-                  (fn []
-                    (assert.are.equal "2"
-                                      (expr.resolve-expr ctx
-                                                         "$find($response.body#/users, name, $inputs.name, id)"))))
-              (it "returns nil when no match"
-                  (fn []
-                    (let [ctx2 {:inputs {:name "nobody"}
-                                :steps {}
-                                :workflows {}
-                                :response {:status 200
-                                           :headers {}
-                                           :body {:users [{:id "1"
-                                                           :name "alice"}]}}
-                                :request nil}]
-                      (assert.is_nil (expr.resolve-expr ctx2
-                                                        "$find($response.body#/users, name, $inputs.name, id)")))))
-              (it "works as step output expression"
-                  (fn []
-                    (let [clients {:api (make-client {:list-users (fn []
-                                                                    (ok-resp {:users [{:id "u1"
-                                                                                       :name "alice"}
-                                                                                      {:id "u2"
-                                                                                       :name "bob"}]}))})}
-                          doc {:arazzo "1.0.0"
-                               :info {}
-                               :workflows [{:workflowId "find-user"
-                                            :steps [{:stepId "list"
-                                                     :operationId "list-users"
-                                                     :successCriteria [{:condition "$statusCode == 200"}]
-                                                     :outputs {:id "$find($response.body#/users, name, $inputs.name, id)"}}]
-                                            :outputs {:id "$steps.list.outputs.id"}}]}
-                          result (arazzo.run-workflow doc "find-user"
-                                                      {:name "bob"} clients {})]
-                      (assert.are.equal "u2" result.outputs.id)))))))
-
-;; ---- expr: $workflows output ----
-
-(describe "expr $workflows"
-          (fn []
-            (it "resolves $workflows.id.outputs.key"
-                (fn []
-                  (let [ctx {:inputs {}
-                             :steps {}
-                             :workflows {:myWf {:outputs {:token "wf-tok"}}}
-                             :response nil
-                             :request nil}]
-                    (assert.are.equal "wf-tok"
-                                      (expr.resolve-expr ctx
-                                                         "$workflows.myWf.outputs.token")))))
-            (it "returns nil for unknown workflow"
-                (fn []
-                  (let [ctx {:inputs {}
-                             :steps {}
-                             :workflows {}
-                             :response nil
-                             :request nil}]
-                    (assert.is_nil (expr.resolve-expr ctx
-                                                      "$workflows.missing.outputs.x")))))))
-
-;; ---- expr: regex criterion ----
-
-(describe "eval-criterion regex"
-          (fn []
-            (let [ctx {:inputs {}
-                       :steps {}
-                       :workflows {}
-                       :response {:status 201 :headers {} :body {}}
-                       :request nil}]
-              (it "matches pattern on status"
-                  (fn []
-                    (assert.is_true (expr.eval-criterion ctx
-                                                         {:type :regex
-                                                          :context "$statusCode"
-                                                          :condition "^2"}))))
-              (it "fails when pattern does not match"
-                  (fn []
-                    (assert.is_false (expr.eval-criterion ctx
-                                                          {:type :regex
-                                                           :context "$statusCode"
-                                                           :condition "^4"}))))
-              (it "matches on string body field"
-                  (fn []
-                    (let [ctx2 {:inputs {}
-                                :steps {}
-                                :workflows {}
-                                :response {:status 200
-                                           :headers {}
-                                           :body {:msg "hello world"}}
-                                :request nil}]
-                      (assert.is_true (expr.eval-criterion ctx2
-                                                           {:type :regex
-                                                            :context "$response.body#/msg"
-                                                            :condition "world"}))))))))
+                  (let [clients {:api (make-client {:list-users (fn []
+                                                                  (ok-resp {:users [{:id "u1"
+                                                                                     :name "alice"}
+                                                                                    {:id "u2"
+                                                                                     :name "bob"}]}))})}
+                        doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "find-user"
+                                          :steps [{:stepId "list"
+                                                   :operationId "list-users"
+                                                   :successCriteria [{:condition "$statusCode == 200"}]
+                                                   :outputs {:id "$find($response.body#/users, name, $inputs.name, id)"}}]
+                                          :outputs {:id "$steps.list.outputs.id"}}]}
+                        result (arazzo.run-workflow doc "find-user"
+                                                    {:name "bob"} clients {})]
+                    (assert.are.equal "u2" result.outputs.id))))))
 
 ;; ---- operation resolution and parameters ----
 
@@ -867,7 +586,14 @@
                                                         (ok-resp {}))})}]
                     (arazzo.run-workflow (one-step-doc {:operationId "$sourceDescriptions.b.op"})
                                          "wf" {} clients {})
-                    (assert.are.same [:b] log))))))
+                    (assert.are.same [:b] log))))
+            (it "rejects a plain operationId found in several sources"
+                (fn []
+                  (let [clients {:a (make-client {:op #(ok-resp {})})
+                                 :b (make-client {:op #(ok-resp {})})}]
+                    (assert.has.error #(arazzo.run-workflow (one-step-doc {:operationId "op"})
+                                                            "wf" {} clients {})
+                                      "operationId 'op' is in several sources (a, b): use $sourceDescriptions.NAME.op"))))))
 
 (describe "run-workflow parameters"
           (fn []

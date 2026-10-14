@@ -24,6 +24,15 @@ are unescaped, numeric segments index arrays 0-based."
         (s) (s:gsub "(%l)(%u)" "%1-%2")]
     (s:lower)))
 
+(fn operation-name [method path op-spec]
+  "Kebab-case name of an operation: its operationId, or method and path words
+when it has none (get /pets/{petId} → get-pets-pet-id)."
+  (if op-spec.operationId (camel->kebab op-spec.operationId)
+      (let [words [(method:lower)]]
+        (each [word (path:gmatch "[%w_]+")]
+          (table.insert words (camel->kebab word)))
+        (table.concat words "-"))))
+
 (fn extract-path-params [template]
   (icollect [p (template:gmatch "{([^}]+)}")] p))
 
@@ -175,6 +184,7 @@ with the same name and location."
                                     (url-encode v))))))
 
 {: camel->kebab
+ : operation-name
  : extract-path-params
  : resolve-path
  : url-encode

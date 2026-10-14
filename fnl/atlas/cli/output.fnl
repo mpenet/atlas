@@ -39,7 +39,7 @@
     (http-fn req)))
 
 (fn op? [v]
-  (and (= (type v) :table) (not= nil (. v :has-body?))))
+  (and (= (type v) :table) (not= nil (. v :has-body))))
 
 (fn list-ops [c]
   (let [ops []]
@@ -54,73 +54,38 @@
                    (string.format (.. "%-" width "s  %s") op.k op.summary)
                    op.k))))))
 
+(fn pick-fields [value fields]
+  "value with only fields kept: an object, or each object of an array."
+  (let [pick (fn [obj]
+               (collect [_ f (ipairs fields)] f (. obj f)))]
+    (when (= (type value) :table)
+      (if (= (type (. value 1)) :table)
+          (icollect [_ obj (ipairs value)] (pick obj))
+          (pick value)))))
+
 (fn select-path [data path]
-  (var cur data)
-  (var i 1)
-  (let [n (length path)]
-    (while (and cur (<= i n))
-      (let [c (path:sub i i)]
-        (if (= c :.)
-            (set i (+ i 1))
-            (= c "[")
-            (let [(j-iter) (path:match "^%[%]()" i)]
-              (if j-iter
-                  (let [rest (path:sub j-iter)
-                        result []]
-                    (when (= (type cur) :table)
-                      (each [_ v (ipairs cur)]
-                        (table.insert result
-                                      (if (> (length rest) 0)
-                                          (select-path v rest)
-                                          v))))
-                    (set cur result)
-                    (set i (+ n 1)))
-                  (let [(idx j) (path:match "^%[(%d+)%]()" i)]
-                    (if idx
-                        (do
-                          (set cur (. cur (+ 1 (tonumber idx))))
-                          (set i j))
-                        (do
-                          (set cur nil)
-                          (set i (+ n 1)))))))
-            (= c "{")
-            (let [(fields-str j) (path:match "^{([^}]+)}()" i)]
-              (if fields-str
-                  (let [fields []
-                        rest (path:sub j)
-                        apply (fn [obj]
-                                (if (= (type obj) :table)
-                                    (let [out {}]
-                                      (each [_ f (ipairs fields)]
-                                        (tset out f (. obj f)))
-                                      (if (> (length rest) 0)
-                                          (select-path out rest)
-                                          out))
-                                    obj))]
-                    (each [f (fields-str:gmatch "[^,]+")]
-                      (table.insert fields (f:match "^%s*(.-)%s*$")))
-                    (if (= (type cur) :table)
-                        (let [is-arr (= (type (. cur 1)) :table)]
-                          (if is-arr
-                              (let [result []]
-                                (each [_ v (ipairs cur)]
-                                  (table.insert result (apply v)))
-                                (set cur result))
-                              (set cur (apply cur))))
-                        (set cur nil))
-                    (set i (+ n 1)))
-                  (do
-                    (set cur nil)
-                    (set i (+ n 1)))))
-            (let [(key j) (path:match "^([^%.%[{]+)()" i)]
-              (if key
-                  (do
-                    (set cur (. cur key))
-                    (set i j))
-                  (do
-                    (set cur nil)
-                    (set i (+ n 1)))))))))
-  cur)
+  "Value at path in data: .field, [N] (0-based), [] to map the rest of the path
+over an array, {a,b} to keep fields. nil when the path doesn't match."
+  (if (or (= nil data) (= path "")) data (path:match "^%.")
+      (select-path data (path:sub 2)) (path:match "^%[%]")
+      (when (= (type data) :table)
+        (icollect [_ v (ipairs data)] (select-path v (path:sub 3))))
+      (path:match "^%[%d+%]")
+      (let [(index rest) (path:match "^%[(%d+)%](.*)$")]
+        (when (= (type data) :table)
+          (select-path (. data (+ 1 (tonumber index))) rest)))
+      (path:match "^{")
+      (let [(fields rest) (path:match "^{([^}]+)}(.*)$")]
+        (when fields
+          (let [picked (pick-fields data
+                                    (icollect [f (fields:gmatch "[^,]+")]
+                                      (f:match "^%s*(.-)%s*$")))]
+            (if (and (= (type (. picked 1)) :table) (not= rest ""))
+                (icollect [_ obj (ipairs picked)] (select-path obj rest))
+                (select-path picked rest)))))
+      (let [(key rest) (path:match "^([^%.%[{]+)(.*)$")]
+        (when (and key (= (type data) :table))
+          (select-path (. data key) rest)))))
 
 (fn request-text [req]
   "Human-readable request, credentials redacted."

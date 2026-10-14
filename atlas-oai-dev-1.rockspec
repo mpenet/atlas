@@ -43,6 +43,7 @@ build = {
       ["atlas.cli"]       = "lua/atlas/cli.lua",
       ["atlas.cli.args"]  = "lua/atlas/cli/args.lua",
       ["atlas.cli.complete"] = "lua/atlas/cli/complete.lua",
+      ["atlas.cli.help"]  = "lua/atlas/cli/help.lua",
       ["atlas.cli.output"] = "lua/atlas/cli/output.lua",
       ["atlas.cli.request"] = "lua/atlas/cli/request.lua",
       ["atlas.cli.restish"] = "lua/atlas/cli/restish.lua",

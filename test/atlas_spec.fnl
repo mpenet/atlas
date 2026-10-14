@@ -23,6 +23,23 @@
                                         {:http-fn http})]
                     (assert.is_not_nil c.list-pets)
                     (assert.is_function (. (getmetatable c.list-pets) :__call)))))
+            (it "names operations without operationId after method and path"
+                (fn []
+                  (let [(http calls) (mock-http)
+                        c (atlas.client (schema {"/pets/{petId}/toys" {:get {:responses {}}}
+                                                 "/" {:post {:responses {}}}
+                                                 "/listPets" {:get {:responses {}}}
+                                                 "/other" {:get {:operationId "getListPets"
+                                                                 :responses {}}}})
+                                        {:http-fn http})]
+                    (assert.are.equal "/pets/{petId}/toys"
+                                      c.get-pets-pet-id-toys.path)
+                    (assert.is_nil c.get-pets-pet-id-toys.operation-id)
+                    (assert.are.equal "get-pets-pet-id-toys"
+                                      c.get-pets-pet-id-toys.name)
+                    (assert.are.equal "/" c.post.path)
+                    ;; operationIds win over derived names
+                    (assert.are.equal "/other" c.get-list-pets.path))))
             (it "calls correct method and URL"
                 (fn []
                   (let [(http calls) (mock-http)
@@ -184,7 +201,10 @@
                                       c.get-owner-pet.path)
                     (assert.are.equal "get" c.get-owner-pet.method)
                     (assert.are.same ["ownerId" "petId"]
-                                     c.get-owner-pet.path-params))))
+                                     c.get-owner-pet.path-params)
+                    (assert.is_false c.get-owner-pet.has-body)
+                    (assert.is_true c.add-pet.has-body)
+                    (assert.is_nil c.get-owner-pet.n-path))))
             (it "builds the request URL without sending"
                 (fn []
                   (let [(http calls) (mock-http)
@@ -264,7 +284,7 @@
                                                                                       :description "op-level v"}]
                                                                         :responses {}}}})
                                         {:http-fn (mock-http)})
-                        help (. c.get-pet :cli/help)]
+                        help (. c.get-pet :fnl/docstring)]
                     (assert.is_truthy (help:find "shared id" 1 true))
                     (assert.is_truthy (help:find "op-level v" 1 true))
                     (assert.is_nil (help:find "path-level v" 1 true)))))))
@@ -470,4 +490,36 @@
                       (tset package.loaded :atlas nil)
                       (assert.are.same {:ssl {:cafile "ca.pem"}
                                         :headers {:authorization "t"}}
-                                       (. seen 1))))))))
+                                       (. seen 1))))))
+            (it "passes ssl and headers to a custom loader as an opts table"
+                (fn []
+                  (let [seen []]
+                    (atlas.client "https://h/openapi.json"
+                                  {:ssl {:cafile "ca.pem"}
+                                   :headers {:authorization "t"}
+                                   :load-schema (fn [location opts]
+                                                  (table.insert seen
+                                                                [location opts])
+                                                  (schema {}))})
+                    (assert.are.same [["https://h/openapi.json"
+                                       {:ssl {:cafile "ca.pem"}
+                                        :headers {:authorization "t"}}]]
+                                     seen))))))
+
+(describe "operation help"
+          (fn []
+            (it "exposes the resolved spec and renders the docstring only when asked"
+                (fn []
+                  (let [doc (require :atlas.doc)
+                        real-build doc.build
+                        calls []]
+                    (set doc.build
+                         (fn [...] (table.insert calls 1) (real-build ...)))
+                    (let [c (atlas.client pets-schema {:http-fn (mock-http)})]
+                      (assert.are.equal 0 (length calls))
+                      (assert.are.equal "addPet" c.add-pet.spec.operationId)
+                      (assert.is_truthy (: (. c.add-pet :fnl/docstring) :find
+                                           "POST /pets" 1 true))
+                      (assert.are.equal 1 (length calls))
+                      (assert.is_nil (. c.add-pet :cli/help)))
+                    (set doc.build real-build))))))

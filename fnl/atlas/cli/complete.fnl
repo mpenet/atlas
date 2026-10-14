@@ -103,51 +103,73 @@ once a name and = are typed."
             (icollect [_ n (ipairs (sorted-keys fields))]
               {:value (.. "--" prefix "." n "=") :help (. fields n :help)}))))))
 
-(fn complete-entries [line ctx]
-  "Completion candidates {:value :help} for a command line typed up to the cursor."
+(fn split-line [line]
+  "(words current positional): the words before the cursor, the word being
+typed, and the positional words (values of `--name value` options skipped)."
   (let [words (icollect [w (line:gmatch "%S+")] w)
         current (if (or (= line "") (line:match "%s$")) "" (table.remove words))
-        positional (let [out []]
-                     (var skip false)
-                     (each [_ w (ipairs words)]
-                       (if skip (set skip false)
-                           ;; an option given as `--name value` consumes the next word
-                           (?. option-by-name w :value) (set skip true)
-                           (not (w:match "^%-")) (table.insert out w)))
-                     out)
-        [cmd target name] positional
-        config (or ctx.config {})
-        profiles (or config.profiles {})
-        flag-value (fn [flag]
-                     (accumulate [v nil _ w (ipairs words)]
-                       (or (w:match (.. "^%-%-" flag "=(.*)$")) v)))
-        context (let [c {}]
-                  (when (and (= cmd :op) target)
-                    (let [src (or (?. profiles target :schema) target)
-                          (ok schema) (pcall ctx.load-schema src)]
-                      (when (and ok (= (type schema) :table))
-                        (let [index (or (tonumber (or (flag-value "server%-index")
-                                                      ""))
-                                        (?. profiles target :server-index) 1)]
-                          (set c.ops (op-entries schema))
-                          (set c.server (. (atlas.servers schema) index))
-                          (set c.op (when name (. c.ops name)))))))
-                  (when (and (= cmd :az) target)
-                    (let [file (or (?. config :arazzo target :file) target)
-                          (ok doc) (pcall ctx.load-doc file)]
-                      (when (and ok (= (type doc) :table))
-                        (set c.doc doc)
-                        (set c.workflow
-                             (accumulate [found nil _ wf (ipairs (or doc.workflows
-                                                                     []))]
-                               (if (= wf.workflowId name) wf found)))
-                        (set c.inputs
-                             (when c.workflow
-                               (arazzo.workflow-inputs doc c.workflow))))))
-                  c)
-        entries (if (current:match "^%-%-(%a+)%.")
-                    (let [(prefix rest) (current:match "^%-%-(%a+)%.(.*)$")
-                          kind (. field-prefixes prefix)]
+        positional []]
+    (var skip false)
+    (each [_ w (ipairs words)]
+      (if skip (set skip false)
+          (?. option-by-name w :value) (set skip true)
+          (not (w:match "^%-")) (table.insert positional w)))
+    (values words current positional)))
+
+(fn completion-context [ctx words [cmd target name]]
+  "What the line refers to: an op schema's operations, server and current
+operation, or an Arazzo document's workflow and inputs."
+  (let [config (or ctx.config {})
+        c {}]
+    (when (and (= cmd :op) target)
+      (let [profile (?. config :profiles target)
+            (ok schema) (pcall ctx.load-schema (or (?. profile :schema) target))]
+        (when (and ok (= (type schema) :table))
+          (let [index-flag (accumulate [v nil _ w (ipairs words)]
+                             (or (w:match "^%-%-server%-index=(%d+)$") v))
+                index (or (tonumber index-flag) (?. profile :server-index) 1)]
+            (set c.ops (op-entries schema))
+            (set c.server (. (atlas.servers schema) index))
+            (set c.op (when name (. c.ops name)))))))
+    (when (and (= cmd :az) target)
+      (let [(ok doc) (pcall ctx.load-doc
+                            (or (?. config :arazzo target :file) target))]
+        (when (and ok (= (type doc) :table))
+          (set c.doc doc)
+          (set c.workflow (arazzo.find-workflow doc name))
+          (set c.inputs
+               (when c.workflow (arazzo.workflow-inputs doc c.workflow))))))
+    c))
+
+(fn positional-entries [config positional context]
+  (let [[cmd target] positional
+        n (length positional)
+        profiles (icollect [_ p (ipairs (sorted-keys config.profiles))]
+                   {:value p})]
+    (if (= nil cmd) (icollect [_ c (ipairs [:auth :az :completion :op :profile])]
+                      {:value c})
+        (and (or (= cmd :op) (= cmd :auth)) (= n 1)) profiles
+        (and (= cmd :profile) (= n 1))
+        [{:value :import-restish} {:value :list} {:value :show}]
+        (and (= cmd :profile) (= n 2) (= target :show)) profiles
+        (and (= cmd :completion) (= n 1))
+        [{:value :bash} {:value :fish} {:value :zsh}] (and (= cmd :op) (= n 2))
+        (icollect [_ op-name (ipairs (sorted-keys context.ops))]
+          {:value op-name :help (?. context.ops op-name :summary)})
+        (and (= cmd :az) (= n 1)) (icollect [_ a (ipairs (sorted-keys config.arazzo))]
+                                   {:value a})
+        (and (= cmd :az) (= n 2))
+        (icollect [_ wf (ipairs (or (?. context :doc :workflows) []))]
+          {:value wf.workflowId :help wf.summary}) [])))
+
+(fn complete-entries [line ctx]
+  "Completion candidates {:value :help} for a command line typed up to the cursor."
+  (let [(words current positional) (split-line line)
+        cmd (. positional 1)
+        context (completion-context ctx words positional)
+        (prefix rest) (current:match "^%-%-(%a+)%.(.*)$")
+        entries (if prefix
+                    (let [kind (. field-prefixes prefix)]
                       (if kind ((field-entries prefix kind context) rest) []))
                     (current:match "^%-")
                     (icollect [_ o (ipairs (scope-options (match cmd
@@ -155,35 +177,7 @@ once a name and = are typed."
                                                             :auth :auth
                                                             _ :op)))]
                       (when o.complete {:value o.complete :help o.help}))
-                    (= nil cmd)
-                    (icollect [_ c (ipairs [:auth :az :completion :op :profile])]
-                      {:value c})
-                    (let [n (length positional)
-                          profile-entries (icollect [_ name (ipairs (sorted-keys profiles))]
-                                            {:value name})]
-                      (if (and (or (= cmd :op) (= cmd :auth)) (= n 1))
-                          profile-entries
-                          (and (= cmd :profile) (= n 1))
-                          [{:value :import-restish}
-                           {:value :list}
-                           {:value :show}]
-                          (and (= cmd :profile) (= n 2) (= target :show))
-                          profile-entries
-                          (and (= cmd :completion) (= n 1))
-                          [{:value :bash} {:value :fish} {:value :zsh}]
-                          (and (= cmd :op) (= n 2))
-                          (icollect [_ op-name (ipairs (sorted-keys context.ops))]
-                            {:value op-name
-                             :help (?. context.ops op-name :summary)})
-                          (and (= cmd :az) (= n 1))
-                          (icollect [_ ctx-name (ipairs (sorted-keys config.arazzo))]
-                            {:value ctx-name})
-                          (and (= cmd :az) (= n 2))
-                          (icollect [_ wf (ipairs (or (?. context :doc
-                                                          :workflows)
-                                                      []))]
-                            {:value wf.workflowId :help wf.summary})
-                          [])))
+                    (positional-entries (or ctx.config {}) positional context))
         matching (icollect [_ e (ipairs entries)]
                    (when (= current (e.value:sub 1 (length current)))
                      e))]

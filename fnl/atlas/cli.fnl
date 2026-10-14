@@ -3,7 +3,7 @@
 (local atlas (require :atlas))
 (local arazzo (require :atlas.arazzo))
 (local auth (require :atlas.auth))
-(local help (require :atlas.doc))
+(local cli-help (require :atlas.cli.help))
 (local http-mod (require :atlas.http))
 (local pretty-mod (require :atlas.pretty))
 (local socket (require :socket))
@@ -208,70 +208,74 @@ positional path params, --inputs, --body, then --i./-i/--b. fields."
                   (io.stderr:write (.. (render info.outputs output use-color)
                                        "\n"))))))))
 
+(fn check-inputs [doc wf inputs p]
+  "Stop when inputs don't match the workflow's inputs schema, unless --no-validate."
+  (let [errors (validate.check (arazzo.workflow-inputs doc wf) inputs :inputs)]
+    (when (and (next errors) (not p.no-validate))
+      (die (.. (table.concat errors "\n") "\n(use --no-validate to run anyway)")))))
+
+(fn source-schema-loader [env auth-headers]
+  "Loader for source schemas: URLs through the transport, getting credentials
+only after answering 401/403; files directly."
+  (fn [location opts]
+    (if (location:match "^https?://")
+        (fetch-schema location {:transport (or env.transport http-mod.request)
+                                :headers opts.headers
+                                :ssl opts.ssl
+                                : auth-headers})
+        (atlas.load-schema location opts))))
+
+(fn execute-workflow [doc file wf inputs p profile-name profile env]
+  (let [
+        ;; merged pages would change what step expressions like $response.body#/0 refer to
+        p (doto (collect [k v (pairs p)] k v)
+            (tset :no-paginate true))
+        {: output : no-color : verbose} (display-options profile p env.config)
+        mode (or p.arazzo-output (if verbose :progress :final))
+        show-progress (or (= mode :progress) (= mode :full))
+        paint #(pretty-mod.paint $1 $2 (not no-color))
+        run-opts (client-options profile-name profile p env.config
+                                 env.transport)]
+    (set run-opts.load-schema (source-schema-loader env run-opts.auth-headers))
+    (set run-opts.on-step
+         (when show-progress (progress-reporter output (not no-color))))
+    (set run-opts.max-gotos p.max-gotos)
+    (let [t0 (socket.gettime)
+          clients (arazzo.build-clients doc run-opts file)
+          (ok result) (pcall arazzo.run-workflow doc wf.workflowId inputs
+                             clients run-opts)
+          timing (string.format "  %.3fs" (- (socket.gettime) t0))]
+      (when show-progress
+        (io.stderr:write (if ok
+                             (.. (paint :ok "✓") " workflow " wf.workflowId
+                                 timing "\n")
+                             (.. (paint :fail "✗") " workflow " wf.workflowId
+                                 " failed" timing "\n"))))
+      (if ok
+          (print-arazzo-result result mode output no-color)
+          (die (tostring result))))))
+
 (fn run-arazzo [p env]
   ;; p.schema = name-or-file, p.operation = workflow-id, p.path-params = extra positionals
   (when (or p.dry-run p.curl)
     (die "--dry-run/--curl are not supported for az: later steps depend on real responses; use -v to log each request"))
-  (let [config env.config]
-    (when (not p.schema)
-      (usage-with-choices "Usage: atlas az <name-or-file> <workflow-id> [-i KEY=VAL ...]"
-                          "Configured Arazzo contexts" (or config.arazzo {})
-                          #(or $.file "")))
-    (let [named (?. config :arazzo p.schema)
-          file (if named named.file p.schema)
-          profile-name (or p.profile (?. named :profile))
-          profile (find-profile config profile-name)
-          doc (arazzo.load-doc file)
-          wf (when p.operation (arazzo.find-workflow doc p.operation))]
-      (if (not p.operation) (list-arazzo-workflows doc) (not wf)
-          (die (.. "Unknown workflow: " p.operation)) p.help
-          (print (help.build-workflow wf (arazzo.workflow-inputs doc wf)
-                                      (arazzo.positional-inputs wf)))
-          ;; merged pages would change what step expressions like $response.body#/0 refer to
-          (let [p (doto (collect [k v (pairs p)] k v)
-                    (tset :no-paginate true))
-                {: output : no-color : verbose} (display-options profile p
-                                                                 config)
-                mode (or p.arazzo-output (if verbose :progress :final))
-                show-progress (or (= mode :progress) (= mode :full))
-                run-opts (client-options profile-name profile p config
-                                         env.transport)
-                use-color (not no-color)
-                paint #(pretty-mod.paint $1 $2 use-color)
-                inputs (workflow-inputs p named doc wf)
-                input-errors (validate.check (arazzo.workflow-inputs doc wf)
-                                             inputs :inputs)]
-            (when (and (next input-errors) (not p.no-validate))
-              (die (.. (table.concat input-errors "\n")
-                       "\n(use --no-validate to run anyway)")))
-            ;; source schemas get credentials only after answering 401/403
-            (set run-opts.load-schema
-                 (fn [location ssl headers]
-                   (if (location:match "^https?://")
-                       (fetch-schema location
-                                     {:transport (or env.transport
-                                                     http-mod.request)
-                                      : headers
-                                      : ssl
-                                      :auth-headers run-opts.auth-headers})
-                       (atlas.load-schema location ssl headers))))
-            (set run-opts.on-step
-                 (when show-progress (progress-reporter output use-color)))
-            (set run-opts.max-gotos p.max-gotos)
-            (let [t0 (socket.gettime)
-                  clients (arazzo.build-clients doc run-opts file)
-                  (ok result) (pcall arazzo.run-workflow doc p.operation inputs
-                                     clients run-opts)
-                  timing (string.format "  %.3fs" (- (socket.gettime) t0))]
-              (when show-progress
-                (io.stderr:write (if ok
-                                     (.. (paint :ok "✓") " workflow "
-                                         p.operation timing "\n")
-                                     (.. (paint :fail "✗") " workflow "
-                                         p.operation " failed" timing "\n"))))
-              (if ok
-                  (print-arazzo-result result mode output no-color)
-                  (die (tostring result)))))))))
+  (when (not p.schema)
+    (usage-with-choices "Usage: atlas az <name-or-file> <workflow-id> [-i KEY=VAL ...]"
+                        "Configured Arazzo contexts" (or env.config.arazzo {})
+                        #(or $.file "")))
+  (let [named (?. env.config :arazzo p.schema)
+        file (if named named.file p.schema)
+        profile-name (or p.profile (?. named :profile))
+        profile (find-profile env.config profile-name)
+        doc (arazzo.load-doc file)
+        wf (when p.operation (arazzo.find-workflow doc p.operation))]
+    (if (not p.operation) (list-arazzo-workflows doc) (not wf)
+        (die (.. "Unknown workflow: " p.operation)) p.help
+        (print (cli-help.build-workflow wf (arazzo.workflow-inputs doc wf)
+                                        (arazzo.positional-inputs wf)))
+        (let [inputs (workflow-inputs p named doc wf)]
+          (check-inputs doc wf inputs p)
+          (execute-workflow doc file wf inputs p profile-name profile env)))))
 
 ;; ---- op ----
 
@@ -353,7 +357,7 @@ invalid body unless --no-validate."
                      (or (. c p.operation)
                          (die (.. "Unknown operation: " p.operation))))]
             (if (or p.list (not op)) (list-ops c) p.help
-                (print (or (. op :cli/help) "No documentation available."))
+                (print (cli-help.build-cli op.path op.method op.spec))
                 (send-op op p opts profile config)))))))
 
 ;; ---- entry points ----

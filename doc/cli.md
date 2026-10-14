@@ -71,6 +71,8 @@ atlas op https://petstore3.swagger.io/api/v3/openapi.json find-pets-by-status --
 atlas op https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 -v
 ```
 
+Operations are named after their `operationId` in kebab-case (`getPetById` → `get-pet-by-id`); one without `operationId` is named after its method and path (`GET /pets/{petId}` → `get-pets-pet-id`).
+
 ## Options reference
 
 | Flag | Description |
@@ -751,7 +753,7 @@ Progress output uses color (suppressed by `--no-color`):
 | `$steps.ID.response.body#/ptr` | Response body from a previous step |
 | `$steps.ID.response.header.NAME` | Response header from a previous step |
 | `$workflows.ID.outputs.KEY` | Output of a workflow already run by this workflow |
-| `$sourceDescriptions.NAME.OPID` | Operation `OPID` in source `NAME` (for `operationId`) |
+| `$sourceDescriptions.NAME.OPID` | Operation `OPID` in source `NAME` (for `operationId`; required when several sources define `OPID`) |
 | `$find(ARRAY, FIELD, VALUE[, RETURN])` | Atlas extension: first element of `ARRAY` whose `FIELD` equals `VALUE`, or its `RETURN` field |
 | `{$expr}` | Template string substitution |
 

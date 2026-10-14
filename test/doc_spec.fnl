@@ -96,7 +96,7 @@
                                                        1 true))
                         (assert.is_truthy (result:find "the pet" 1 true))))))))
 
-(local {: build-workflow} (require :atlas.doc))
+(local {: build-workflow} (require :atlas.cli.help))
 
 (local workflow
        {:workflowId "createAndWait"
@@ -145,7 +145,7 @@
           (fn []
             (it "includes the op subcommand"
                 (fn []
-                  (let [{: build-cli} (require :atlas.doc)]
+                  (let [{: build-cli} (require :atlas.cli.help)]
                     (assert.is_truthy (: (build-cli "/pets/{id}" :get
                                                     {:operationId "getPet"
                                                      :responses {}})

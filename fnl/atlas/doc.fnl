@@ -1,5 +1,5 @@
-;; ABOUTME: Renders human-readable help for an operation, in CLI or library form.
-;; ABOUTME: The text backs --help in the CLI and the docstring of library ops.
+;; ABOUTME: Renders human-readable help for an operation; the library form is
+;; ABOUTME: each op's REPL docstring, and the CLI reuses render for its --help.
 (local util (require :atlas.util))
 (local negotiate (require :atlas.negotiate))
 
@@ -60,7 +60,9 @@ params heading and an optional body hint, which differ between CLI and library."
               op-spec.description)]
       (when s (add (.. "\n" s)))
       (when d (add d)))
-    (add (.. "\nUsage: " (style.usage op-spec path-params query-params)))
+    (add (.. "\nUsage: "
+             (style.usage (util.operation-name method path op-spec) op-spec
+                          path-params query-params)))
     (when (> (length path-params) 0)
       (add "\nPath params:")
       (each [_ p (ipairs path-params)]
@@ -87,19 +89,6 @@ params heading and an optional body hint, which differ between CLI and library."
       (add (string.format "  %-6s %s" (tostring code) (or resp.description ""))))
     (table.concat lines "\n")))
 
-(local cli-style
-       {:usage (fn [op-spec path-params query-params]
-                 (let [parts [(util.camel->kebab op-spec.operationId)]]
-                   (each [_ p (ipairs path-params)]
-                     (table.insert parts (.. "<" p.name ">")))
-                   (when op-spec.requestBody
-                     (table.insert parts "[-d JSON|@file|@-]"))
-                   (when (> (length query-params) 0)
-                     (table.insert parts "[--q.KEY=VAL ...]"))
-                   (.. "atlas op <profile-or-schema> " (table.concat parts " "))))
-        :query-heading "Query params (--q.KEY=VAL):"
-        :body-hint "  Use -d JSON, --body=@file, --body=@- for stdin, or --b.KEY=VAL for individual fields"})
-
 (fn invoke-usage [name op-spec path-params query-params]
   (let [parts []]
     (when (> (length path-params) 0)
@@ -123,71 +112,13 @@ params heading and an optional body hint, which differ between CLI and library."
         (string.format "(%s)" name))))
 
 (local library-style
-       {:usage (fn [op-spec path-params query-params]
-                 (let [name (util.camel->kebab op-spec.operationId)]
-                   (.. (invoke-usage name op-spec path-params query-params)
-                       "\n       "
-                       (positional-usage name op-spec path-params query-params))))
+       {:usage (fn [name op-spec path-params query-params]
+                 (.. (invoke-usage name op-spec path-params query-params)
+                     "\n       "
+                     (positional-usage name op-spec path-params query-params)))
         :query-heading "Query params (via {:query {...}}):"})
-
-(fn build-cli [path method op-spec]
-  (render path method op-spec cli-style))
 
 (fn build [path method op-spec]
   (render path method op-spec library-style))
 
-(fn step-target [step]
-  "What a workflow step calls, for display."
-  (if step.operationId (tostring step.operationId)
-      step.workflowId (.. "workflow " step.workflowId)
-      step.operationPath (let [ptr (or (step.operationPath:match "#/paths/(.+)$")
-                                       "")
-                               (path method) (ptr:match "^(.+)/([^/]+)$")]
-                           (if path
-                               (.. (method:upper) " "
-                                   (util.unescape-pointer path))
-                               step.operationPath))
-      "?"))
-
-(fn build-workflow [wf inputs-schema positional]
-  "Help text for an Arazzo workflow. inputs-schema is the workflow's resolved
-inputs JSON Schema; positional lists inputs that may be passed positionally."
-  (let [lines []
-        add #(table.insert lines $)
-        required (collect [_ r (ipairs (or (?. inputs-schema :required) []))]
-                   r
-                   true)
-        props (or (?. inputs-schema :properties) {})
-        names (icollect [name (pairs props)] name)]
-    (table.sort names (fn [a b]
-                        (if (= (. required a) (. required b)) (< a b)
-                            (= true (. required a)))))
-    (add wf.workflowId)
-    (when (and wf.summary (not= wf.summary "")) (add (.. "\n" wf.summary)))
-    (when (and wf.description (not= wf.description "")
-               (not= wf.description wf.summary))
-      (add wf.description))
-    (add (.. "\nUsage: atlas az <name-or-file> " wf.workflowId
-             (table.concat (icollect [_ n (ipairs positional)] (.. " <" n ">")))
-             " [-i KEY=VAL ...]"))
-    (if (= 0 (length names))
-        (add "\nInputs: none")
-        (do
-          (add "\nInputs:")
-          (each [_ name (ipairs names)]
-            (let [prop (. props name)]
-              (add (string.format "  %-16s %s%s" name (or prop.type :any)
-                                  (param-extras {:schema prop
-                                                 :description prop.description}
-                                                (. required name))))))))
-    (let [steps (or wf.steps [])
-          width (accumulate [w 0 _ s (ipairs steps)]
-                  (math.max w (length (tostring s.stepId))))]
-      (when (> (length steps) 0)
-        (add "\nSteps:")
-        (each [i step (ipairs steps)]
-          (add (string.format (.. "  %d. %-" (+ width 2) "s %s") i
-                              (tostring step.stepId) (step-target step))))))
-    (table.concat lines "\n")))
-
-{: build : build-cli : build-workflow}
+{: build : render : param-extras}

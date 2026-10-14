@@ -31,8 +31,9 @@
 declares; records the variables it used in used."
   (if (= nil (next server-vars))
       (atlas.client url opts)
-      (let [schema ((or opts.load-schema atlas.load-schema) url opts.ssl
-                                                            opts.headers)
+      (let [schema ((or opts.load-schema atlas.load-schema) url
+                                                            {:ssl opts.ssl
+                                                             :headers opts.headers})
             declared (or (?. schema :servers 1 :variables) {})
             own (collect [name value (pairs server-vars)]
                   (when (. declared name)
@@ -61,10 +62,9 @@ Relative source URLs resolve against ?location, the document's own path or URL."
         (let [url (if ?location (util.resolve-reference ?location src.url)
                       src.url)
               (ok c) (pcall source-client url (or ?opts {}) server-vars used)]
-          (if ok
-              (tset clients src.name c)
-              (io.stderr:write (.. "warning: could not build client for source '"
-                                   src.name "': " (tostring c) "\n")))))
+          (when (not ok)
+            (error (.. "source '" src.name "': " (tostring c)) 0))
+          (tset clients src.name c)))
       (each [name (pairs server-vars)]
         (when (not (. used name))
           (error (.. "no openapi source declares server variable '" name "'") 0))))
@@ -88,8 +88,17 @@ Relative source URLs resolve against ?location, the document's own path or URL."
         (assert (. clients op-id.__source)
                 (.. "unknown source '" op-id.__source "'"))
         (find-op clients #(= $.operation-id op-id.__operationId) op-id.__source))
-      ;; plain string — first-match across all clients
-      (find-op clients #(= $.operation-id op-id))))
+      ;; plain string: must be unique across sources
+      (let [sources (doto (icollect [name (pairs clients)]
+                            (when (find-op clients #(= $.operation-id op-id)
+                                           name)
+                              name))
+                      (table.sort))]
+        (when (> (length sources) 1)
+          (error (string.format "operationId '%s' is in several sources (%s): use $sourceDescriptions.NAME.%s"
+                                op-id (table.concat sources ", ") op-id)
+                 0))
+        (find-op clients #(= $.operation-id op-id) (. sources 1)))))
 
 (fn find-op-by-path [clients op-path-expr]
   "Resolve an operationPath expression to an operation.
@@ -222,143 +231,147 @@ target; a :value on the reference overrides the target parameter's value."
         (.. "step '" step-id "' failed success criteria (HTTP "
             (tostring (or (?. resp :status) "?")) body ")"))))
 
-(fn run-workflow [doc workflow-id inputs clients ?opts]
-  (let [workflows (collect [_ w (ipairs (or doc.workflows []))]
-                    w.workflowId
-                    w)
-        wf (. workflows workflow-id)]
-    (assert wf (.. "workflow not found: " workflow-id))
-    (let [stack (or (?. ?opts :workflow-stack) [])
-          _ (each [_ active (ipairs stack)]
-              (when (= active workflow-id)
-                (error (.. "workflow cycle: " (table.concat stack " -> ")
-                           " -> " workflow-id) 0)))
-          ?opts (doto (collect [k v (pairs (or ?opts {}))]
-                        k
-                        v)
-                  (tset :workflow-stack
-                        (doto (icollect [_ w (ipairs stack)] w)
-                          (table.insert workflow-id))))
-          on-step (?. ?opts :on-step)
-          max-gotos (or (?. ?opts :max-gotos) 50)
-          ctx {:inputs (or inputs {})
-               :request nil
-               :response nil
-               :steps {}
-               :workflows {}}
-          step-order []
-          steps wf.steps
-          step-index (collect [i s (ipairs steps)] s.stepId i)
-          wf-params (expand-references doc wf.parameters)
-          goto-counts {}
-          retry-counts {}
-          run-sub (fn [sub-id sub-inputs]
-                    (let [sub (run-workflow doc sub-id sub-inputs clients ?opts)]
-                      (each [k v (pairs sub.ctx.workflows)]
-                        (tset ctx.workflows k v))
-                      (tset ctx.workflows sub-id {:outputs sub.outputs})
-                      sub))]
-      ;; workflows listed in dependsOn run first, once each, with the same inputs
-      (each [_ dep (ipairs (or wf.dependsOn []))]
-        (when (= nil (. ctx.workflows dep))
-          (run-sub dep inputs)))
-
-      (fn run-step [step]
-        "Run one step; returns {:ok bool :response resp :error message}."
-        (if step.workflowId
-            ;; sub-workflow step: its outputs become the step's outputs
-            (let [sub-inputs (collect [_ p (ipairs (expand-references doc
-                                                                      step.parameters))]
-                               p.name
-                               (expr.eval ctx p.value))
-                  (ok sub) (pcall run-sub step.workflowId sub-inputs)]
-              (tset ctx.steps step.stepId
-                    {:outputs (if ok sub.outputs {})
-                     :request nil
-                     :response nil})
-              (if ok {:ok true} {:ok false :error sub}))
-            ;; operation step: merge workflow params then step params
-            (let [params (util.merge-parameters wf-params
-                                                (expand-references doc
-                                                                   step.parameters))]
-              {:ok true
-               :response (execute-step ctx clients step params on-step)})))
-
-      (fn next-index [i step success?]
-        "Index of the step to run after step i, by the first action that
-applies; nil when a failure is left unhandled."
-        (let [actions (if success?
-                          (merge-actions (expand-references doc
-                                                            wf.successActions)
-                                         (expand-references doc step.onSuccess))
-                          (merge-actions (expand-references doc
-                                                            wf.failureActions)
-                                         (expand-references doc step.onFailure)))
-              step-id step.stepId]
-          (var next-i (if success? (+ i 1) nil))
-          (var decided false)
-          (each [_ action (ipairs actions) &until decided]
-            (when (expr.eval-criteria ctx action.criteria)
-              (match action.type
-                :end (do
-                       (set next-i (+ (length steps) 1))
-                       (set decided true))
-                :goto (let [target (or action.stepId action.workflowId)
-                            n (+ 1 (or (. goto-counts target) 0))]
-                        (tset goto-counts target n)
-                        (assert (<= n max-gotos)
-                                (.. "goto loop detected at: " target))
-                        (when (and action.stepId (= action.stepId step-id)
-                                   action.retryAfter)
-                          (socket.sleep action.retryAfter))
-                        (if action.stepId
-                            (let [idx (. step-index action.stepId)]
-                              (assert idx
-                                      (.. "goto: unknown step: " action.stepId))
-                              (set next-i idx))
-                            (do
-                              (run-sub action.workflowId inputs)
-                              (set next-i (+ (length steps) 1))))
-                        (set decided true))
-                :retry (let [n (+ 1 (or (. retry-counts step-id) 0))]
-                         (when (<= n (or action.retryLimit 1))
-                           (tset retry-counts step-id n)
-                           (when (and action.retryAfter (> action.retryAfter 0))
-                             (socket.sleep action.retryAfter))
-                           (when action.workflowId
-                             (run-sub action.workflowId inputs))
-                           (set next-i i)
-                           (set decided true))))))
-          next-i))
-
-      (var i 1)
-      (while (<= i (length steps))
-        (let [step (. steps i)
-              step-id step.stepId
-              outcome (run-step step)
-              success? (and outcome.ok
-                            (expr.eval-criteria ctx step.successCriteria))]
-          (table.insert step-order step-id)
-          (when step.outputs
-            (tset (. ctx.steps step-id) :outputs
-                  (resolve-outputs ctx step.outputs)))
-          (when success?
-            (tset retry-counts step-id nil))
-          (let [next-i (next-index i step success?)]
-            (when (= next-i nil)
-              (error (failure-message step-id outcome) 0))
-            (set i next-i))))
-      {:ctx ctx
-       :outputs (resolve-outputs ctx wf.outputs)
-       :steps ctx.steps
-       :step-order step-order})))
-
-;; ---- introspection ----
-
 (fn find-workflow [doc workflow-id]
   "The workflow with workflow-id in doc, or nil."
   (accumulate [found nil _ wf (ipairs (or doc.workflows [])) &until found]
     (when (= wf.workflowId workflow-id) wf)))
+
+(fn enter-workflow [workflow-id ?opts]
+  "?opts with workflow-id pushed on the running-workflow stack; a workflow
+already on the stack means a cycle (dependsOn or a step calling itself)."
+  (let [stack (or (?. ?opts :workflow-stack) [])]
+    (each [_ active (ipairs stack)]
+      (when (= active workflow-id)
+        (error (.. "workflow cycle: " (table.concat stack " -> ") " -> "
+                   workflow-id) 0)))
+    (doto (collect [k v (pairs (or ?opts {}))]
+            k
+            v)
+      (tset :workflow-stack
+            (doto (icollect [_ w (ipairs stack)] w)
+              (table.insert workflow-id))))))
+
+(fn run-step [run step]
+  "Run one step; returns {:ok bool :response resp :error message}."
+  (if step.workflowId
+      ;; sub-workflow step: its outputs become the step's outputs
+      (let [sub-inputs (collect [_ p (ipairs (expand-references run.doc
+                                                                step.parameters))]
+                         p.name
+                         (expr.eval run.ctx p.value))
+            (ok sub) (pcall run.run-sub step.workflowId sub-inputs)]
+        (tset run.ctx.steps step.stepId
+              {:outputs (if ok sub.outputs {}) :request nil :response nil})
+        (if ok {:ok true} {:ok false :error sub}))
+      ;; operation step: merge workflow params then step params
+      (let [params (util.merge-parameters run.wf-params
+                                          (expand-references run.doc
+                                                             step.parameters))]
+        {:ok true
+         :response (execute-step run.ctx run.clients step params run.on-step)})))
+
+(fn goto-action [run action step]
+  "Index of the step a goto action continues at."
+  (let [target (or action.stepId action.workflowId)
+        n (+ 1 (or (. run.goto-counts target) 0))]
+    (tset run.goto-counts target n)
+    (assert (<= n run.max-gotos) (.. "goto loop detected at: " target))
+    (when (and action.stepId (= action.stepId step.stepId) action.retryAfter)
+      (socket.sleep action.retryAfter))
+    (if action.stepId
+        (or (. run.step-index action.stepId)
+            (error (.. "goto: unknown step: " action.stepId) 0))
+        (do
+          (run.run-sub action.workflowId run.inputs)
+          (+ (length run.steps) 1)))))
+
+(fn retry-action [run action i step]
+  "i to run the step again, or nil once retryLimit is used up."
+  (let [n (+ 1 (or (. run.retry-counts step.stepId) 0))]
+    (when (<= n (or action.retryLimit 1))
+      (tset run.retry-counts step.stepId n)
+      (when (and action.retryAfter (> action.retryAfter 0))
+        (socket.sleep action.retryAfter))
+      (when action.workflowId
+        (run.run-sub action.workflowId run.inputs))
+      i)))
+
+(fn next-index [run i step success?]
+  "Index of the step to run after step i, by the first action that applies;
+nil when a failure is left unhandled."
+  (let [wf run.wf
+        actions (if success?
+                    (merge-actions (expand-references run.doc wf.successActions)
+                                   (expand-references run.doc step.onSuccess))
+                    (merge-actions (expand-references run.doc wf.failureActions)
+                                   (expand-references run.doc step.onFailure)))
+        chosen (accumulate [found nil _ action (ipairs actions) &until found]
+                 (when (expr.eval-criteria run.ctx action.criteria)
+                   (match action.type
+                     :end [(+ (length run.steps) 1)]
+                     :goto [(goto-action run action step)]
+                     :retry (match (retry-action run action i step)
+                              again [again]))))]
+    (if chosen (. chosen 1)
+        success? (+ i 1)
+        nil)))
+
+(fn run-workflow [doc workflow-id inputs clients ?opts]
+  (let [wf (or (find-workflow doc workflow-id)
+               (error (.. "workflow not found: " workflow-id) 0))
+        opts (enter-workflow workflow-id ?opts)
+        ctx {:inputs (or inputs {})
+             :request nil
+             :response nil
+             :steps {}
+             :workflows {}}
+        run {: doc
+             : wf
+             : clients
+             : ctx
+             :inputs (or inputs {})
+             :steps (or wf.steps [])
+             :step-index (collect [i s (ipairs (or wf.steps []))]
+                           s.stepId
+                           i)
+             :wf-params (expand-references doc wf.parameters)
+             :on-step opts.on-step
+             :max-gotos (or opts.max-gotos 50)
+             :goto-counts {}
+             :retry-counts {}
+             :run-sub (fn [sub-id sub-inputs]
+                        (let [sub (run-workflow doc sub-id sub-inputs clients
+                                                opts)]
+                          (each [k v (pairs sub.ctx.workflows)]
+                            (tset ctx.workflows k v))
+                          (tset ctx.workflows sub-id {:outputs sub.outputs})
+                          sub))}
+        step-order []]
+    ;; workflows listed in dependsOn run first, once each, with the same inputs
+    (each [_ dep (ipairs (or wf.dependsOn []))]
+      (when (= nil (. ctx.workflows dep))
+        (run.run-sub dep run.inputs)))
+    (var i 1)
+    (while (<= i (length run.steps))
+      (let [step (. run.steps i)
+            outcome (run-step run step)
+            success? (and outcome.ok
+                          (expr.eval-criteria ctx step.successCriteria))]
+        (table.insert step-order step.stepId)
+        (when step.outputs
+          (tset (. ctx.steps step.stepId) :outputs
+                (resolve-outputs ctx step.outputs)))
+        (when success?
+          (tset run.retry-counts step.stepId nil))
+        (set i
+             (or (next-index run i step success?)
+                 (error (failure-message step.stepId outcome) 0)))))
+    {: ctx
+     :outputs (resolve-outputs ctx wf.outputs)
+     :steps ctx.steps
+     : step-order}))
+
+;; ---- introspection ----
 
 (fn positional-inputs [wf]
   "Input names used as path parameters by the workflow's steps, in first-use
