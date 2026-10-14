@@ -33,4 +33,4 @@ RUN make check-binary
 
 # ---- export stage ----
 FROM scratch
-COPY --from=builder /src/bin/atlas-bin /atlas-linux-x86_64
+COPY --from=builder /src/bin/atlas-bin /atlas

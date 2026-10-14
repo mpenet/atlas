@@ -10,19 +10,28 @@ Two options:
 
 No Lua runtime required. The binary embeds Lua, luasocket, libcurl, libyaml and OpenSSL statically.
 
-Download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases) (`atlas-macos-arm64` or `atlas-linux-x86_64`), then install it:
+Download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases) (`atlas-macos-arm64`, `atlas-macos-x86_64`, `atlas-linux-x86_64` or `atlas-linux-arm64`), then install it:
 
 ```sh
 install -m 755 atlas-macos-arm64 /usr/local/bin/atlas
 ```
+
+Each release lists the files' SHA-256 sums in `SHA256SUMS` and carries a [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) proving the binary was built by this repository's release workflow:
+
+```sh
+shasum -a 256 -c SHA256SUMS --ignore-missing
+gh attestation verify atlas-macos-arm64 --repo mpenet/atlas
+```
+
+The Linux binaries depend only on glibc. HTTPS needs the system's CA certificates (the `ca-certificates` package on minimal Linux images) — see [TLS verification and proxies](#tls-verification-and-proxies).
 
 To build the binary from source instead:
 
 ```sh
 make deps     # install luarocks dependencies (fennel, lunajson, luasocket, lyaml, busted)
 make binary   # produces bin/atlas-bin
-make check-binary  # runs it with Lua's module paths emptied, proving it is self-contained
-install -m 755 bin/atlas-bin /usr/local/bin/atlas
+make check-binary  # runs it with Lua's module paths emptied and checks it links only system libraries
+make install       # installs bin/atlas-bin as /usr/local/bin/atlas (PREFIX=... to change)
 ```
 
 Requires `lua` (5.4+), `fennel`, `openssl`, `libyaml`, `pkg-config` and `curl` to build: the build downloads the libcurl sources, checks them against a pinned checksum and links them in statically.

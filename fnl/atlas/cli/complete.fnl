@@ -41,6 +41,7 @@
   (print "  profile import-restish [FILE] [--dry-run]             Add profiles from a Restish config")
   (print "  auth    <profile> [--logout]                          Authenticate a profile")
   (print "  completion <fish|bash|zsh>                            Print shell completion")
+  (print "  --version                                             Print the version")
   (each [_ [title scope] (ipairs [["Options (op):" :op] ["Options (az):" :az]])]
     (print "")
     (print title)

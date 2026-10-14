@@ -303,6 +303,15 @@
                   (let [r (atlas-run [])]
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.out:find "Usage: atlas" 1 true)))))
+            (it "prints its version and the HTTP library it uses"
+                (fn []
+                  (let [r (atlas-run ["--version"])
+                        version (. (require :atlas) :version)]
+                    (assert.are.equal 0 r.code)
+                    (assert.is_truthy (version:match "^%d+%.%d+%.%d+"))
+                    (assert.is_truthy (r.out:find (.. "atlas " version
+                                                      " (libcurl/")
+                                                  1 true)))))
             (it "lists profiles sorted"
                 (fn []
                   (let [r (atlas-run ["profile" "list"])]

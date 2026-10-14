@@ -365,6 +365,9 @@ invalid body unless --no-validate."
 (fn dispatch [args env]
   (if (= (. args 1) "__complete")
       (run-complete args)
+      (= (. args 1) "--version")
+      (print (.. "atlas " atlas.version " ("
+                 ((. (require :atlas.curl) :version)) ")"))
       (let [p (parse-args args)]
         (match p.cmd
           nil (usage)

@@ -109,8 +109,11 @@ test: build check-globals check-manifests
 	LUA_PATH="./$(LUA_DIR)/?.lua;./$(LUA_DIR)/?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" \
 	LUA_CPATH="./$(LUA_DIR)/?.so;$(shell luarocks path --lr-cpath 2>/dev/null);;" busted test/
 
+PREFIX ?= /usr/local
+
 install: binary
-	install -m 755 bin/atlas-bin /usr/local/bin/atlas
+	install -d $(DESTDIR)$(PREFIX)/bin
+	install -m 755 bin/atlas-bin $(DESTDIR)$(PREFIX)/bin/atlas
 
 # ---- standalone binary ----
 

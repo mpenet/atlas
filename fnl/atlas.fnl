@@ -211,7 +211,8 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
                                       method op-spec))))))))
     client))
 
-{:client client
+{:version "1.0.0-beta1"
+ :client client
  :load-schema load-schema
  :parse-schema parse-schema
  :servers servers}
