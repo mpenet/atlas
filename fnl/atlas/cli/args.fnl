@@ -94,7 +94,7 @@
         {:family "--ssl."
          :shown "--ssl.KEY=VAL"
          :scope :any
-         :help "luasec TLS option (e.g. --ssl.verify=none)"}
+         :help "TLS option: cafile, capath, certificate, key, verify (e.g. --ssl.verify=none)"}
         {:names ["--output"]
          :key :output
          :value :string

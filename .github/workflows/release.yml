@@ -20,7 +20,6 @@ jobs:
           luarocks install fennel
           luarocks install lunajson
           luarocks install luasocket
-          luarocks install luasec
           luarocks install lyaml
 
       - name: Build binary
@@ -28,6 +27,9 @@ jobs:
 
       - name: Check binary is self-contained
         run: make check-binary
+
+      - name: Check TLS verification
+        run: make check-binary-tls
 
       - name: Stage artifact
         run: cp bin/atlas-bin atlas-macos-arm64
@@ -49,6 +51,9 @@ jobs:
         run: |
           docker buildx build --output type=local,dest=dist/ .
           cp dist/atlas-linux-x86_64 atlas-linux-x86_64
+
+      - name: Check TLS verification
+        run: mkdir -p bin && cp atlas-linux-x86_64 bin/atlas-bin && make check-binary-tls
 
       - uses: actions/upload-artifact@v4
         with:

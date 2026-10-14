@@ -66,14 +66,14 @@ atlas az myapi create-and-wait \
 ## Building from source
 
 ```sh
-make deps     # lunajson, luasocket, luasec, lyaml, fennel, busted
+make deps     # lunajson, luasocket, lyaml, fennel, busted
 make build    # compile Fennel → Lua
 make test     # run test suite
 make install  # build standalone binary and install to /usr/local/bin
 make binary   # build standalone binary → bin/atlas-bin
 ```
 
-`make binary` requires `fennel`, `lua`, `openssl`, `libyaml`, and `pkg-config`. It statically links Lua, luasocket, luasec, lyaml, OpenSSL and libyaml — the resulting binary has no runtime dependencies.
+`make build` and `make test` also compile the libcurl binding, which needs the libcurl headers (`curl-config` on `PATH`). `make binary` requires `fennel`, `lua`, `openssl`, `libyaml`, `pkg-config` and `curl`; it downloads the libcurl sources (checked against a pinned checksum) and statically links Lua, luasocket, libcurl, lyaml, OpenSSL and libyaml — the resulting binary has no runtime dependencies.
 
 ## License
 

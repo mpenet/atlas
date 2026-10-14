@@ -12,7 +12,8 @@ description = {
     Dynamically builds a callable client from any OpenAPI 3.x schema at runtime
     (file path, URL, or parsed table; JSON or YAML). No code generation required.
     Also ships a standalone CLI (atlas) similar to Restish, with profiles,
-    OAuth 2.0, mTLS, schema caching, and shell completion.
+    OAuth 2.0, mTLS, schema caching, and shell completion. HTTP goes through
+    libcurl.
   ]],
   license = "MPL-2.0",
   homepage = "https://github.com/mpenet/atlas",
@@ -22,7 +23,6 @@ dependencies = {
   "lua >= 5.4",
   "lunajson",
   "luasocket",
-  "luasec",
   "lyaml",
 }
 
@@ -30,11 +30,15 @@ build_dependencies = {
   "fennel",
 }
 
+external_dependencies = {
+  CURL = { header = "curl/curl.h" },
+}
+
 build = {
   -- sources are Fennel; compile them, then install the generated Lua
   type = "command",
   -- needs the fennel executable on PATH (the build dependency's tree bin dir)
-  build_command = "make build",
+  build_command = "make build LUA_INC=$(LUA_INCDIR) CURL_CFLAGS=-I$(CURL_INCDIR) 'CURL_LIBS=-L$(CURL_LIBDIR) -lcurl'",
   install = {
     lua = {
       ["atlas"]           = "lua/atlas.lua",
@@ -57,12 +61,14 @@ build = {
       ["atlas.pretty"]    = "lua/atlas/pretty.lua",
       ["atlas.refs"]      = "lua/atlas/refs.lua",
       ["atlas.retry"]     = "lua/atlas/retry.lua",
+      ["atlas.tls"] = "lua/atlas/tls.lua",
       ["atlas.util"]      = "lua/atlas/util.lua",
       ["atlas.validate"]  = "lua/atlas/validate.lua",
       ["atlas.arazzo"]    = "lua/atlas/arazzo.lua",
       ["atlas.arazzo.expr"] = "lua/atlas/arazzo/expr.lua",
       ["atlas.yaml"]      = "lua/atlas/yaml.lua",
     },
+    lib = { ["atlas.curl"] = "lua/atlas/curl.so" },
     bin = { atlas = "bin/atlas" },
   },
 }

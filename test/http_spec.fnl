@@ -74,8 +74,50 @@
                                          :timeout 0.2})]
                     (srv:close)
                     (assert.is_false ok)
-                    (assert.is_truthy (: (tostring err) :find "timeout"))
+                    (assert.is_truthy (: (tostring err) :find "timed out"))
                     (assert.is_true (< (- (socket.gettime) t0) 2)))))))
+
+(describe "http.parse-headers"
+          (fn []
+            (it "lowercases names and joins repeated headers"
+                (fn []
+                  (assert.are.same {:content-type "application/json"
+                                    :set-cookie "a=1, b=2"
+                                    :x-empty ""}
+                                   (http.parse-headers "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nSet-Cookie: a=1\r\nset-cookie: b=2\r\nX-Empty:\r\n\r\n"))))))
+
+(describe "http.transfer"
+          (fn []
+            (let [tls {:verify true :cafile "/ca.pem"}]
+              (it "describes the exchange for the transport"
+                  (fn []
+                    (assert.are.same {:method "POST"
+                                      :url "https://h/x?a=1"
+                                      :headers ["accept: application/json"
+                                                "content-type: application/json"]
+                                      :body "{}"
+                                      :timeout 5
+                                      :verify true
+                                      :cafile "/ca.pem"}
+                                     (http.transfer {:method "POST" :timeout 5}
+                                                    "https://h/x?a=1" "{}"
+                                                    {:content-type "application/json"
+                                                     :accept "application/json"}
+                                                    tls))))
+              (it "stops the transport from adding a form content type"
+                  (fn []
+                    (assert.are.same ["content-type:"]
+                                     (. (http.transfer {:method "POST"}
+                                                       "https://h/x" "raw" {}
+                                                       tls)
+                                        :headers))))
+              (it "sends empty header values"
+                  (fn []
+                    (assert.are.same ["x-empty;"]
+                                     (. (http.transfer {:method "GET"}
+                                                       "https://h/x" nil
+                                                       {:x-empty ""} tls)
+                                        :headers)))))))
 
 (describe "http.request over the network"
           (fn []
@@ -104,6 +146,17 @@
                                           :body "{\"name\":\"Rex\"}"
                                           :content_type "application/json"}
                                          resp.body))))))
+            (it "goes through the proxy named by http_proxy"
+                (fn []
+                  (with-server 1
+                    (fn [port]
+                      (let [script "local r = require('atlas.http').request({method = 'GET', url = 'http://api.example.test/pets'}); io.write(r.body.path)"
+                            proc (io.popen (.. "http_proxy=http://127.0.0.1:"
+                                               port " lua -e \"" script "\""))
+                            path (proc:read :*a)]
+                        (proc:close)
+                        ;; a proxy receives the absolute URL
+                        (assert.are.equal "http://api.example.test/pets" path))))))
             (it "fetches text from a URL"
                 (fn []
                   (with-server 1

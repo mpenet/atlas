@@ -7,3 +7,4 @@ luarocks.lock
 **.lua
 /tmp
 !test/fixtures/*.lua
+*.so

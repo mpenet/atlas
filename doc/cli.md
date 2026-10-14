@@ -8,7 +8,7 @@ Two options:
 
 ### Option 1 — Standalone binary (recommended)
 
-No Lua runtime required. The binary embeds Lua, luasocket, luasec, libyaml and OpenSSL statically.
+No Lua runtime required. The binary embeds Lua, luasocket, libcurl, libyaml and OpenSSL statically.
 
 Download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases) (`atlas-macos-arm64` or `atlas-linux-x86_64`), then install it:
 
@@ -19,17 +19,17 @@ install -m 755 atlas-macos-arm64 /usr/local/bin/atlas
 To build the binary from source instead:
 
 ```sh
-make deps     # install luarocks dependencies (fennel, lunajson, luasocket, luasec, lyaml, busted)
+make deps     # install luarocks dependencies (fennel, lunajson, luasocket, lyaml, busted)
 make binary   # produces bin/atlas-bin
 make check-binary  # runs it with Lua's module paths emptied, proving it is self-contained
 install -m 755 bin/atlas-bin /usr/local/bin/atlas
 ```
 
-Requires `lua` (5.4+), `fennel`, `openssl`, `libyaml` and `pkg-config` to build.
+Requires `lua` (5.4+), `fennel`, `openssl`, `libyaml`, `pkg-config` and `curl` to build: the build downloads the libcurl sources, checks them against a pinned checksum and links them in statically.
 
 ### Option 2 — Lua script (requires a Lua runtime)
 
-Installs `atlas` as a Lua script run by your Lua interpreter, together with the library. luarocks installs the runtime dependencies (lunajson, luasocket, luasec, lyaml; lyaml needs the libyaml headers) and compiles the Fennel sources, which needs the `fennel` executable on `PATH`.
+Installs `atlas` as a Lua script run by your Lua interpreter, together with the library. luarocks installs the runtime dependencies (lunajson, luasocket, lyaml; lyaml needs the libyaml headers) and compiles the libcurl binding, which needs the libcurl headers (`libcurl4-openssl-dev` on Debian/Ubuntu, `libcurl-devel` on Fedora; macOS ships them) and compiles the Fennel sources, which needs the `fennel` executable on `PATH`.
 
 ```sh
 luarocks install atlas-oai
@@ -293,7 +293,7 @@ Top-level fields in `config.json` apply to all invocations as defaults:
 | `retry` | object | Retry settings for this profile, same shape as the top-level `retry` |
 | `auth` | object | Authentication configuration — see [Authentication](#authentication) |
 | `tls` | object | mTLS configuration (`cert`, `key`, `ca_cert`, `insecure`) — see [mTLS](#mtls) |
-| `ssl` | object | Raw luasec options merged with `tls` |
+| `ssl` | object | TLS options (`cafile`, `capath`, `certificate`, `key`, `verify`) merged with `tls` |
 | `extends` | string | Inherit from another profile |
 
 Resolution order for `no-color`, `output`, `verbose`, and `timeout`: CLI flag → profile → global config.
@@ -529,15 +529,22 @@ Add a `tls` block for mutual TLS. The schema is also fetched using the client ce
 |-----|-------------|
 | `cert` | Path to PEM client certificate |
 | `key` | Path to PEM private key |
+| `ca_cert` | PEM bundle of CAs to trust instead of the system's |
 | `insecure` | Set `true` to skip server certificate verification |
 
-For a custom CA bundle or other luasec options, use `ssl` alongside or instead of `tls`:
+For a CA directory or the other TLS options, use `ssl` alongside or instead of `tls`:
 
 ```json
 "ssl": { "cafile": "/etc/ssl/internal-ca.pem" }
 ```
 
 `tls` and `ssl` are merged, with `tls` taking precedence for fields they share.
+
+## TLS verification and proxies
+
+Server certificates are always verified, chain and host name, unless a profile sets `"insecure": true` or you pass `--ssl.verify=none`. atlas trusts the system's CA bundle: `$SSL_CERT_FILE` when set, else the bundle at the usual place for macOS and the major Linux distributions, else `$SSL_CERT_DIR`. With none of them, HTTPS requests fail rather than go unverified.
+
+Requests go through the proxy named by `https_proxy`/`HTTPS_PROXY` (HTTPS), `http_proxy` (HTTP) or `all_proxy`/`ALL_PROXY`, except for hosts in `no_proxy`/`NO_PROXY`.
 
 ### Combined example (OAuth Authorization Code + mTLS)
 

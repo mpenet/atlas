@@ -6,7 +6,6 @@
 (local retry (require :atlas.retry))
 (local paginate (require :atlas.paginate))
 (local util (require :atlas.util))
-(local yaml (require :atlas.yaml))
 (local http-mod (require :atlas.http))
 (local json (require :lunajson))
 (local {: wrap-log-request : request-text : curl-command : printing-transport}
@@ -193,10 +192,7 @@ authentication. opts: {:transport :headers :ssl :auth-headers}"
                  first)]
     (assert (util.success? resp.status)
             (string.format "HTTP %s fetching schema from %s" resp.status url))
-    (let [(ok parsed) (pcall yaml.decode (or resp.raw ""))]
-      (assert ok (string.format "failed to parse schema from '%s': %s" url
-                                (tostring parsed)))
-      parsed)))
+    (atlas.parse-schema (or resp.raw "") url)))
 
 (fn load-schema-cached [url opts]
   "Schema at url from the cache when fresh, else fetched and cached.

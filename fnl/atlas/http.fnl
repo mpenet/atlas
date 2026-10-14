@@ -1,8 +1,7 @@
-;; ABOUTME: HTTP transport over luasocket/luasec: encodes request bodies by
+;; ABOUTME: HTTP transport over libcurl: encodes request bodies by
 ;; ABOUTME: content-type and decodes responses into {:status :headers :body :raw}.
-(local socket-http (require :socket.http))
-(local https (require :ssl.https))
-(local ltn12 (require :ltn12))
+(local curl (require :atlas.curl))
+(local tls (require :atlas.tls))
 (local json (require :lunajson))
 (local util (require :atlas.util))
 
@@ -80,22 +79,6 @@ determines one (multipart boundaries)."
                    raw))]
     {:status status :headers headers :body body :raw raw}))
 
-(fn with-timeout [seconds f]
-  "Run f with luasocket/luasec module timeouts set to seconds; they only
-support a module-level setting, so it is restored afterwards."
-  (if (= nil seconds)
-      (f)
-      (let [prev-http socket-http.TIMEOUT
-            prev-https https.TIMEOUT]
-        (set socket-http.TIMEOUT seconds)
-        (set https.TIMEOUT seconds)
-        (let [result (table.pack (pcall f))]
-          (set socket-http.TIMEOUT prev-http)
-          (set https.TIMEOUT prev-https)
-          (if (. result 1)
-              (table.unpack result 2 result.n)
-              (error (. result 2) 0))))))
-
 (fn check-header [name value]
   "Raise for names that aren't HTTP tokens and values with CR, LF or NUL,
 which would let a value inject extra headers."
@@ -158,29 +141,50 @@ redirect-target allows."
     (set next-req (redirect-target current resp)))
   resp)
 
+(fn parse-headers [text]
+  "Header map of a response header block: names lowercased, repeated
+headers joined with \", \"."
+  (let [headers {}]
+    (each [line (text:gmatch "[^\r\n]+")]
+      (match (line:match "^([^:%s]+):%s*(.-)%s*$")
+        (name value) (let [k (name:lower)]
+                       (tset headers k
+                             (match (. headers k)
+                               prev (.. prev ", " value)
+                               _ value)))))
+    headers))
+
+(local body-methods {:POST true :PUT true :PATCH true})
+
+(fn transfer [req url payload headers tls-options]
+  "The exchange as the transport takes it: headers as sorted \"name: value\"
+lines, plus the TLS settings."
+  (let [names (doto (icollect [k (pairs headers)] k)
+                (table.sort))
+        lines (icollect [_ k (ipairs names)]
+                (let [v (tostring (. headers k))]
+                  ;; "name;" is how libcurl sends an empty value
+                  (if (= v "") (.. k ";") (.. k ": " v))))]
+    ;; a body without a content type would otherwise be sent as a form
+    (when (and (or payload (. body-methods req.method))
+               (= nil (util.header headers "content-type")))
+      (table.insert lines "content-type:"))
+    (doto (collect [k v (pairs tls-options)] k v)
+      (tset :method req.method)
+      (tset :url url)
+      (tset :headers lines)
+      (tset :body payload)
+      (tset :timeout req.timeout))))
+
 (fn send [req]
-  "One HTTP exchange; luasocket's own redirect handling is disabled because it
-re-sends every header to whatever host the Location names."
+  "One HTTP exchange; redirects are followed by request, not by the transport."
   (let [(url payload headers) (encode-request req)
-        requester (if (url:match "^https://") https socket-http)
-        body-out []
-        req-table (if (and req.ssl (url:match "^https://"))
-                      (collect [k v (pairs req.ssl)] k v)
-                      {})]
-    (when payload
-      (tset headers :content-length (tostring (length payload))))
-    (tset req-table :url url)
-    (tset req-table :method req.method)
-    (tset req-table :redirect false)
-    (tset req-table :headers headers)
-    (tset req-table :source (when payload (ltn12.source.string payload)))
-    (tset req-table :sink (ltn12.sink.table body-out))
-    (let [(ok code resp-headers) (with-timeout req.timeout
-                                   #(requester.request req-table))]
-      (assert ok
-              (string.format "%s %s failed: %s" req.method
-                             (util.redact-url url) (tostring code)))
-      (decode-response code resp-headers (table.concat body-out)))))
+        (status head body) (curl.perform (transfer req url payload headers
+                                                   (tls.options req.ssl)))]
+    (assert status
+            (string.format "%s %s failed: %s" req.method (util.redact-url url)
+                           (tostring head)))
+    (decode-response status (parse-headers head) body)))
 
 (fn request [req]
   (follow-redirects send req))
@@ -204,6 +208,8 @@ re-sends every header to whatever host the Location names."
           content))))
 
 {: request
+ : parse-headers
+ : transfer
  : follow-redirects
  : encode-request
  : fetch-text

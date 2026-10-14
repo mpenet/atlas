@@ -506,6 +506,21 @@
                                         :headers {:authorization "t"}}]]
                                      seen))))))
 
+(describe "schema documents"
+          (fn []
+            (it "rejects text that is not a mapping"
+                (fn []
+                  (let [path (os.tmpname)]
+                    (with-open [f (io.open path :w)]
+                      (f:write "<!doctype html><html></html>"))
+                    (let [(ok err) (pcall atlas.load-schema path)]
+                      (os.remove path)
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           (.. "'" path
+                                               "' is not an OpenAPI document")
+                                           1 true))))))))
+
 (describe "operation help"
           (fn []
             (it "exposes the resolved spec and renders the docstring only when asked"

@@ -11,16 +11,22 @@
 
 (local http (require :atlas.http))
 
+(fn parse-schema [text location]
+  "The document in text (JSON or YAML), which must be a mapping; location
+names it in errors."
+  (let [(ok parsed) (pcall yaml.decode text)]
+    (assert ok (string.format "failed to parse schema from '%s': %s" location
+                              (tostring parsed)))
+    (assert (= (type parsed) :table)
+            (string.format "'%s' is not an OpenAPI document" location))
+    parsed))
+
 (fn load-schema [path ?opts]
   "Load an OpenAPI schema (JSON or YAML) from a local file path or http(s):// URL.
-?opts — {:ssl luasec-options :headers {}} for fetching a URL"
-  (let [content (http.fetch-text path
+?opts — {:ssl tls-options :headers {}} for fetching a URL"
+  (parse-schema (http.fetch-text path
                                  {:headers (?. ?opts :headers)
-                                  :ssl (?. ?opts :ssl)})
-        (ok parsed) (pcall yaml.decode content)]
-    (assert ok (string.format "failed to parse schema from '%s': %s" path
-                              (tostring parsed)))
-    parsed))
+                                  :ssl (?. ?opts :ssl)}) path))
 
 (fn merge-headers [...]
   "Merge header tables left to right; names are lowercased so later
@@ -205,4 +211,7 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
                                       method op-spec))))))))
     client))
 
-{:client client :load-schema load-schema :servers servers}
+{:client client
+ :load-schema load-schema
+ :parse-schema parse-schema
+ :servers servers}

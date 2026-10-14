@@ -11,23 +11,9 @@
 
 (require :lunajson)
 
-(require :ltn12)
-
-(require :mime)
-
 (require :socket)
 
 (require :socket.url)
-
-(require :socket.headers)
-
-(require :socket.tp)
-
-(require :socket.http)
-
-(require :ssl)
-
-(require :ssl.https)
 
 (require :atlas.util)
 
@@ -48,6 +34,8 @@
 (require :atlas.negotiate)
 
 (require :atlas.doc)
+
+(require :atlas.tls)
 
 (require :atlas.http)
 

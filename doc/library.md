@@ -63,7 +63,7 @@ Returns a table where each key is a kebab-case `operationId` (`getPetById` → `
 | `:server-vars` | table | Values for `servers[1].variables`, e.g. `{:zone "de-fra-1"}`; unknown names and values outside a variable's `enum` raise an error |
 | `:headers` | table | Default headers sent with every request |
 | `:timeout` | number | Default timeout in seconds |
-| `:ssl` | table | luasec SSL options (`cafile`, `certificate`, `key`, `verify`, …) |
+| `:ssl` | table | TLS options (`cafile`, `capath`, `certificate`, `key`, `verify`) — see [SSL / TLS](#ssl--tls) |
 | `:http-fn` | function | Custom HTTP backend — see [HTTP adapter](#http-adapter) |
 | `:source-url` | string | Location of a schema passed as a parsed table, used to resolve relative server URLs and external `$ref`s |
 | `:load-schema` | function | `(fn [location {:ssl :headers}])` returning a parsed document; replaces `atlas.load-schema` for the schema and its external `$ref`s |
@@ -214,11 +214,13 @@ Fetches and parses a schema. Used internally by `atlas.client` but exposed for c
 (local client (atlas.client schema {:base-url "https://staging.example.com"}))
 ```
 
-`?opts` is `{:ssl luasec-options :headers {}}`: for HTTPS schemas, `:ssl` is a luasec options table, and `:headers` are sent with the fetch request (useful for authenticated schema endpoints).
+`?opts` is `{:ssl {} :headers {}}`: for HTTPS schemas, `:ssl` takes the [TLS options](#ssl--tls), and `:headers` are sent with the fetch request (useful for authenticated schema endpoints).
+
+`atlas.parse-schema` parses schema text you fetched yourself: `(atlas.parse-schema text location)` returns the document, raising when it is not valid JSON or YAML, or not a mapping (an HTML error page, say). `location` names the document in error messages.
 
 ## HTTP adapter
 
-The default HTTP backend uses luasocket + luasec. Replace it by passing `:http-fn`:
+The default HTTP backend is libcurl. Replace it by passing `:http-fn`:
 
 ```fennel
 (atlas.client schema {:http-fn my-fn})
@@ -235,11 +237,11 @@ The function receives a single table and must return a `{:status :headers :body}
   ;;   :headers — table of request headers
   ;;   :body    — body value (table or string, or nil); encode it yourself if needed
   ;;   :timeout — timeout in seconds (or nil)
-  ;;   :ssl     — luasec options table (or nil)
+  ;;   :ssl     — TLS options table (or nil)
   {:status 200 :headers {} :body {:ok true}})
 ```
 
-The default `atlas.http.request` function handles query-string encoding, content-type aware body encoding, timeouts and luasec SSL options — your replacement must handle all of these itself.
+The default `atlas.http.request` function handles query-string encoding, content-type aware body encoding, timeouts and TLS options — your replacement must handle all of these itself.
 
 It also follows redirects for GET and HEAD (301, 302, 303, 307, 308; up to 5, then an error). On a redirect to another origin, credential headers (`Authorization`, cookies, anything key/token/secret-like) are dropped; a redirect from `https` to `http` is not followed. Header names and values are checked before sending, so a value containing a line break is rejected rather than injecting extra headers. `atlas.http.encode-body` and `atlas.http.decode-response` are exported if you want to reuse the default encoding.
 
@@ -313,19 +315,32 @@ Responses:
 
 ## SSL / TLS
 
-Pass luasec options in `:ssl`:
+Server certificates are verified, chain and host name, against the system's CA bundle: `$SSL_CERT_FILE` when set, else the first of `/etc/ssl/cert.pem`, `/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt`, `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` and `/etc/ssl/ca-bundle.pem` that exists, else the directory in `$SSL_CERT_DIR`. Without any of them, HTTPS requests fail rather than go unverified.
+
+`:ssl` changes this:
+
+| Key | Description |
+|-----|-------------|
+| `cafile` | PEM bundle of CAs to trust instead of the system's |
+| `capath` | Directory of CA certificates to trust instead of the system's |
+| `certificate` | PEM client certificate, for mutual TLS |
+| `key` | PEM private key of the client certificate |
+| `verify` | `"none"` to skip verification (not for production) |
 
 ```fennel
 ;; custom CA bundle
 (atlas.client schema {:ssl {:cafile "/etc/ssl/internal-ca.pem"}})
 
 ;; mutual TLS (client certificate)
-(atlas.client schema {:ssl {:certificate "/path/to/client.pem"
-                             :key         "/path/to/client.key"}})
+(atlas.client schema {:ssl {:certificate "/path/to/client.pem" :key "/path/to/client.key"}})
 
 ;; skip server certificate verification (not for production)
 (atlas.client schema {:ssl {:verify "none"}})
 ```
+
+## Proxies
+
+Requests go through the proxy named by the standard environment variables: `https_proxy`/`HTTPS_PROXY` for HTTPS, `http_proxy` for HTTP, `all_proxy`/`ALL_PROXY` for both, with hosts listed in `no_proxy`/`NO_PROXY` reached directly. Credentials can be part of the proxy URL (`http://user:pass@proxy:3128`).
 
 ## Error handling
 

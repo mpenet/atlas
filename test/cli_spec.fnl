@@ -1064,6 +1064,17 @@
                                                     v)
                                               (tset :reload true)))
                     (assert.are.equal 2 (length calls)))))
+            (it "rejects a fetched page that is not a schema"
+                (fn []
+                  (let [(ok err) (pcall cli.fetch-schema "https://h/"
+                                        {:transport (fn []
+                                                      {:status 200
+                                                       :headers {}
+                                                       :raw "<html>hi</html>"})})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "'https://h/' is not an OpenAPI document"
+                                         1 true)))))
             (it "prints curl commands and logs requests per the options"
                 (fn []
                   (let [(_ out) (capture #(let [opts (cli.client-options nil
