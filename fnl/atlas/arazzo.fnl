@@ -4,7 +4,7 @@
 
 (local expr (require :atlas.arazzo.expr))
 
-(local json (require :lunajson))
+(local json (require :atlas.json))
 
 (local yaml (require :atlas.yaml))
 

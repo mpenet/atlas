@@ -17,7 +17,7 @@
 
 (local {: parse-args} (require :atlas.cli.args))
 (local restish (require :atlas.cli.restish))
-(local json (require :lunajson))
+(local json (require :atlas.json))
 (local {: list-ops
         : render
         : print-resp
@@ -34,6 +34,7 @@
         : merge-ssl
         : client-options
         : display-options
+        : colors-wanted?
         : fetch-schema
         : load-schema-cached} (require :atlas.cli.settings))
 
@@ -77,7 +78,7 @@
 (fn profile-show [config name]
   (let [p (find-profile config name)]
     (if p
-        (print (pretty-mod.pretty p 0 true))
+        (print (pretty-mod.pretty p 0 (colors-wanted?)))
         (die (.. "Profile not found: " (tostring name))))))
 
 (fn read-json-file [path]

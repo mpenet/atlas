@@ -2,7 +2,7 @@
 ;; ABOUTME: content-type and decodes responses into {:status :headers :body :raw}.
 (local curl (require :atlas.curl))
 (local tls (require :atlas.tls))
-(local json (require :lunajson))
+(local json (require :atlas.json))
 (local util (require :atlas.util))
 
 (fn json-type? [content-type]

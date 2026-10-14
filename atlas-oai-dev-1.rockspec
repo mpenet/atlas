@@ -56,6 +56,7 @@ build = {
       ["atlas.digest"]    = "lua/atlas/digest.lua",
       ["atlas.doc"]       = "lua/atlas/doc.lua",
       ["atlas.http"]      = "lua/atlas/http.lua",
+      ["atlas.json"] = "lua/atlas/json.lua",
       ["atlas.negotiate"] = "lua/atlas/negotiate.lua",
       ["atlas.paginate"]  = "lua/atlas/paginate.lua",
       ["atlas.pretty"]    = "lua/atlas/pretty.lua",

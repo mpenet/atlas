@@ -342,6 +342,22 @@ Server certificates are verified, chain and host name, against the system's CA b
 
 Requests go through the proxy named by the standard environment variables: `https_proxy`/`HTTPS_PROXY` for HTTPS, `http_proxy` for HTTP, `all_proxy`/`ALL_PROXY` for both, with hosts listed in `no_proxy`/`NO_PROXY` reached directly. Credentials can be part of the proxy URL (`http://user:pass@proxy:3128`).
 
+## JSON values
+
+Response bodies are decoded with `atlas.json`, which keeps arrays apart from objects even when empty: a decoded `[]` is a table marked as an array, so it prints and re-encodes as `[]`, never `{}`. A body you build in Lua has no such mark, so mark empty arrays yourself:
+
+```fennel
+(local json (require :atlas.json))
+
+;; sends "tags": []
+(client.update-pet.invoke {:body {:name "Rex" :tags (json.array [])}})
+
+;; true for any decoded array
+(json.array? (. resp.body :tags))
+```
+
+`json.decode` and `json.encode` are available for your own JSON handling.
+
 ## Error handling
 
 `atlas.client` raises if:

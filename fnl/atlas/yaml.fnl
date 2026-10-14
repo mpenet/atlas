@@ -1,7 +1,7 @@
 ;; ABOUTME: Parses YAML (or JSON) documents into plain Lua tables with JSON
 ;; ABOUTME: semantics, resolving plain scalars by the YAML 1.2 core schema.
 (local libyaml (require :yaml))
-(local json (require :lunajson))
+(local json (require :atlas.json))
 
 (local tag-prefix "tag:yaml.org,2002:")
 
@@ -97,7 +97,7 @@ stays \"010\"."
     m))
 
 (fn load-sequence [parser]
-  (let [s (remember parser {})]
+  (let [s (remember parser (json.array []))]
     (var n 0)
     (while (not= (. (advance parser) :type) :SEQUENCE_END)
       (set n (+ n 1))

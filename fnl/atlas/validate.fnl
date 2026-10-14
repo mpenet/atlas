@@ -1,5 +1,6 @@
 ;; ABOUTME: Validates decoded request values against the JSON Schema subset
 ;; ABOUTME: OpenAPI bodies use, returning readable errors with paths.
+(local json (require :atlas.json))
 
 (fn integral? [v]
   (and (= (type v) :number) (= v (math.floor v)) (not= v math.huge)
@@ -10,14 +11,15 @@
        (setmetatable {} {:__tostring #"null"}))
 
 (fn json-type [v]
-  "JSON type name of a decoded value; empty tables count as arrays."
+  "JSON type name of a decoded value; an empty table is an array only when
+marked as one."
   (match (if (= v null) :null (type v))
     :null :null
     :nil :null
     :boolean :boolean
     :string :string
     :number (if (integral? v) :integer :number)
-    :table (if (or (not= nil (. v 1)) (= nil (next v))) :array :object)
+    :table (if (json.array? v) :array :object)
     _ (type v)))
 
 (fn type-matches? [expected v]

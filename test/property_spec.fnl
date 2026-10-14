@@ -1,6 +1,6 @@
 ;; ABOUTME: Property specs: random values must round-trip through the encoders,
 ;; ABOUTME: and random input must never crash the parsers. ATLAS_SEED reproduces a run.
-(local json (require :lunajson))
+(local json (require :atlas.json))
 (local pretty (require :atlas.pretty))
 (local yaml (require :atlas.yaml))
 (local util (require :atlas.util))
@@ -72,21 +72,24 @@
 
 (fn gen-value [depth]
   (match (math.random 1 (if (> depth 2) 4 6))
-    1
-    (= 1 (math.random 0 1))
-    2
-    (math.random -1000000 1000000)
-    3
-    (/ (math.random -4000 4000) 4)
-    4
-    (gen-string)
-    ;; containers are never empty: {} and [] look alike once decoded
-    5
-    (fcollect [_ 1 (math.random 1 4)]
-      (gen-value (+ depth 1)))
-    _
-    (collect [_ _ (ipairs [1 2 3])]
-      (values (gen-key) (gen-value (+ depth 1))))))
+    1 (= 1 (math.random 0 1))
+    2 (math.random -1000000 1000000)
+    3 (/ (math.random -4000 4000) 4)
+    4 (gen-string)
+    5 (json.array (fcollect [_ 1 (math.random 0 4)]
+                    (gen-value (+ depth 1))))
+    _ (collect [_ _ (ipairs (fcollect [i 1 (math.random 0 3)] i))]
+        (values (gen-key) (gen-value (+ depth 1))))))
+
+(fn same-json? [a b]
+  "Whether a and b are the same JSON value, arrays and objects told apart."
+  (if (and (= (type a) :table) (= (type b) :table))
+      (and (= (json.array? a) (json.array? b))
+           (accumulate [ok true k v (pairs a) &until (not ok)]
+             (same-json? v (. b k)))
+           (accumulate [ok true k (pairs b) &until (not ok)]
+             (not= nil (. a k))))
+      (= a b)))
 
 (fn crash? [err]
   "Whether err is a Lua runtime error rather than a reported problem."
@@ -109,16 +112,26 @@
                 (fn []
                   (for-all #(gen-value 0)
                            (fn [v]
-                             (assert.are.same v
-                                              (json.decode (pretty.pretty v 0
-                                                                          false)))))))
+                             (assert (same-json? v
+                                                 (json.decode (pretty.pretty v
+                                                                             0
+                                                                             false)))
+                                     "differs after printing and parsing")))))
             (it "YAML output parses to the same value"
                 (fn []
                   (for-all #(gen-value 0)
                            (fn [v]
-                             (assert.are.same v
-                                              (yaml.parse (pretty.yaml v 0
-                                                                       false)))))))
+                             (assert (same-json? v
+                                                 (yaml.parse (pretty.yaml v 0
+                                                                          false)))
+                                     "differs after printing and parsing")))))
+            (it "JSON encoding decodes to the same value"
+                (fn []
+                  (for-all #(gen-value 0)
+                           (fn [v]
+                             (assert (same-json? v
+                                                 (json.decode (json.encode v)))
+                                     "differs after encoding and decoding")))))
             (it "URL encoding decodes to the same string"
                 (fn []
                   (for-all gen-string

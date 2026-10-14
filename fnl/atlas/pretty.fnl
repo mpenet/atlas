@@ -1,5 +1,7 @@
 ;; ABOUTME: Renders decoded values as colorized JSON or YAML for terminal output.
 ;; ABOUTME: Output is deterministic: object keys are sorted.
+(local json (require :atlas.json))
+
 (local colors {:reset "\27[0m"
                :key "\27[36m"
                :string "\27[32m"
@@ -57,7 +59,7 @@
         pad+ (string.rep "  " (+ ind 1))]
     (match (type v)
       :table (if (= (next v) nil)
-                 (c :punct "{}" uc)
+                 (c :punct (if (json.array? v) "[]" "{}") uc)
                  (array? v)
                  (let [items (icollect [_ x (ipairs v)]
                                (.. pad+ (pretty x (+ ind 1) uc)))]
@@ -125,7 +127,7 @@ such as response codes stay bare."
         pad (string.rep "  " ind)]
     (match (type v)
       :table (if (= (next v) nil)
-                 (c :punct "{}" uc)
+                 (c :punct (if (json.array? v) "[]" "{}") uc)
                  (array? v)
                  (let [lines []]
                    (each [_ x (ipairs v)]

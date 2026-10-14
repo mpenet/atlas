@@ -1064,6 +1064,20 @@
                                                     v)
                                               (tset :reload true)))
                     (assert.are.equal 2 (length calls)))))
+            (it "colours output only on a terminal, unless NO_COLOR is set"
+                (fn []
+                  (assert.is_true (cli.colors-wanted? {} #true))
+                  (assert.is_false (cli.colors-wanted? {} #false))
+                  (assert.is_false (cli.colors-wanted? {:NO_COLOR "1"} #true))
+                  ;; an empty NO_COLOR doesn't count
+                  (assert.is_true (cli.colors-wanted? {:NO_COLOR ""} #true))
+                  (assert.is_true (. (cli.display-options nil {} {} false)
+                                     :no-color))
+                  (assert.is_falsy (. (cli.display-options nil {} {} true)
+                                      :no-color))
+                  (assert.is_true (. (cli.display-options nil {:no-color true}
+                                                          {} true)
+                                     :no-color))))
             (it "rejects a fetched page that is not a schema"
                 (fn []
                   (let [(ok err) (pcall cli.fetch-schema "https://h/"

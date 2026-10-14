@@ -24,6 +24,7 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - Request checks before sending: missing required parameters and invalid JSON bodies are errors, undeclared query names warn; `--no-validate` sends anyway.
 - Shell completion of operations, parameters, body fields, enum values, server variables, Arazzo contexts, workflows and inputs.
 - Operations without `operationId` are available under a name made of their method and path (`GET /pets/{petId}` → `get-pets-pet-id`); every operation exposes `:name`.
+- `atlas.json` (`decode`, `encode`, `array`, `array?`): JSON that keeps empty arrays apart from empty objects; use `json.array` to send an empty array from a body built in Lua.
 - `atlas.parse-schema` parses fetched schema text, rejecting documents that are not a mapping.
 - Release binaries for macOS x86_64 and Linux arm64, a `SHA256SUMS` file and build provenance attestations.
 
@@ -46,6 +47,9 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 
 - Base URLs ending in `/` no longer produce `//` in request paths.
 - A schema URL answering with an HTML page is reported as such instead of being read as a file path.
+- Empty JSON arrays came out as `{}`: printed that way, and re-sent that way, so `-d '{"tags":[]}'` sent `{"tags":{}}`. Arrays now stay arrays, empty or not, through decoding, printing, YAML, validation and encoding; validation also stopped treating an empty object as an array.
+- JSON request bodies are encoded exactly and the same way every time: integers above 2^53 (IDs) are no longer rounded, floats are written in their shortest exact form (`0.1`, not `0.10000000000000001`), and object keys are sorted, so `--dry-run` and `--curl` output is reproducible.
+- Colours are only used when stdout is a terminal, and never when `NO_COLOR` is set: piping `atlas` into `jq` or a file gave escape codes.
 - YAML documents could be misread or rejected at random ("control characters are not allowed") when the garbage collector freed the text while libyaml was still reading it.
 - An operationId defined twice (Cloudflare has one) no longer hides one of the two operations.
 - `--output yaml` quotes a key named `<<` instead of writing a merge key.

@@ -11,6 +11,8 @@
 
 (require :lunajson)
 
+(require :atlas.json)
+
 (require :socket)
 
 (require :socket.url)

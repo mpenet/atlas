@@ -2,7 +2,7 @@
 ;; ABOUTME: and curl printing, request logging with redaction, exit codes.
 (local util (require :atlas.util))
 (local http-mod (require :atlas.http))
-(local json (require :lunajson))
+(local json (require :atlas.json))
 (local pretty-mod (require :atlas.pretty))
 
 (fn redact-header [name value]

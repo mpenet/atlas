@@ -4,7 +4,7 @@
 (local validate (require :atlas.validate))
 (local util (require :atlas.util))
 (local yaml (require :atlas.yaml))
-(local json (require :lunajson))
+(local json (require :atlas.json))
 
 (fn read-file [path]
   (let [f (assert (io.open path :rb))
@@ -128,7 +128,7 @@ query names are warnings. Header names match case-insensitively."
           (not (op.content-type:match "json")))
       []
       (let [(ok value) (if (= (type body) :string)
-                           (pcall json.decode body nil validate.null)
+                           (pcall json.decode body validate.null)
                            (values true body))]
         (if ok (validate.check op.body-schema value :body) []))))
 

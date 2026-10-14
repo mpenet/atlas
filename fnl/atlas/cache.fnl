@@ -1,6 +1,6 @@
 ;; ABOUTME: On-disk cache of fetched OpenAPI schemas, keyed by URL with a TTL.
 ;; ABOUTME: Entries are JSON files under the atlas cache directory.
-(local json (require :lunajson))
+(local json (require :atlas.json))
 (local util (require :atlas.util))
 
 (fn cache-dir []

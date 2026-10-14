@@ -1,6 +1,6 @@
 ;; ABOUTME: Profile authentication: OAuth 2.0 flows with a token cache, and
 ;; ABOUTME: external-tool bearer tokens or per-request signing.
-(local json (require :lunajson))
+(local json (require :atlas.json))
 (local http (require :atlas.http))
 (local util (require :atlas.util))
 (local socket (require :socket))

@@ -7,7 +7,7 @@
 (local paginate (require :atlas.paginate))
 (local util (require :atlas.util))
 (local http-mod (require :atlas.http))
-(local json (require :lunajson))
+(local json (require :atlas.json))
 (local {: wrap-log-request : request-text : curl-command : printing-transport}
        (require :atlas.cli.output))
 
@@ -85,10 +85,21 @@
     {:max-pages (or p.max-pages (?. profile :max-pages) (?. config :max-pages)
                     25)}))
 
-(fn display-options [profile p config]
-  "Output settings: command line, then profile, then config."
+(fn colors-wanted? [?env ?terminal?]
+  "Whether output may be coloured: stdout is a terminal and NO_COLOR is unset
+or empty (https://no-color.org)."
+  (let [no-color (if ?env (. ?env :NO_COLOR) (os.getenv :NO_COLOR))]
+    (and (or (= nil no-color) (= no-color ""))
+         (if ?terminal?
+             (?terminal?)
+             (= true (os.execute "test -t 1"))))))
+
+(fn display-options [profile p config ?colors]
+  "Output settings: command line, then profile, then config. Colour is off
+when ?colors (default: colors-wanted?) says so."
   {:output (or p.output (?. profile :output) (?. config :output))
-   :no-color (or p.no-color (?. profile :no-color) (?. config :no-color))
+   :no-color (or p.no-color (?. profile :no-color) (?. config :no-color)
+                 (not (if (= nil ?colors) (colors-wanted?) ?colors)))
    :verbose (or p.verbose (?. profile :verbose) (?. config :verbose))})
 
 (fn lazy-auth-headers [profile-name auth-cfg ssl]
@@ -205,6 +216,7 @@ opts: fetch-schema options plus {:ttl seconds :reload bool :cache bool}"
                  schema))))
 
 {: config-path
+ : colors-wanted?
  : load-config
  : merge-profiles
  : resolve-profile

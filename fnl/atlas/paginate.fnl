@@ -1,6 +1,6 @@
 ;; ABOUTME: Wraps an http-fn to follow Link rel="next" pagination on GET
 ;; ABOUTME: requests, concatenating JSON array pages into one response.
-(local json (require :lunajson))
+(local json (require :atlas.json))
 (local util (require :atlas.util))
 
 (fn link-params-rel [params]

@@ -1,6 +1,6 @@
 ;; ABOUTME: Converts command-line string values into typed values,
 ;; ABOUTME: guided by a JSON Schema when one is known.
-(local json (require :lunajson))
+(local json (require :atlas.json))
 
 (fn json-number [s]
   "Parse s only if it is a JSON number literal (no leading zeros, hex, etc.)."
