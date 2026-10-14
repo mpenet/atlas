@@ -7,6 +7,7 @@
 ;;          $sourceDescriptions.name.operationId,
 ;;          template strings "text {$expr} text"
 (local util (require :atlas.util))
+(local json (require :atlas.json))
 
 ;; ---- JSON Pointer ----
 
@@ -41,7 +42,9 @@ meant a JSON pointer into it: raise saying so."
   "Resolve body or header access on a request/response; parts = [body|header name]."
   (match (. parts 1)
     :body (with-pointer (?. msg :body) expr)
-    :header (util.header (?. msg :headers) (or (. parts 2) ""))))
+    :header (util.header (?. msg :headers) (or (. parts 2) ""))
+    :query (?. msg :query (. parts 2))
+    :path (?. msg :path (. parts 2))))
 
 (fn find-in [ctx resolve find-body]
   "$find(array-expr, match-field, match-value[, return-field])"
@@ -97,7 +100,7 @@ meant a JSON pointer into it: raise saying so."
               :sourceDescriptions
               {:__source (. parts 2) :__operationId (. parts 3)}
               _
-              nil))))))
+              (error (.. "unknown runtime expression: " expr) 0)))))))
 
 ;; ---- template substitution ----
 
@@ -108,13 +111,31 @@ meant a JSON pointer into it: raise saying so."
                            (let [v (resolve-expr ctx expr)]
                              (if (= v nil) "" (tostring v)))))))
 
+(local roots {:inputs true
+              :statusCode true
+              :url true
+              :method true
+              :response true
+              :request true
+              :steps true
+              :workflows true
+              :sourceDescriptions true
+              :find true})
+
+(fn expression? [s]
+  "Whether s is a runtime expression: $ followed by a known root."
+  (not= nil (. roots (or (s:match "^%$(%a+)") ""))))
+
 (fn eval [ctx expr]
-  "Evaluate an Arazzo expression, template string, or table (recursively)."
-  (if (and (= (type expr) :string) (expr:match "^%$")) (resolve-expr ctx expr)
+  "Evaluate an Arazzo expression, template string, or table (recursively).
+Text that only starts with $ (\"$5\") is not an expression and stays as is."
+  (if (and (= (type expr) :string) (expression? expr)) (resolve-expr ctx expr)
       (and (= (type expr) :string) (expr:match "{%$")) (eval-template ctx expr)
-      (= (type expr) :table) (collect [k v (pairs expr)]
-                               k
-                               (eval ctx v))
+      (= (type expr) :table) (let [out (collect [k v (pairs expr)]
+                                         k
+                                         (eval ctx v))]
+                               ;; arrays stay arrays, even empty ones
+                               (if (json.array? expr) (json.array out) out))
       expr))
 
 ;; ---- simple condition language ----
@@ -131,7 +152,8 @@ meant a JSON pointer into it: raise saying so."
 (local operators ["==" "!=" "<=" ">=" "&&" "||" "<" ">" "!" "(" ")"])
 
 (fn read-string-literal [s pos]
-  "Read a quoted literal starting at pos; returns (text next-pos)."
+  "Read a quoted literal starting at pos; returns (text next-pos). As in the
+Arazzo spec, a doubled quote stands for the quote itself."
   (let [delimiter (s:sub pos pos)
         out []]
     (var i (+ pos 1))
@@ -139,12 +161,13 @@ meant a JSON pointer into it: raise saying so."
     (while (not done)
       (let [ch (s:sub i i)]
         (if (= ch "") (error (.. "unterminated string in condition: " s))
-            (= ch "\\") (do
-                         (table.insert out (s:sub (+ i 1) (+ i 1)))
-                         (set i (+ i 2)))
-            (= ch delimiter) (do
-                              (set done true)
-                              (set i (+ i 1)))
+            (and (= ch delimiter) (= (s:sub (+ i 1) (+ i 1)) delimiter))
+            (do
+              (table.insert out delimiter)
+              (set i (+ i 2))) (= ch delimiter)
+            (do
+              (set done true)
+              (set i (+ i 1)))
             (do
               (table.insert out ch)
               (set i (+ i 1))))))
@@ -209,12 +232,18 @@ meant a JSON pointer into it: raise saying so."
 (fn normalize [v]
   (if (= v null) nil v))
 
+(fn fold-case [a b]
+  "Strings compare case-insensitively, as the Arazzo spec requires."
+  (if (and (= (type a) :string) (= (type b) :string))
+      (values (a:lower) (b:lower))
+      (values a b)))
+
 (fn equal? [a b]
-  (let [(a b) (numeric-pair (normalize a) (normalize b))]
+  (let [(a b) (fold-case (numeric-pair (normalize a) (normalize b)))]
     (= a b)))
 
 (fn ordered [op a b]
-  (let [(a b) (numeric-pair (normalize a) (normalize b))
+  (let [(a b) (fold-case (numeric-pair (normalize a) (normalize b)))
         comparable (or (and (= (type a) :number) (= (type b) :number))
                        (and (= (type a) :string) (= (type b) :string)))]
     (and comparable (match op
@@ -307,11 +336,16 @@ meant a JSON pointer into it: raise saying so."
   "Evaluate one Criterion Object. Returns true if it passes."
   (let [typ (or criterion.type :simple)]
     (match typ
-      :simple (eval-condition ctx criterion.condition)
-      :regex (let [v (eval ctx criterion.context)
-                   s (if (= (type v) :string) v (tostring v))]
-               (not= nil (s:match criterion.condition)))
-      _ (error (.. "unsupported criterion type: " (tostring typ))))))
+      :simple
+      (eval-condition ctx criterion.condition)
+      ;; a missing value matches nothing
+      :regex
+      (let [v (eval ctx criterion.context)]
+        (and (not= nil v)
+             (not= nil (: (tostring v) :match criterion.condition))))
+      _
+      (error (.. "unsupported criterion type: "
+                 (tostring (if (= (type typ) :table) typ.type typ)))))))
 
 (fn eval-criteria [ctx criteria]
   "Evaluate all criteria (AND logic). Returns true if all pass."

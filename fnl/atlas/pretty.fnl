@@ -103,16 +103,24 @@
   "True when s would not read back as the same string from a plain scalar."
   (or (= s "") (. yaml-reserved (s:lower)) (not= nil (tonumber s))
       (s:match "^[0-9]") (s:match "^[-?:,%[%]{}#&*!|>'\"%%@`.+~]")
-      (s:match "[\n\r\t]") (s:match ":[ \t]") (s:match ":$") (s:match " #")
+      (s:match "%c") (s:match ":[ \t]") (s:match ":$") (s:match " #")
       (s:match "^%s") (s:match "%s$")))
 
+(local yaml-escapes {"\\" "\\\\" "\"" "\\\"" "\n" "\\n" "\r" "\\r" "\t" "\\t"})
+
 (fn yaml-escape [s]
-  (-> s
-      (: :gsub "\\" "\\\\")
-      (: :gsub "\"" "\\\"")
-      (: :gsub "\n" "\\n")
-      (: :gsub "\r" "\\r")
-      (: :gsub "\t" "\\t")))
+  "s for a double-quoted YAML scalar; other control characters as \\xNN."
+  (pick-values 1
+               (s:gsub "[%c\"\\]"
+                       #(or (. yaml-escapes $)
+                            (string.format "\\x%02X" (string.byte $))))))
+
+(fn yaml-number [n]
+  "n as YAML writes it: infinities and NaN have names of their own."
+  (if (not= n n) ".nan"
+      (= n math.huge) ".inf"
+      (= n (- math.huge)) "-.inf"
+      (tostring n)))
 
 (fn yaml-key [k]
   "k as a mapping key that reads back as the same string; canonical integers
@@ -155,7 +163,7 @@ such as response codes stay bare."
                           (.. "\"" (yaml-escape v) "\"")
                           v)]
                 (c :string s uc))
-      :number (c :number (tostring v) uc)
+      :number (c :number (yaml-number v) uc)
       :boolean (c :bool (tostring v) uc)
       _ (c :null "null" uc))))
 

@@ -93,6 +93,11 @@
                            "plain" 6
                            "007" 7}]
                     (assert.are.same v (ayaml.parse (yaml v 0 false))))))
+            (it "quotes control characters and writes infinities as YAML does"
+                (fn []
+                  (let [ayaml (require :atlas.yaml)
+                        v {:a "x\1y" :b math.huge :c (- math.huge)}]
+                    (assert.are.same v (ayaml.parse (yaml v 0 false))))))
             (it "quotes a key that YAML would read as a merge"
                 (fn []
                   (let [v {"<<" {:a 1} :b 2}]

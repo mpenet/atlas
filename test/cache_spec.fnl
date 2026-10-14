@@ -13,6 +13,15 @@
                     (cache.put url {:openapi "3.0.0" :paths {}})
                     (assert.are.same {:openapi "3.0.0" :paths {}}
                                      (cache.get url 60)))))
+            (it "keeps cached schemas private to the user"
+                (fn []
+                  (let [url (unique-url)]
+                    (cache.put url {:a 1})
+                    (let [dir (: (cache.path url) :match "^(.*)/")
+                          p (io.popen (.. "ls -ld '" dir "'"))
+                          mode (p:read :*l)]
+                      (p:close)
+                      (assert.are.equal "drwx------" (mode:sub 1 10))))))
             (it "returns nothing for unknown URLs"
                 (fn []
                   (assert.is_nil (cache.get (unique-url) 60))))

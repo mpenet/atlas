@@ -131,7 +131,7 @@ body.photoUrls: required
 ```console
 $ atlas op $PETSTORE get-pet-by-id 999999999
 HTTP 404  0.495s
-"Pet not found"
+Pet not found
 $ echo $?
 4
 ```
@@ -239,7 +239,7 @@ make install
 make corpus
 ```
 
-`make build` and `make test` also compile the libcurl binding, which needs the libcurl headers (`curl-config` on `PATH`). `make binary` requires `fennel`, `lua`, `openssl`, `libyaml`, `pkg-config` and `curl`; it downloads the libcurl sources (checked against a pinned checksum) and statically links Lua, luasocket, libcurl, lyaml, OpenSSL and libyaml — the resulting binary depends only on system libraries (glibc on Linux).
+`make build` and `make test` also compile the libcurl binding, which needs the libcurl headers (`curl-config` on `PATH`). `make binary` requires a C compiler, `fennel`, `lua`, `luarocks`, `openssl`, `libyaml`, `pkg-config`, `unzip` and `curl`; it downloads the libcurl sources (checked against a pinned checksum) and statically links Lua, luasocket, libcurl, lyaml, OpenSSL and libyaml — the resulting binary depends only on system libraries (glibc on Linux).
 
 ## Releasing
 

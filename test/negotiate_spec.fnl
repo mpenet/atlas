@@ -20,6 +20,24 @@
                 (fn []
                   (assert.is_nil (negotiate.pick-content-type {}))))))
 
+(describe "pick-media-type, deterministic"
+          (fn []
+            (it "prefers JSON, parameters included, then forms, then the first by name"
+                (fn []
+                  (for [_ 1 5]
+                    (assert.are.equal "application/json; charset=utf-8"
+                                      (negotiate.pick-media-type {"application/json; charset=utf-8" {}
+                                                                  "application/xml" {}
+                                                                  "text/plain" {}
+                                                                  "application/yaml" {}}))
+                    (assert.are.equal "application/vnd.api+json"
+                                      (negotiate.pick-media-type {"application/xml" {}
+                                                                  "application/vnd.api+json" {}}))
+                    (assert.are.equal "application/xml"
+                                      (negotiate.pick-media-type {"text/plain" {}
+                                                                  "application/xml" {}
+                                                                  "application/yaml" {}})))))))
+
 (describe "pick-accept"
           (fn []
             (it "returns content type from response"

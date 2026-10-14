@@ -121,7 +121,7 @@ A short reference of what atlas supports. The [Arazzo specification](https://spe
 
 ### Steps
 
-A step calls an operation, named by `operationId` (written `$sourceDescriptions.NAME.ID` when several sources define the same id) or `operationPath`, or runs another workflow with `workflowId`. Its `parameters` fill path, query, header and cookie parameters; `requestBody` gives the body. Step parameters replace workflow-level parameters with the same `name` and `in`.
+A step calls an operation, named by `operationId` (written `$sourceDescriptions.NAME.ID` when several sources define the same id) or `operationPath`, or runs another workflow with `workflowId`. Its `parameters` fill path, query, header and cookie parameters (`in` is required); step parameters replace workflow-level parameters with the same `name` and `in`. `requestBody` gives the body: `payload` (with runtime expressions anywhere inside), `contentType` to override the operation's, and `replacements`, each setting the value at a JSON pointer `target` in the payload.
 
 ### Runtime expressions
 
@@ -133,6 +133,7 @@ A step calls an operation, named by `operationId` (written `$sourceDescriptions.
 | `$response.body#/pointer` | Part of the current response body (a [JSON pointer](https://www.rfc-editor.org/rfc/rfc6901)) |
 | `$response.header.NAME` | A header of the current response |
 | `$request.body#/pointer`, `$request.header.NAME` | The same, for the current request |
+| `$request.query.NAME`, `$request.path.NAME` | A query or path parameter of the current request |
 | `$steps.ID.outputs.NAME` | An output of an earlier step |
 | `$steps.ID.response.body#/pointer`, `$steps.ID.response.header.NAME` | An earlier step's response |
 | `$workflows.ID.outputs.NAME` | An output of a workflow this one already ran |
@@ -145,14 +146,14 @@ To reach inside an input or output, add a JSON pointer: `$steps.fetch.outputs.pe
 
 All of a step's `successCriteria` must hold; a step without any succeeds. Two kinds are supported:
 
-- **Simple conditions:** comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!` and parentheses, with strings in single or double quotes, numbers, `true`, `false` and `null`. Values from responses are compared as values, never read as part of the condition.
+- **Simple conditions:** comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!` and parentheses, with strings in single or double quotes (`''` for a quote inside: `'it''s'`), numbers, `true`, `false` and `null`. Strings compare case-insensitively, as the spec requires. Values from responses are compared as values, never read as part of the condition. A misspelled expression (`$statuscode`) is an error, not a silent `null`.
 
   ```yaml
   - condition: $statusCode == 200
   - condition: ($statusCode == 200 || $statusCode == 201) && $response.body#/state != 'failed'
   ```
 
-- **Regular expressions** (`type: regex`), written as [Lua patterns](https://www.lua.org/manual/5.4/manual.html#6.4.1) rather than ECMAScript regexes: `%d` for a digit, `%w` for an alphanumeric, `%` to escape. There is no `|` and no `{m,n}`: `^2%d%d$` matches a 2xx status.
+- **Regular expressions** (`type: regex`) never match a missing value. They are written as [Lua patterns](https://www.lua.org/manual/5.4/manual.html#6.4.1) rather than ECMAScript regexes: `%d` for a digit, `%w` for an alphanumeric, `%` to escape. There is no `|` and no `{m,n}`: `^2%d%d$` matches a 2xx status.
 
   ```yaml
   - context: $statusCode
@@ -168,9 +169,9 @@ After a step, `onSuccess` or `onFailure` decide what happens next; the workflow'
 
 - `end` stops the workflow.
 - `goto` continues at `stepId`, or runs `workflowId` and stops. A `goto` to the same step waits `retryAfter` seconds first, which makes polling loops. A workflow aborts after 50 jumps to the same step; raise it with `--max-gotos`.
-- `retry` runs the step again after `retryAfter` seconds, at most `retryLimit` times (default 1), running `workflowId` first when given.
+- `retry` runs the step again after `retryAfter` seconds, at most `retryLimit` times (default 1). With `workflowId` or `stepId`, that workflow or step runs first (to refresh a token, say).
 
-A step that fails with no action to handle it fails the workflow.
+When the response has a `Retry-After` header in seconds, it overrules `retryAfter`. A request that fails in transport (connection refused, timeout…) is a step failure like any other, so `retry` handles it too. A step that fails with no action to handle it fails the workflow.
 
 ### Polling
 
@@ -205,4 +206,4 @@ steps:
 
 ### Reuse and composition
 
-`components` holds reusable `parameters`, `successActions`, `failureActions` and input schemas; refer to them with `reference: $components.parameters.NAME` (a `value` next to it overrides the component's) or `$ref`. Workflows listed in `dependsOn` run first, once each, with the same inputs, and their outputs are available as `$workflows.ID.outputs.NAME`. A step with `workflowId` runs another workflow as a step: its `parameters` are that workflow's inputs, and its criteria, actions and outputs work as for any step (a step without `outputs` exposes the workflow's outputs).
+`components` holds reusable `parameters`, `successActions`, `failureActions` and input schemas; refer to them with `reference: $components.parameters.NAME` (a `value` next to it overrides the component's); input schemas can use `$ref`. Workflows listed in `dependsOn` run first, once each, with the same inputs, and their outputs are available as `$workflows.ID.outputs.NAME`. A step with `workflowId` runs another workflow as a step: its `parameters` are that workflow's inputs, and its criteria, actions and outputs work as for any step (a step without `outputs` exposes the workflow's outputs).

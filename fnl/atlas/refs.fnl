@@ -54,6 +54,9 @@ nowhere, or only at each other, raise."
           (when (= (type ref) :string) ref))))
 
     (var deref nil)
+    ;; tables already copied during the current call, so that values that are
+    ;; already cyclic are copied as cycles
+    (var copies {})
 
     (fn resolve-ref [from ref]
       ;; follow refs to refs to the value they finally name
@@ -71,7 +74,7 @@ nowhere, or only at each other, raise."
               expanded (if (not= nil cached) cached (not= (type value) :table)
                            value ;; registered before it is filled, so recursion
                            ;; comes back to this same table
-                           (let [out {}]
+                           (let [out (setmetatable {} (getmetatable value))]
                              (tset cache key out)
                              (each [k v (pairs value)]
                                (tset out k (deref target v)))
@@ -83,12 +86,16 @@ nowhere, or only at each other, raise."
     (set deref (fn [from value]
                  (match (ref-of value)
                    ref (resolve-ref from ref)
-                   _ (if (= (type value) :table)
-                         (collect [k v (pairs value)]
-                           k
-                           (deref from v))
-                         value))))
+                   _ (if (not= (type value) :table) value (. copies value)
+                         (. copies value)
+                         ;; the copy keeps the table's metatable (JSON arrays)
+                         (let [out (setmetatable {} (getmetatable value))]
+                           (tset copies value out)
+                           (each [k v (pairs value)]
+                             (tset out k (deref from v)))
+                           out)))))
     (fn [value]
+      (set copies {})
       (deref {: root :base opts.base} value))))
 
 {: resolver}

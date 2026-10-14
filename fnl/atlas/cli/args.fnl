@@ -30,11 +30,11 @@
          :key :body
          :value :body
          :shown "--body=JSON, -d JSON"
-         :scope :op
+         :scope :any
          :help "Request body: inline JSON/YAML, @file or @- for stdin"}
         {:family "--b."
          :shown "--body.KEY=VAL"
-         :scope :op
+         :scope :any
          :help "Body field, deep dot paths (short: --b.KEY=VAL)"}
         {:family "--q."
          :shown "--query.KEY=VAL"
@@ -99,6 +99,7 @@
          :key :output
          :value :string
          :arg "FORMAT"
+         :choices [:json :yaml :raw :status :headers]
          :scope :any
          :help "json (default), yaml, raw, status or headers"}
         {:names ["--select"]
@@ -165,6 +166,7 @@
          :key :arazzo-output
          :value :string
          :arg "MODE"
+         :choices [:final :steps :progress :full]
          :scope :az
          :help "final (default), steps, progress, full"}
         {:names ["--max-gotos"]
@@ -191,7 +193,13 @@ returns (kind key value); kind is a value of field-prefixes."
     (when kind
       (values kind k v))))
 
+(local short-prefixes {:query "--q." :header "--h." :body "--b." :input "--i."})
+
 (fn add-field [r kind k v]
+  (when (= k "")
+    (error (.. (or (. short-prefixes kind) (.. "--" kind "."))
+               " needs a field name, as in " (or (. short-prefixes kind) "--")
+               "NAME=VALUE") 0))
   (match kind
     :query (let [prev (. r.query k)]
              ;; repeating a parameter sends it several times
@@ -212,6 +220,11 @@ returns (kind key value); kind is a value of field-prefixes."
     :ssl (tset r.ssl k v)))
 
 (fn option-value [name opt raw]
+  (when (and opt.choices (not (accumulate [ok false _ c (ipairs opt.choices)
+                                           &until ok]
+                                (= c raw))))
+    (error (.. name " must be one of " (table.concat opt.choices ", ")
+               ", got '" raw "'") 0))
   (match opt.value
     :number
     (or (tonumber raw) (error (.. name " expects a number, got '" raw "'") 0))

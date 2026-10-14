@@ -99,21 +99,28 @@ replaced when body encoding chose one."
       (tset headers :content-type content-type))
     (each [k v (pairs headers)]
       (check-header k v))
-    (values (util.append-query req.url (or req.query {})) payload headers)))
+    (values (util.append-query req.url (or req.query {}) req.query-styles)
+            payload headers)))
 
 (local redirect-status {301 true 302 true 303 true 307 true 308 true})
 
 (fn redirect-target [req resp]
   "The request to send next for a followable redirect, or nil. Only GET and
-HEAD are followed; https never goes to http; credential headers are dropped
-when the origin changes."
+HEAD are followed; https never goes to http; when the origin changes,
+credential headers are dropped: those named in req.sensitive-headers (what
+authentication added) and any whose name looks like a credential."
   (let [location (util.header resp.headers "location")
         method (: (or req.method "GET") :upper)]
     (when (and (. redirect-status resp.status) location
                (or (= method "GET") (= method "HEAD")))
       (let [from (util.append-query req.url (or req.query {}))
             target ((. (require :socket.url) :absolute) from location)
-            same-origin? (= (util.origin target) (util.origin from))]
+            target-origin (util.origin target)
+            same-origin? (and target-origin
+                              (= target-origin (util.origin from)))
+            sensitive (collect [_ n (ipairs (or req.sensitive-headers []))]
+                        (n:lower)
+                        true)]
         (when (not (and (: (from:lower) :match "^https:")
                         (: (target:lower) :match "^http:")))
           (doto (collect [k v (pairs req)] k v)
@@ -122,7 +129,8 @@ when the origin changes."
             (tset :headers (if same-origin?
                                req.headers
                                (collect [k v (pairs (or req.headers {}))]
-                                 (when (not (util.secret-name? k))
+                                 (when (not (or (util.secret-name? k)
+                                                (. sensitive (k:lower))))
                                    (values k v)))))))))))
 
 (fn follow-redirects [send req]
@@ -198,7 +206,8 @@ lines, plus the TLS settings."
                            :headers (?. ?opts :headers)
                            :ssl (?. ?opts :ssl)})]
         (assert (util.success? resp.status)
-                (string.format "HTTP %s fetching %s" resp.status location))
+                (string.format "HTTP %s fetching %s" resp.status
+                               (util.redact-url location)))
         resp.raw)
       (let [(f err) (io.open location :r)]
         (assert f

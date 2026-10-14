@@ -23,13 +23,17 @@
         {})))
 
 (fn merge-profiles [base child]
+  "child over base; headers merge by name, case-insensitively, the child's
+winning."
   (let [result (collect [k v (pairs base)] k v)]
     (each [k v (pairs child)]
       (if (and (= k :headers) (= (type v) :table)
                (= (type (. result k)) :table))
-          (let [merged (collect [hk hv (pairs (. result k))]
-                         hk
-                         hv)]
+          (let [overridden (collect [hk (pairs v)] (hk:lower)
+                             true)
+                merged (collect [hk hv (pairs (. result k))]
+                         (when (not (. overridden (hk:lower)))
+                           (values hk hv)))]
             (each [hk hv (pairs v)] (tset merged hk hv))
             (tset result k merged))
           (tset result k v)))
@@ -38,8 +42,8 @@
 (fn resolve-profile [name profiles ?seen]
   (let [seen (or ?seen {})
         p (. profiles name)]
-    (assert p (.. "Profile not found: " name))
-    (assert (not (. seen name)) (.. "Circular extends: " name))
+    (when (not p) (error (.. "Profile not found: " name) 0))
+    (when (. seen name) (error (.. "Circular extends: " name) 0))
     (tset seen name true)
     (if p.extends
         (let [base (resolve-profile p.extends profiles seen)
@@ -47,6 +51,12 @@
           (tset child :extends nil)
           (merge-profiles base child))
         p)))
+
+(fn find-profile [config name]
+  "Profile name of config with extends resolved, or nil when there is none."
+  (let [profiles (or (?. config :profiles) {})]
+    (when (and name (. profiles name))
+      (resolve-profile name profiles {}))))
 
 (fn tls->ssl [tls]
   (when tls
@@ -95,12 +105,19 @@ or empty (https://no-color.org)."
              (= true (os.execute "test -t 1"))))))
 
 (fn display-options [profile p config ?colors]
-  "Output settings: command line, then profile, then config. Colour is off
-when ?colors (default: colors-wanted?) says so."
-  {:output (or p.output (?. profile :output) (?. config :output))
-   :no-color (or p.no-color (?. profile :no-color) (?. config :no-color)
-                 (not (if (= nil ?colors) (colors-wanted?) ?colors)))
-   :verbose (or p.verbose (?. profile :verbose) (?. config :verbose))})
+  "Output settings: command line, then profile, then config, the first set
+winning. Colour is also off when ?colors (default: colors-wanted?) says so."
+  (let [first-set (fn [key]
+                    ;; first one set wins, so false can override true
+                    (let [sources [p profile config]]
+                      (var found nil)
+                      (for [i 1 3 &until (not= nil found)]
+                        (set found (?. sources i key)))
+                      found))]
+    {:output (first-set :output)
+     :no-color (or (first-set :no-color)
+                   (not (if (= nil ?colors) (colors-wanted?) ?colors)))
+     :verbose (first-set :verbose)}))
 
 (fn lazy-auth-headers [profile-name auth-cfg ssl]
   "Getter for the profile's auth headers, authenticating on first use only."
@@ -127,7 +144,9 @@ when they cover every auth header (names), auth doesn't run at all."
           (when (= nil (util.header headers k))
             (tset headers k v))))
       (base-fn (doto (collect [k v (pairs req)] k v)
-                 (tset :headers headers))))))
+                 (tset :headers headers)
+                 ;; redirects to another origin must drop them
+                 (tset :sensitive-headers names))))))
 
 (fn with-profile-query [query base-fn]
   "Adds the profile's query parameters to each request; explicit ones win."
@@ -202,7 +221,8 @@ authentication. opts: {:transport :headers :ssl :auth-headers}"
                    (send headers))
                  first)]
     (assert (util.success? resp.status)
-            (string.format "HTTP %s fetching schema from %s" resp.status url))
+            (string.format "HTTP %s fetching schema from %s" resp.status
+                           (util.redact-url url)))
     (atlas.parse-schema (or resp.raw "") url)))
 
 (fn load-schema-cached [url opts]
@@ -217,6 +237,7 @@ opts: fetch-schema options plus {:ttl seconds :reload bool :cache bool}"
 
 {: config-path
  : colors-wanted?
+ : find-profile
  : load-config
  : merge-profiles
  : resolve-profile

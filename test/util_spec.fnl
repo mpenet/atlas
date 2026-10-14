@@ -2,6 +2,81 @@
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
 (local util (require :atlas.util))
 
+(describe "origin"
+          (fn []
+            (it "ends the host where the transport does"
+                (fn []
+                  ;; the authority ends at the first / ? # (and \, which
+                  ;; parsers disagree about), so these go to evil.com
+                  (assert.are.equal "https://evil.com:443"
+                                    (util.origin "https://evil.com?@api.good.com/"))
+                  (assert.are.equal "https://evil.com:443"
+                                    (util.origin "https://evil.com#@api.good.com/x"))
+                  (assert.are.equal "https://evil.com:443"
+                                    (util.origin "https://evil.com\\@api.good.com/"))))
+            (it "drops user info, lowercases, and makes the port explicit"
+                (fn []
+                  (assert.are.equal "https://api.good.com:443"
+                                    (util.origin "HTTPS://me:pw@API.Good.com/x?y=1"))
+                  (assert.are.equal "http://h:8080"
+                                    (util.origin "http://a@b@h:8080/"))
+                  (assert.are.equal "http://[::1]:80"
+                                    (util.origin "http://[::1]/x"))))
+            (it "is nil for what is not an absolute http(s) URL"
+                (fn []
+                  (assert.is_nil (util.origin "/relative"))
+                  (assert.is_nil (util.origin "ftp://h/"))
+                  (assert.is_nil (util.origin "https:///nohost"))))))
+
+(describe "redact-url"
+          (fn []
+            (it "masks credentials in the user info and the query"
+                (fn []
+                  (assert.are.equal "https://<redacted>@h/x?api_key=<redacted>&page=2"
+                                    (util.redact-url "https://me:pw@h/x?api_key=s&page=2"))))
+            (it "masks query parameters named as sensitive"
+                (fn []
+                  (assert.are.equal "https://h/x?appid=<redacted>&page=2"
+                                    (util.redact-url "https://h/x?appid=s&page=2"
+                                                     {:appid true}))))))
+
+(describe "resolve-path"
+          (fn []
+            (it "writes array and object values in the simple style"
+                (fn []
+                  (assert.are.equal "/p/1,2"
+                                    (util.resolve-path "/p/{ids}" {:ids [1 2]}))
+                  (assert.are.equal "/p/a,1,b,x%20y"
+                                    (util.resolve-path "/p/{o}"
+                                                       {:o {:a 1 :b "x y"}}))))))
+
+(describe "query-string"
+          (fn []
+            (it "writes each parameter in its OpenAPI style"
+                (fn []
+                  (let [qs #(util.query-string $1 $2)]
+                    ;; form, exploded: the default
+                    (assert.are.equal "a=1&a=2&b=x" (qs {:a [1 2] :b "x"}))
+                    (assert.are.equal "x=1&y=2" (qs {:o {:x 1 :y 2}}))
+                    ;; form, not exploded
+                    (assert.are.equal "a=1,2&o=x,1,y,2"
+                                      (qs {:a [1 2] :o {:x 1 :y 2}}
+                                          {:a {:explode false}
+                                           :o {:explode false}}))
+                    (assert.are.equal "a=1%202"
+                                      (qs {:a [1 2]}
+                                          {:a {:style "spaceDelimited"}}))
+                    (assert.are.equal "a=1|2"
+                                      (qs {:a [1 2]}
+                                          {:a {:style "pipeDelimited"}}))
+                    (assert.are.equal "f[x]=1&f[y]=a%20b"
+                                      (qs {:f {:x 1 :y "a b"}}
+                                          {:f {:style "deepObject"}}))
+                    ;; values are encoded, delimiters are not
+                    (assert.are.equal "a=x%2Cy,z"
+                                      (qs {:a ["x,y" "z"]}
+                                          {:a {:explode false}})))))))
+
 (describe "operation-name"
           (fn []
             (it "turns any operationId into a lowercase dash-separated name"

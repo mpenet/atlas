@@ -47,7 +47,7 @@ make check-binary
 make install
 ```
 
-Building needs `lua` (5.4 or later), `fennel`, `openssl`, `libyaml`, `pkg-config` and `curl`: the build downloads the libcurl sources, checks them against a pinned checksum and links them in statically.
+Building needs a C compiler, `lua` (5.4 or later) and `luarocks`, `fennel`, `openssl`, `libyaml`, `pkg-config`, `unzip` and `curl`: the build downloads the libcurl sources, checks them against a pinned checksum and links them in statically.
 
 ### With luarocks
 
@@ -87,7 +87,7 @@ Operation names are the spec's `operationId`s in lowercase, dash-separated words
 
 ## Options
 
-Options go anywhere after the command. `--name=value` and `--name value` are equivalent. `--` ends the options: everything after it is positional (for a path parameter starting with `-`). Unknown options are an error.
+Options go anywhere after the command. `--name=value` and `--name value` are equivalent, except for the field options (`--q.`, `--h.`, `--b.`, `--i.`, `--server.`, `--ssl.`), which take `NAME=VALUE` as one argument. `--` ends the options: everything after it is positional (for a path parameter starting with `-`). Unknown options are an error.
 
 ### Operations (`op`)
 
@@ -100,7 +100,7 @@ Options go anywhere after the command. `--name=value` and `--name value` are equ
 | `--q.KEY=VAL`, `--query.KEY=VAL` | Query parameter; repeating a key sends a list (`--q.tag=a --q.tag=b`) |
 | `--h.KEY=VAL`, `--header.KEY=VAL` | Request header; repeating a name joins the values with `, ` |
 | `--select=PATH` | Print only part of the response; see [Selecting](#selecting) |
-| `--output=FORMAT` | `json` (default), `yaml`, `raw`, `status` or `headers`; see [Output formats](#output-formats) |
+| `--output=FORMAT` | `json` (default), `yaml`, `raw`, `status` or `headers` (anything else is an error); see [Output formats](#output-formats) |
 | `--no-color` | Never colour the output (colours are only used on a terminal anyway) |
 | `-v`, `--verbose` | Log the request and the response status and headers on stderr |
 | `--dry-run` | Print the request instead of sending it; credentials redacted |

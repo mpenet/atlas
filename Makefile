@@ -19,7 +19,9 @@ LYAML_SRC        = $(NATIVE_BUILD)/lyaml/ext/yaml
 _lua_cflags     := $(shell pkg-config --cflags lua5.4 2>/dev/null || \
                             pkg-config --cflags lua5.5 2>/dev/null || \
                             pkg-config --cflags lua 2>/dev/null)
-LUA_INC         ?= $(patsubst -I%,%,$(firstword $(filter -I%,$(_lua_cflags))))
+# pkg-config first, else luarocks (CI's Lua ships no .pc file)
+LUA_INC         ?= $(or $(patsubst -I%,%,$(firstword $(filter -I%,$(_lua_cflags)))),\
+                        $(shell luarocks config variables.LUA_INCDIR 2>/dev/null))
 _LUA_LIBDIR     := $(shell pkg-config --variable=libdir lua5.4 2>/dev/null || \
                             pkg-config --variable=libdir lua5.5 2>/dev/null || \
                             pkg-config --variable=libdir lua 2>/dev/null)
@@ -96,6 +98,7 @@ deps:
 build: $(LUA_TARGETS) $(CURL_MODULE)
 
 $(CURL_MODULE): c/atlas_curl.c
+	@test -f "$(LUA_INC)/lua.h" || { echo "lua.h not found in '$(LUA_INC)': set LUA_INC to Lua's include directory"; exit 1; }
 	@mkdir -p $(dir $@)
 	$(CC) -O2 -Wall -fPIC $(MODULE_LDFLAGS) -I$(LUA_INC) $(CURL_CFLAGS) $< $(CURL_LIBS) -o $@
 
@@ -117,9 +120,12 @@ install: binary
 
 # ---- standalone binary ----
 
-native-libs: $(NATIVE_BUILD)/.stamp
+# the stamp names the libcurl version, so changing it rebuilds the libraries
+NATIVE_STAMP = $(NATIVE_BUILD)/.stamp-curl-$(CURL_VERSION)
 
-$(NATIVE_BUILD)/.stamp:
+native-libs: $(NATIVE_STAMP) $(NATIVE_BUILD)/libatlas_curl.a
+
+$(NATIVE_STAMP):
 	@mkdir -p $(NATIVE_BUILD)
 	@# extract luasocket
 	@if [ ! -d $(SOCKET_SRC) ]; then \
@@ -158,10 +164,12 @@ $(NATIVE_BUILD)/.stamp:
 	$(MAKE) -C $(NATIVE_BUILD)/curl-src/lib > /dev/null
 	$(MAKE) -C $(NATIVE_BUILD)/curl-src/lib install > /dev/null
 	$(MAKE) -C $(NATIVE_BUILD)/curl-src/include install > /dev/null
-	@# build the atlas.curl binding against it
-	$(CC) -O2 -Wall -DCURL_STATICLIB -I$(LUA_INC) -I$(CURL_PREFIX)/include -c c/atlas_curl.c -o $(NATIVE_BUILD)/atlas_curl.o
-	@ar rcs $(NATIVE_BUILD)/libatlas_curl.a $(NATIVE_BUILD)/atlas_curl.o
 	@touch $@
+
+# the atlas.curl binding, against that libcurl
+$(NATIVE_BUILD)/libatlas_curl.a: c/atlas_curl.c $(NATIVE_STAMP)
+	$(CC) -O2 -Wall -DCURL_STATICLIB -I$(LUA_INC) -I$(CURL_PREFIX)/include -c c/atlas_curl.c -o $(NATIVE_BUILD)/atlas_curl.o
+	ar rcs $@ $(NATIVE_BUILD)/atlas_curl.o
 
 binary: build native-libs
 	LUA_PATH="./$(LUA_DIR)/?.lua;./$(LUA_DIR)/?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" \

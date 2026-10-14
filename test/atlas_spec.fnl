@@ -521,6 +521,80 @@
                                         :headers {:authorization "t"}}]]
                                      seen))))))
 
+(describe "query parameter styles"
+          (fn []
+            (it "follow each parameter's style and explode"
+                (fn []
+                  (let [(http calls) (mock-http)
+                        c (atlas.client (schema {"/p" {:get {:operationId "p"
+                                                             :parameters [{:name "tags"
+                                                                           :in "query"
+                                                                           :explode false}
+                                                                          {:name "filter"
+                                                                           :in "query"
+                                                                           :style "deepObject"}]
+                                                             :responses {}}}})
+                                        {:http-fn http})]
+                    (assert.are.equal "https://api.example.com/p?filter[a]=1&tags=x,y"
+                                      (c.p.url-for {:query {:tags ["x" "y"]
+                                                            :filter {:a 1}}}))
+                    (c.p.invoke {:query {:tags ["x" "y"] :filter {:a 1}}})
+                    (let [http-mod (require :atlas.http)
+                          (url) (http-mod.encode-request (. calls 1))]
+                      (assert.are.equal "https://api.example.com/p?filter[a]=1&tags=x,y"
+                                        url)))))))
+
+(describe "bodyless calls"
+          (fn []
+            (it "send no Content-Type"
+                (fn []
+                  (let [(http calls) (mock-http)
+                        c (atlas.client (schema {"/p" {:post {:operationId "p"
+                                                              :requestBody {:content {"application/json" {:schema {:type "object"}}}}
+                                                              :responses {}}}})
+                                        {:http-fn http})]
+                    (c.p.invoke {})
+                    (assert.is_nil (. calls 1 :headers :content-type))
+                    (c.p.invoke {:body {:a 1}})
+                    (assert.are.equal "application/json"
+                                      (. calls 2 :headers :content-type)))))))
+
+(describe "referenced path items"
+          (fn []
+            (it "build operations whose schemas are recursive"
+                (fn []
+                  (let [doc (schema {"/a" {:$ref "#/components/pathItems/A"}})]
+                    (set doc.components
+                         {:pathItems {:A {:get {:operationId "getA"
+                                                :responses {"200" {:description "ok"
+                                                                   :content {"application/json" {:schema {:$ref "#/components/schemas/Node"}}}}}}}}
+                          :schemas {:Node {:type "object"
+                                           :properties {:next {:$ref "#/components/schemas/Node"}}}}})
+                    (let [c (atlas.client doc {:http-fn (mock-http)})]
+                      (assert.are.equal "/a" c.get-a.path)))))))
+
+(describe "credentials for referenced documents"
+          (fn []
+            (it "go only to the spec's own origin"
+                (fn []
+                  (let [seen {}
+                        docs {"https://api.test/openapi.json" (schema {"/a" {:get {:operationId "a"
+                                                                                   :responses {"200" {:$ref "https://api.test/common.json#/ok"}
+                                                                                               "404" {:$ref "https://other.test/common.json#/nf"}}}}})
+                              "https://api.test/common.json" {:ok {:description "ok"}}
+                              "https://other.test/common.json" {:nf {:description "nf"}}}]
+                    (atlas.client "https://api.test/openapi.json"
+                                  {:headers {:x-api-key "k"}
+                                   :load-schema (fn [location opts]
+                                                  (tset seen location opts)
+                                                  (. docs location))})
+                    (assert.are.same {:headers {:x-api-key "k"}}
+                                     (. seen "https://api.test/openapi.json"))
+                    (assert.are.same {:headers {:x-api-key "k"}}
+                                     (. seen "https://api.test/common.json"))
+                    (assert.are.same {:credentials false}
+                                     (. seen "https://other.test/common.json")))))))
+
 (describe "schema documents"
           (fn []
             (it "rejects text that is not a mapping"

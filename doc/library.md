@@ -62,13 +62,13 @@ Returns a table where each key is a kebab-case `operationId` (`getPetById` → `
 |-----|------|-------------|
 | `:base-url` | string | Override `servers[1].url` from the schema |
 | `:server-index` | number | Which of `servers` to use, 1-based (default 1) |
-| `:server-vars` | table | Values for `servers[1].variables`, e.g. `{:zone "de-fra-1"}`; unknown names and values outside a variable's `enum` raise an error |
+| `:server-vars` | table | Values for the selected server's `variables`, e.g. `{:zone "de-fra-1"}`; unknown names and values outside a variable's `enum` raise an error |
 | `:headers` | table | Default headers sent with every request |
 | `:timeout` | number | Default timeout in seconds |
 | `:ssl` | table | TLS options (`cafile`, `capath`, `certificate`, `key`, `verify`) — see [SSL / TLS](#ssl--tls) |
 | `:http-fn` | function | Custom HTTP backend — see [HTTP adapter](#http-adapter) |
 | `:source-url` | string | Location of a schema passed as a parsed table, used to resolve relative server URLs and external `$ref`s |
-| `:load-schema` | function | `(fn [location {:ssl :headers}])` returning a parsed document; replaces `atlas.load-schema` for the schema and its external `$ref`s |
+| `:load-schema` | function | `(fn [location opts])` returning a parsed document; replaces `atlas.load-schema` for the schema and its external `$ref`s. `opts` is `{:ssl :headers}`, or `{:ssl :credentials false}` for a document on another origin than the spec's, which must be fetched without credentials |
 
 ### Base URL resolution
 
@@ -114,7 +114,7 @@ Every part of the request is named, so nothing depends on argument order or on w
 | Key | Type | Description |
 |-----|------|-------------|
 | `:path` | table | Path parameters by name; values are percent-encoded (`"a/b c"` → `a%2Fb%20c`) |
-| `:query` | table | Query parameters; array values repeat the key (`{:id [1 2]}` → `id=1&id=2`) |
+| `:query` | table | Query parameters, serialized in each declared parameter's `style` and `explode` (by default an array repeats the key, `{:id [1 2]}` → `id=1&id=2`; `explode: false` gives `id=1,2`; `deepObject` gives `filter[a]=1`) |
 | `:headers` | table | Merged over client-level defaults; names are case-insensitive, per-request wins |
 | `:body` | any | Request body, encoded according to the operation's `Content-Type` |
 | `:timeout` | number | Overrides the client-level timeout for this call |

@@ -78,6 +78,14 @@
                                             :headers {}})
                                         :body))
                     (assert.are.equal 1 (length seen)))))
+            (it "does not follow links that only look same-origin"
+                (fn []
+                  (each [_ link (ipairs ["https://evil.example?@h/a?p=2"
+                                         "https://evil.example#@h/a"])]
+                    (let [(http seen) (site {"https://h/a" (page [1] link)})
+                          f (paginate.wrap http {})]
+                      (f {:method "GET" :url "https://h/a" :headers {}})
+                      (assert.are.equal 1 (length seen))))))
             (it "stops at max-pages"
                 (fn []
                   (let [(http seen) (site {"https://h/1" (page [1]

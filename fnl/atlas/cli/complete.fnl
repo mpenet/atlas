@@ -5,7 +5,8 @@
 (local util (require :atlas.util))
 (local http-mod (require :atlas.http))
 (local {: field-prefixes : options : option-by-name} (require :atlas.cli.args))
-(local {: load-config : load-schema-cached} (require :atlas.cli.settings))
+(local {: load-config : load-schema-cached : find-profile}
+       (require :atlas.cli.settings))
 
 ;; ---- options and completion ----
 (fn shown [o]
@@ -123,7 +124,7 @@ operation, or an Arazzo document's workflow and inputs."
   (let [config (or ctx.config {})
         c {}]
     (when (and (= cmd :op) target)
-      (let [profile (?. config :profiles target)
+      (let [(_ profile) (pcall find-profile config target)
             (ok schema) (pcall ctx.load-schema (or (?. profile :schema) target))]
         (when (and ok (= (type schema) :table))
           (let [index-flag (accumulate [v nil _ w (ipairs words)]
@@ -199,18 +200,20 @@ operation, or an Arazzo document's workflow and inputs."
   (print "_atlas_complete() {")
   (print "  local line=\"${COMP_LINE:0:COMP_POINT}\"")
   (print "  local cur=\"${COMP_WORDS[COMP_CWORD]}\"")
-  (print "  local IFS=$'\\n'")
-  (print "  local cands")
-  (print "  cands=($(atlas __complete \"$line\" 2>/dev/null))")
+  ;; candidates come from the spec: read them as data, one per line, and
+  ;; never pass them to compgen -W, which would expand $(...) in them
+  (print "  local c cands=()")
+  (print "  while IFS= read -r c; do cands+=(\"$c\"); done < <(atlas __complete \"$line\" 2>/dev/null)")
   (print "  # bash splits words at '=': complete only the part after it")
   (print "  if [[ \"$cur\" == \"=\" ]]; then cur=\"\"; fi")
   (print "  if [[ \"${line##* }\" == *=* ]]; then")
-  (print "    local stripped c")
+  (print "    local stripped")
   (print "    stripped=()")
   (print "    for c in \"${cands[@]}\"; do stripped+=(\"${c#*=}\"); done")
   (print "    cands=(\"${stripped[@]}\")")
   (print "  fi")
-  (print "  COMPREPLY=($(compgen -W \"${cands[*]}\" -- \"$cur\"))")
+  (print "  COMPREPLY=()")
+  (print "  for c in \"${cands[@]}\"; do [[ \"$c\" == \"$cur\"* ]] && COMPREPLY+=(\"$c\"); done")
   (print "  if [[ ${#COMPREPLY[@]} -eq 1 && \"${COMPREPLY[0]}\" == *[=.] ]] && type compopt &>/dev/null; then compopt -o nospace; fi")
   (print "}")
   (print "complete -F _atlas_complete atlas"))

@@ -15,8 +15,14 @@
     (icollect [_ name (ipairs (util.extract-path-params path))]
       (or (. declared name) {:name name :in "path"}))))
 
+(fn type-name [schema]
+  "A schema's type for help: \"string\", \"string | null\" (OpenAPI 3.1 type
+arrays), or \"any\"."
+  (let [t (?. schema :type)]
+    (if (= (type t) :table) (table.concat t " | ") (or t :any))))
+
 (fn param-type [p]
-  (or (?. p :schema :type) :any))
+  (type-name p.schema))
 
 (fn param-extras [p required?]
   (let [parts []]
@@ -84,7 +90,7 @@ params heading and an optional body hint, which differ between CLI and library."
         (when bschema
           (each [_ name (ipairs (sorted-keys bschema.properties))]
             (local prop (. bschema.properties name))
-            (add (string.format "  %-16s %s%s%s" name (or prop.type :any)
+            (add (string.format "  %-16s %s%s%s" name (type-name prop)
                                 (if (. bschema.required name) " [required]" "")
                                 (if prop.description
                                     (.. " — " prop.description)

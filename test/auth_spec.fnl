@@ -679,6 +679,19 @@
                     (wrapped {:method "GET"
                               :url "https://h/items?api_key=K&page=2"})
                     (assert.is_nil (?. sent 1 :query :api_key)))))
+            (it "marks the parameter as sensitive"
+                (fn []
+                  (let [auth (reload-auth (pick-values 1 (seq-mock)))
+                        sent []
+                        wrapped (auth.wrap-http-fn {:name "api-key"
+                                                    :params {:name "appid"
+                                                             :in "query"
+                                                             :value "K"}}
+                                                   (fn [req]
+                                                     (table.insert sent req)
+                                                     {:status 200}))]
+                    (wrapped {:method "GET" :url "https://h/items"})
+                    (assert.are.same [:appid] (. sent 1 :sensitive-query)))))
             (it "leaves the caller's request alone"
                 (fn []
                   (let [auth (reload-auth (pick-values 1 (seq-mock)))

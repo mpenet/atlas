@@ -61,3 +61,23 @@
             (it "returns nil for unknown paths"
                 (fn []
                   (assert.is_nil (coerce.schema-at {:type "object"} ["x"]))))))
+
+(describe "numbers from the command line"
+          (fn []
+            (it "follow JSON's syntax and stay exact"
+                (fn []
+                  ;; typed: only JSON numbers convert; the rest stays text and
+                  ;; validation reports it
+                  (assert.are.equal "0x10"
+                                    (coerce.from-string "0x10"
+                                                        {:type "integer"}))
+                  (assert.are.equal "1e400"
+                                    (coerce.from-string "1e400"
+                                                        {:type "number"}))
+                  (assert.are.equal 16
+                                    (coerce.from-string "16" {:type "integer"}))
+                  ;; untyped: an integer too large for 64 bits stays text
+                  (assert.are.equal "12345678901234567890"
+                                    (coerce.from-string "12345678901234567890"))
+                  (assert.are.equal 9007199254740993
+                                    (coerce.from-string "9007199254740993"))))))

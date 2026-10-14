@@ -35,6 +35,7 @@
         : client-options
         : display-options
         : colors-wanted?
+        : find-profile
         : fetch-schema
         : load-schema-cached} (require :atlas.cli.settings))
 
@@ -61,11 +62,6 @@
                            "/config.json\n")))
   (exit 1))
 
-(fn find-profile [config name]
-  (let [profiles (or (?. config :profiles) {})]
-    (when (and name (. profiles name))
-      (resolve-profile name profiles {}))))
-
 ;; ---- profile subcommands ----
 
 (fn profile-list [config]
@@ -74,7 +70,9 @@
         (print "No profiles configured.")
         (each [_ name (ipairs (sorted-names profiles))]
           (print (.. name "\t"
-                     (or (?. (find-profile config name) :schema) "(no schema)")))))))
+                     (match (pcall find-profile config name)
+                       (true p) (or (?. p :schema) "(no schema)")
+                       (_ err) (.. "(broken: " (tostring err) ")"))))))))
 
 (fn profile-show [config name]
   (let [p (find-profile config name)]
@@ -218,13 +216,16 @@ positional path params, --inputs, --body, then --i./-i/--b. fields."
 
 (fn source-schema-loader [env auth-headers]
   "Loader for source schemas: URLs through the transport, getting credentials
-only after answering 401/403; files directly."
+only after answering 401/403, and never for a document whose loader options
+say :credentials false (a $ref to another origin); files directly."
   (fn [location opts]
     (if (location:match "^https?://")
-        (fetch-schema location {:transport (or env.transport http-mod.request)
-                                :headers opts.headers
-                                :ssl opts.ssl
-                                : auth-headers})
+        (fetch-schema location
+                      {:transport (or env.transport http-mod.request)
+                       :headers opts.headers
+                       :ssl opts.ssl
+                       :auth-headers (when (not= false opts.credentials)
+                                       auth-headers)})
         (atlas.load-schema location opts))))
 
 (fn execute-workflow [doc file wf inputs p profile-name profile env]

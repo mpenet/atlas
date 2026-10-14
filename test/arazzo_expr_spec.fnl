@@ -508,3 +508,63 @@
                     (assert.has.error #(expr.eval ctx
                                                   "$workflows.w.outputs.r.id")
                                       "$workflows.w.outputs.r.id: there is no output 'r.id'; for a value inside 'r' use $workflows.w.outputs.r#/id"))))))
+
+(describe "payload evaluation"
+          (fn []
+            (local json (require :atlas.json))
+            (it "keeps arrays arrays, empty ones included"
+                (fn []
+                  (let [v (expr.eval {:inputs {:n 1}}
+                                     {:tags (json.array [])
+                                      :ids (json.array [1 2])
+                                      :n "$inputs.n"})]
+                    (assert.are.equal "{\"ids\":[1,2],\"n\":1,\"tags\":[]}"
+                                      (json.encode v)))))))
+
+(describe "condition language, as the Arazzo spec defines it"
+          (fn []
+            (let [ctx {:inputs {:a "it's"}
+                       :response {:status 200
+                                  :headers {}
+                                  :body {:state "DONE"}}
+                       :steps {}
+                       :workflows {}}]
+              (it "compares strings case-insensitively"
+                  (fn []
+                    (assert.is_true (expr.eval-criterion ctx
+                                                         {:condition "$response.body#/state == 'done'"}))
+                    (assert.is_false (expr.eval-criterion ctx
+                                                          {:condition "$response.body#/state != 'Done'"}))))
+              (it "escapes a single quote by doubling it"
+                  (fn []
+                    (assert.is_true (expr.eval-criterion ctx
+                                                         {:condition "$inputs.a == 'it''s'"}))))
+              (it "never matches a regex against a missing value"
+                  (fn []
+                    (assert.is_false (expr.eval-criterion ctx
+                                                          {:context "$response.header.X"
+                                                           :type "regex"
+                                                           :condition "^n"})))))))
+
+(describe "expression roots"
+          (fn []
+            (let [ctx {:inputs {}
+                       :request {:query {:q "x"} :path {:id "7"} :headers {}}
+                       :response {:status 200 :headers {}}
+                       :steps {}
+                       :workflows {}}]
+              (it "read the request's query and path parameters"
+                  (fn []
+                    (assert.are.equal "x" (expr.eval ctx "$request.query.q"))
+                    (assert.are.equal "7" (expr.eval ctx "$request.path.id"))))
+              (it "reject a root that doesn't exist instead of reading nil"
+                  (fn []
+                    (assert.has.error #(expr.eval-criterion ctx
+                                                            {:condition "$statuscode == 200"})
+                                      "unknown runtime expression: $statuscode")))
+              (it "leave payload text that merely starts with $ as it is"
+                  (fn []
+                    (assert.are.same {:price "$5" :code 200}
+                                     (expr.eval ctx
+                                                {:price "$5"
+                                                 :code "$statusCode"})))))))

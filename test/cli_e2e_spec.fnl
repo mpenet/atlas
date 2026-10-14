@@ -340,6 +340,33 @@
                                                    :child {:extends "base"}}}
                             #(atlas-run ["profile" "list"]))]
                     (assert.are.equal "base\ts.json\nchild\ts.json" r.out))))
+            (it "lists every profile, flagging one whose extends is broken"
+                (fn []
+                  (let [r (with-config {:profiles {:a {:schema "s.json"}
+                                                   :b {:extends "nope"}
+                                                   :c {:schema "t.json"}}}
+                            #(atlas-run ["profile" "list"]))]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "a\ts.json\nb\t(broken: Profile not found: nope)\nc\tt.json"
+                                      r.out))))
+            (it "explains bad option values"
+                (fn []
+                  (let [r (atlas-run ["op" "p" "get-pet" "3" "--output=yml"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "--output must be one of json, yaml, raw, status, headers"
+                                                  1 true)))
+                  (let [r (atlas-run ["op"
+                                      "p"
+                                      "get-pet"
+                                      "3"
+                                      "--server-index=0"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "server index 0 out of range"
+                                                  1 true)))
+                  (let [r (atlas-run ["op" "p" "add-pet" "--b.=1"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "--b. needs a field name" 1
+                                                  true)))))
             (it "shows a profile, or fails when it does not exist"
                 (fn []
                   (let [r (atlas-run ["profile" "show" "yaml"])]
@@ -466,7 +493,24 @@
                       (assert.are.equal 0 code err)
                       (assert.is_nil (. requests 1 :headers :authorization))
                       (assert.are.equal "Bearer t"
-                                        (. requests 2 :headers :authorization))))))))
+                                        (. requests 2 :headers :authorization)))))
+              (it "never sends credentials to a host a source's $ref names"
+                  (fn []
+                    (let [f (io.open "test/fixtures/cli-remote.arazzo.json" :w)]
+                      (f:write "{\"arazzo\":\"1.0.0\",\"info\":{\"title\":\"r\",\"version\":\"1\"},\"sourceDescriptions\":[{\"name\":\"api\",\"type\":\"openapi\",\"url\":\"https://specs.test/openapi.json\"}],\"workflows\":[{\"workflowId\":\"w\",\"steps\":[{\"stepId\":\"s\",\"operationId\":\"listPets\"}]}]}")
+                      (f:close))
+                    (let [spec "{\"openapi\":\"3.0.0\",\"info\":{\"title\":\"t\",\"version\":\"1\"},\"servers\":[{\"url\":\"https://api.test\"}],\"paths\":{\"/pets\":{\"get\":{\"operationId\":\"listPets\",\"responses\":{\"200\":{\"$ref\":\"https://other.test/common.json#/ok\"}}}}}}"
+                          (_ requests) (run-with ["az" "remote-flow" "w"]
+                                                 {"GET https://specs.test/openapi.json" {:status 200
+                                                                                         :headers {}
+                                                                                         :raw spec}
+                                                  "GET https://other.test/common.json" {:status 401
+                                                                                        :headers {}
+                                                                                        :raw ""}})]
+                      (os.remove "test/fixtures/cli-remote.arazzo.json")
+                      (each [_ req (ipairs requests)]
+                        (when (req.url:find "other.test" 1 true)
+                          (assert.is_nil (?. req :headers :authorization))))))))))
 
 (describe "auth and argument edge cases"
           (fn []

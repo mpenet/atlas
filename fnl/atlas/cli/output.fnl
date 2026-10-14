@@ -5,15 +5,22 @@
 (local json (require :atlas.json))
 (local pretty-mod (require :atlas.pretty))
 
-(fn redact-header [name value]
-  "Value safe to print for header name: credentials are masked."
+(fn redact-header [name value ?names]
+  "Value safe to print for header name: credentials are masked, as are the
+headers in the set ?names (lowercase)."
   (let [n (name:lower)]
     (if (or (= n "authorization") (= n "proxy-authorization"))
         (let [(scheme) (: (tostring value) :match "^(%S+)%s")]
           (if scheme (.. scheme " <redacted>") "<redacted>"))
-        (util.secret-name? n)
+        (or (util.secret-name? n) (?. ?names n))
         "<redacted>"
         value)))
+
+(fn sensitive-names [names]
+  "Set of the lowercased names authentication marked on a request."
+  (collect [_ n (ipairs (or names []))]
+    (n:lower)
+    true))
 
 (fn sorted-headers [headers]
   (let [names (icollect [k (pairs (or headers {}))]
@@ -26,7 +33,9 @@
   (fn [req]
     (io.stderr:write (.. "> " (or req.method "?") " "
                          (util.redact-url (util.append-query (or req.url "?")
-                                                             (or req.query {})))
+                                                             (or req.query {})
+                                                             req.query-styles)
+                                          (sensitive-names req.sensitive-query))
                          "\n"))
     (when req.body
       (io.stderr:write (.. "> body: "
@@ -35,7 +44,10 @@
                                (tostring req.body))
                            "\n")))
     (each [_ [k v] (ipairs (sorted-headers req.headers))]
-      (io.stderr:write (.. "> " k ": " (tostring (redact-header k v)) "\n")))
+      (io.stderr:write (.. "> " k ": "
+                           (tostring (redact-header k v
+                                                    (sensitive-names req.sensitive-headers)))
+                           "\n")))
     (http-fn req)))
 
 (fn op? [v]
@@ -59,9 +71,9 @@
   (let [pick (fn [obj]
                (collect [_ f (ipairs fields)] f (. obj f)))]
     (when (= (type value) :table)
-      (if (= (type (. value 1)) :table)
-          (icollect [_ obj (ipairs value)]
-            (when (= (type obj) :table) (pick obj)))
+      (if (or (json.array? value) (= (type (. value 1)) :table))
+          (json.array (icollect [_ obj (ipairs value)]
+                        (when (= (type obj) :table) (pick obj))))
           (pick value)))))
 
 (fn select-path [data path]
@@ -70,7 +82,7 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
   (if (or (= nil data) (= path "")) data (path:match "^%.")
       (select-path data (path:sub 2)) (path:match "^%[%]")
       (when (= (type data) :table)
-        (icollect [_ v (ipairs data)] (select-path v (path:sub 3))))
+        (json.array (icollect [_ v (ipairs data)] (select-path v (path:sub 3)))))
       (path:match "^%[%d+%]")
       (let [(index rest) (path:match "^%[(%d+)%](.*)$")]
         (when (= (type data) :table)
@@ -82,7 +94,8 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
                                     (icollect [f (fields:gmatch "[^,]+")]
                                       (f:match "^%s*(.-)%s*$")))]
             (if (and (= (type (. picked 1)) :table) (not= rest ""))
-                (icollect [_ obj (ipairs picked)] (select-path obj rest))
+                (json.array (icollect [_ obj (ipairs picked)]
+                              (select-path obj rest)))
                 (select-path picked rest)))))
       (let [(key rest) (path:match "^([^%.%[{]+)(.*)$")]
         (when (and key (= (type data) :table))
@@ -91,9 +104,13 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
 (fn request-text [req]
   "Human-readable request, credentials redacted."
   (let [(url payload headers) (http-mod.encode-request req)
-        lines [(.. req.method " " (util.redact-url url))]]
+        lines [(.. req.method " "
+                   (util.redact-url url (sensitive-names req.sensitive-query)))]]
     (each [_ [k v] (ipairs (sorted-headers headers))]
-      (table.insert lines (.. k ": " (redact-header k v))))
+      (table.insert lines
+                    (.. k ": "
+                        (redact-header k v
+                                       (sensitive-names req.sensitive-headers)))))
     (when payload
       (table.insert lines "")
       (table.insert lines payload))
@@ -171,7 +188,9 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
     (if error?
         (do
           (when (not= nil resp.body)
-            (io.stderr:write (.. (render resp.body :json use-color) "\n")))
+            (io.stderr:write (.. (if (= (type resp.body) :string) resp.body
+                                     (render resp.body :json use-color))
+                                 "\n")))
           (exit-code resp.status false))
         (let [text (format-output resp output use-color ?select)]
           (if text

@@ -71,14 +71,23 @@ dashes (getPetById → get-pet-by-id, projects/list_cards → projects-list-card
   "Quote s as a single POSIX shell word."
   (.. "'" (pick-values 1 (: (tostring s) :gsub "'" "'\\''")) "'"))
 
+(local default-ports {:http "80" :https "443"})
+
 (fn origin [url]
-  "scheme://host:port as the transport will connect, default port explicit.
-Parsed by luasocket so it agrees with where requests actually go."
-  (let [parsed ((. (require :socket.url) :parse) url)]
-    (when (and parsed parsed.scheme parsed.host)
-      (let [scheme (parsed.scheme:lower)]
-        (.. scheme "://" (parsed.host:lower) ":"
-            (or parsed.port (if (= scheme "https") "443" "80")))))))
+  "scheme://host:port of an http(s) URL, port explicit, as libcurl connects:
+the authority ends at the first / ? # (and at \\, which URL parsers disagree
+about), and user info before its last @ is dropped. nil for anything else."
+  (let [(scheme rest) (url:match "^(%a[%w+.-]*)://(.*)$")
+        scheme (and scheme (scheme:lower))]
+    (when (and scheme (. default-ports scheme))
+      (let [authority (rest:match "^([^/?#\\]*)")
+            hostport (or (authority:match "^.*@(.*)$") authority)
+            (host port) (if (hostport:match "^%[")
+                            (hostport:match "^(%[[^%]]*%]):?(%d*)$")
+                            (hostport:match "^([^:]*):?(%d*)$"))]
+        (when (and host (not= host ""))
+          (.. scheme "://" (host:lower) ":"
+              (if (= port "") (. default-ports scheme) port)))))))
 
 (fn header [headers name]
   "Case-insensitive header lookup."
@@ -106,14 +115,18 @@ Parsed by luasocket so it agrees with where requests actually go."
                   (n:match "token") (n:match "secret") (n:match "sig")
                   (n:match "passw")))))
 
-(fn redact-url [url]
-  "url with the values of credential-like query parameters masked."
-  (pick-values 1 (url:gsub "([?&])([^=&#]+)=([^&#]*)"
-                           (fn [sep name value]
-                             (.. sep name "="
-                                 (if (secret-name? (url-decode name))
-                                     "<redacted>"
-                                     value))))))
+(fn redact-url [url ?names]
+  "url with its user info masked, and the values of query parameters that look
+like credentials or are in the set ?names (lowercase)."
+  (let [(without-userinfo) (url:gsub "^(%a[%w+.-]*://)[^/?#@]*@"
+                                     "%1<redacted>@")]
+    (pick-values 1 (without-userinfo:gsub "([?&])([^=&#]+)=([^&#]*)"
+                     (fn [sep name value]
+                       (let [n (url-decode name)]
+                         (.. sep name "="
+                             (if (or (secret-name? n) (?. ?names (n:lower)))
+                                 "<redacted>"
+                                 value))))))))
 
 (fn form-encode [params]
   "Encode params as application/x-www-form-urlencoded, keys sorted.
@@ -132,9 +145,51 @@ Array values repeat the key (OpenAPI style=form, explode=true)."
           (table.insert parts (.. (url-encode k) "=" (url-encode x))))))
     (table.concat parts "&")))
 
-(fn append-query [url params]
-  "Append form-encoded params to url, extending any existing query string."
-  (let [qs (form-encode params)]
+(local delimiters {:form "," :spaceDelimited "%20" :pipeDelimited "|"})
+
+(fn query-pairs [name value style explode]
+  "\"key=value\" strings for one query parameter in an OpenAPI style
+(form, spaceDelimited, pipeDelimited, deepObject); values are encoded,
+delimiters are not."
+  (let [k (url-encode name)
+        enc url-encode]
+    (if (not= (type value) :table) [(.. k "=" (enc value))]
+        (not= nil (. value 1))
+        (if explode
+            (icollect [_ x (ipairs value)] (.. k "=" (enc x)))
+            [(.. k "="
+                 (table.concat (icollect [_ x (ipairs value)] (enc x))
+                               (. delimiters style)))])
+        (let [keys (doto (icollect [p (pairs value)] p)
+                     (table.sort))]
+          (if (= style :deepObject)
+              (icollect [_ p (ipairs keys)]
+                (.. k "[" (enc p) "]=" (enc (. value p))))
+              explode
+              (icollect [_ p (ipairs keys)]
+                (.. (enc p) "=" (enc (. value p))))
+              [(.. k "=" (table.concat (icollect [_ p (ipairs keys)]
+                                         (.. (enc p) "," (enc (. value p))))
+                                       ","))])))))
+
+(fn query-string [params ?styles]
+  "Query string for params, keys sorted; ?styles maps a parameter name to
+its {:style :explode} (default: form, exploded)."
+  (let [names (doto (icollect [k (pairs params)] k)
+                (table.sort #(< (tostring $1) (tostring $2))))
+        parts []]
+    (each [_ name (ipairs names)]
+      (let [{: style : explode} (or (?. ?styles name) {})
+            style (or style :form)
+            explode (if (= nil explode) (= style :form) explode)]
+        (each [_ part (ipairs (query-pairs name (. params name) style explode))]
+          (table.insert parts part))))
+    (table.concat parts "&")))
+
+(fn append-query [url params ?styles]
+  "Append params to url as a query string (see query-string), extending any
+existing one."
+  (let [qs (query-string params ?styles)]
     (if (= qs "") url
         (url:find "?" 1 true) (.. url "&" qs)
         (.. url "?" qs))))
@@ -177,17 +232,29 @@ with the same name and location."
       (table.insert out p))
     out))
 
+(fn simple-style [v]
+  "A path parameter value in OpenAPI's default simple style: arrays as
+a,b and objects as k1,v1,k2,v2 (keys sorted), each part url-encoded."
+  (if (not= (type v) :table) (url-encode v) (not= nil (. v 1))
+      (table.concat (icollect [_ x (ipairs v)] (url-encode x)) ",")
+      (let [keys (doto (icollect [k (pairs v)] k)
+                   (table.sort))]
+        (table.concat (icollect [_ k (ipairs keys)]
+                        (.. (url-encode k) "," (url-encode (. v k))))
+                      ","))))
+
 (fn resolve-path [template params]
-  "Substitute {name} segments in template with url-encoded params[name]."
+  "Substitute {name} segments in template with params[name], url-encoded."
   (pick-values 1 (template:gsub "{([^}]+)}"
                                 (fn [param]
                                   (let [v (. params param)]
                                     (assert (not= nil v)
                                             (.. "missing required path parameter: "
                                                 param))
-                                    (url-encode v))))))
+                                    (simple-style v))))))
 
 {: camel->kebab
+ : query-string
  : operation-name
  : extract-path-params
  : resolve-path

@@ -97,6 +97,12 @@
                     (assert.are.equal v.x v.y)
                     (assert.are.equal v.x v.x.properties.next)
                     (assert.are.same {:type "object"} v.y.properties.meta))))
+            (it "copies values that are already cyclic"
+                (fn []
+                  (let [node {:type "object"}]
+                    (tset node :properties {:next node})
+                    (let [v (deref {} {:schema node})]
+                      (assert.are.equal v.schema v.schema.properties.next)))))
             (it "raises for refs that resolve to nothing"
                 (fn []
                   (let [(ok err) (pcall deref {:components {}}

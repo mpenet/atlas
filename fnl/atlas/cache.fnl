@@ -26,7 +26,9 @@
 
 (fn put [url schema]
   (let [dir (cache-dir)]
-    (os.execute (.. "mkdir -p " (util.shell-quote dir)))
+    ;; private: specs fetched with credentials need not be public
+    (os.execute (.. "mkdir -p " (util.shell-quote dir) " && chmod 700 "
+                    (util.shell-quote dir)))
     ;; write then rename, so a concurrent reader never sees a partial entry
     (let [path (cache-path url)
           tmp (.. path ".tmp" (math.random 1 1000000000))

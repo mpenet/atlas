@@ -2,11 +2,8 @@
 ;; ABOUTME: empty ones; encoding is deterministic (sorted keys) and exact for numbers.
 (local lunajson (require :lunajson))
 
-;; lunajson's encoder reads an array's length from index 0; answering it here
-;; keeps it out of the table's contents
-(local array-mt {:__index (fn [t k]
-                            (when (= k 0)
-                              (rawlen t)))})
+;; marks a table as a JSON array, so that it encodes as one even when empty
+(local array-mt {})
 
 (fn array [t]
   "t marked as a JSON array, so that it encodes as one even when empty."

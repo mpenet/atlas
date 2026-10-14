@@ -1,18 +1,22 @@
 ;; ABOUTME: Chooses request Content-Type and Accept headers from an operation's
 ;; ABOUTME: declared media types.
-(local preferred [:application/json
-                  :application/x-www-form-urlencoded
-                  :multipart/form-data])
+(fn rank [media-type]
+  "Preference of a media type: JSON first, then forms, then the rest."
+  (let [mt (media-type:lower)]
+    (if (or (mt:match "^application/json") (mt:match "^[^;]*%+json")) 1
+        (mt:match "^application/x%-www%-form%-urlencoded") 2
+        (mt:match "^multipart/form%-data") 3
+        4)))
 
 (fn pick-media-type [content]
+  "The media type to send among content's: the most preferred, then the first
+by name, so the choice is the same on every run."
   (when content
-    (var found nil)
-    (each [_ mt (ipairs preferred) :until found]
-      (when (. content mt) (set found mt)))
-    (when (not found)
-      (each [k _ (pairs content) :until found]
-        (set found k)))
-    found))
+    (let [types (doto (icollect [k (pairs content)] k)
+                  (table.sort #(let [a (rank $1)
+                                     b (rank $2)]
+                                 (if (= a b) (< $1 $2) (< a b)))))]
+      (. types 1))))
 
 (fn pick-content-type [op-spec]
   (when op-spec.requestBody

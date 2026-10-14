@@ -116,6 +116,18 @@
                                   :enum [true false]
                                   :default false}}})
 
+(describe "doc.build types"
+          (fn []
+            (it "shows OpenAPI 3.1 type arrays"
+                (fn []
+                  (let [text (build "/x" "get"
+                                    {:parameters [{:name "q"
+                                                   :in "query"
+                                                   :schema {:type ["string"
+                                                                   "null"]}}]})]
+                    (assert.is_truthy (text:find "q                string | null"
+                                                 1 true)))))))
+
 (describe "doc.build ordering"
           (fn []
             (it "lists body properties and responses in a stable order"

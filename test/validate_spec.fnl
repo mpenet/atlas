@@ -148,3 +148,33 @@
                     (assert.are.same [] (validate.check a {}))
                     (assert.are.same ["value: expected object, got string"]
                                      (validate.check a "x")))))))
+
+(describe "schema forms from OpenAPI 3.0 and 3.1"
+          (fn []
+            (local json (require :atlas.json))
+            (it "applies nullable only together with type"
+                (fn []
+                  (assert.are.same []
+                                   (validate.check {:nullable true
+                                                    :allOf [{:type "object"}]}
+                                                   {:x 1}))
+                  (assert.are.same []
+                                   (validate.check {:type "string"
+                                                    :nullable true}
+                                                   validate.null))))
+            (it "accepts boolean schemas: true allows anything, false nothing"
+                (fn []
+                  (assert.are.same []
+                                   (validate.check {:type "object"
+                                                    :properties {:x true}}
+                                                   {:x 1}))
+                  (assert.are.same ["value.x: not allowed"]
+                                   (validate.check {:type "object"
+                                                    :properties {:x false}}
+                                                   {:x 1}))))
+            (it "tells an empty array from an empty object"
+                (fn []
+                  (assert.are.same ["value: expected object, got array"]
+                                   (validate.check {:type "object"}
+                                                   (json.array [])))
+                  (assert.are.same [] (validate.check {:type "object"} {}))))))

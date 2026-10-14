@@ -139,6 +139,31 @@ Expression format: '{$sourceDescriptions.NAME.url}#/paths/~1foo/method'"
       (tset result.headers :cookie (table.concat cookies "; ")))
     result))
 
+(fn set-at-pointer [value pointer new]
+  "value with the location named by JSON pointer set to new (objects along the
+way are created)."
+  (let [keys (icollect [k (pointer:gmatch "/([^/]*)")]
+               (util.unescape-pointer k))
+        last (table.remove keys)]
+    (assert last (.. "replacement target must be a JSON pointer: " pointer))
+    (var node value)
+    (each [_ k (ipairs keys)]
+      (let [key (if (json.array? node) (+ 1 (tonumber k)) k)]
+        (when (not= (type (. node key)) :table)
+          (tset node key {}))
+        (set node (. node key))))
+    (tset node (if (json.array? node) (+ 1 (tonumber last)) last) new)
+    value))
+
+(fn request-body [ctx request-body]
+  "The step's body: the evaluated payload with its replacements applied."
+  (let [body (expr.eval ctx request-body.payload)]
+    (each [_ r (ipairs (or request-body.replacements []))]
+      (assert (= (type body) :table)
+              "requestBody replacements need a structured payload")
+      (set-at-pointer body r.target (expr.eval ctx r.value)))
+    body))
+
 (fn resolve-outputs [ctx outputs]
   (let [result {}]
     (each [k expr-str (pairs (or outputs {}))]
@@ -149,17 +174,19 @@ Expression format: '{$sourceDescriptions.NAME.url}#/paths/~1foo/method'"
 
 (fn execute-step [ctx clients step params on-step]
   "Execute a single step with resolved parameter objects. Updates ctx in place.
-Returns the response."
+Returns the response, or (nil message) when the request failed in transport."
   (let [step-id step.stepId
         resolved (resolve-params ctx params)
         body (when step.requestBody
-               (expr.eval ctx step.requestBody.payload))
+               (request-body ctx step.requestBody))
         op-ref (or step.operationId step.operationPath)
         op (if step.operationId
                (find-op-by-id clients (expr.eval ctx step.operationId))
                (find-op-by-path clients step.operationPath))
         request {:body body
-                 :headers resolved.headers
+                 :headers (doto resolved.headers
+                            (tset :content-type
+                                  (?. step :requestBody :contentType)))
                  :path resolved.path
                  :query (when (next resolved.query) resolved.query)
                  :timeout step.timeout}]
@@ -172,24 +199,27 @@ Returns the response."
     (let [t0 (socket.gettime)
           (ok resp) (pcall op.invoke request)
           elapsed (- (socket.gettime) t0)]
-      (assert ok (.. "step '" step-id "' request failed: " (tostring resp)))
-      ;; store in context
-      (tset ctx.steps step-id {:elapsed elapsed
-                               :op-ref op-ref
-                               :outputs {}
-                               :request request
-                               :response resp})
+      ;; store in context; a transport failure leaves no response
+      (tset ctx.steps step-id
+            {:elapsed elapsed
+             :op-ref op-ref
+             :outputs {}
+             :request request
+             :response (when ok resp)})
       ;; update current response/request in ctx for criterion eval
-      (tset ctx :response resp)
+      (tset ctx :response (when ok resp))
       (tset ctx :request request)
-      (when on-step
-        (on-step {:elapsed elapsed
-                  :op-ref op-ref
-                  :outputs (resolve-outputs ctx step.outputs)
-                  :response resp
-                  :status :done
-                  :step step-id}))
-      resp)))
+      (if ok
+          (do
+            (when on-step
+              (on-step {:elapsed elapsed
+                        :op-ref op-ref
+                        :outputs (resolve-outputs ctx step.outputs)
+                        :response resp
+                        :status :done
+                        :step step-id}))
+            resp)
+          (values nil (.. "request failed: " (tostring resp)))))))
 
 ;; ---- workflow execution ----
 
@@ -260,15 +290,52 @@ already on the stack means a cycle (dependsOn or a step calling itself)."
                          p.name
                          (expr.eval run.ctx p.value))
             (ok sub) (pcall run.run-sub step.workflowId sub-inputs)]
+        ;; the step has no response of its own: criteria must not see the
+        ;; previous step's
+        (tset run.ctx :response nil)
+        (tset run.ctx :request nil)
         (tset run.ctx.steps step.stepId
               {:outputs (if ok sub.outputs {}) :request nil :response nil})
         (if ok {:ok true} {:ok false :error sub}))
       ;; operation step: merge workflow params then step params
-      (let [params (util.merge-parameters run.wf-params
-                                          (expand-references run.doc
-                                                             step.parameters))]
-        {:ok true
-         :response (execute-step run.ctx run.clients step params run.on-step)})))
+      (let [step-params (expand-references run.doc step.parameters)
+            _ (each [_ p (ipairs step-params)]
+                (when (. p "$ref")
+                  (error (.. "step '" step.stepId
+                             "': refer to reusable parameters with reference: $components.parameters.NAME, not $ref")
+                         0))
+                (when (= nil p.in)
+                  (error (.. "step '" step.stepId "': parameter '"
+                             (tostring p.name)
+                             "' has no 'in' (path, query, header or cookie)")
+                         0)))
+            params (util.merge-parameters run.wf-params step-params)]
+        (match (execute-step run.ctx run.clients step params run.on-step)
+          resp {:ok true :response resp}
+          (nil message) {:ok false :error message}))))
+
+(fn wait-before-retry [run seconds]
+  "Sleep before retrying: the response's Retry-After (in seconds) overrules
+the action's retryAfter, as the Arazzo spec recommends."
+  (let [header (util.header (?. run.ctx :response :headers) "retry-after")
+        wait (or (tonumber header) seconds)]
+    (when (and wait (> wait 0))
+      (socket.sleep wait))))
+
+(fn run-step-first [run step-id retried]
+  "Run the step a retry action names before the retried step runs again; it
+must succeed."
+  (let [target (. run.steps
+                  (or (. run.step-index step-id)
+                      (error (.. "retry: unknown step: " step-id) 0)))
+        outcome (run-step run target)]
+    (when target.outputs
+      (tset (. run.ctx.steps step-id) :outputs
+            (resolve-outputs run.ctx target.outputs)))
+    (when (not (and outcome.ok
+                    (expr.eval-criteria run.ctx target.successCriteria)))
+      (error (.. "step '" retried.stepId "': retry step "
+                 (failure-message step-id outcome)) 0))))
 
 (fn goto-action [run action step]
   "Index of the step a goto action continues at."
@@ -277,7 +344,7 @@ already on the stack means a cycle (dependsOn or a step calling itself)."
     (tset run.goto-counts target n)
     (assert (<= n run.max-gotos) (.. "goto loop detected at: " target))
     (when (and action.stepId (= action.stepId step.stepId) action.retryAfter)
-      (socket.sleep action.retryAfter))
+      (wait-before-retry run action.retryAfter))
     (if action.stepId
         (or (. run.step-index action.stepId)
             (error (.. "goto: unknown step: " action.stepId) 0))
@@ -290,10 +357,11 @@ already on the stack means a cycle (dependsOn or a step calling itself)."
   (let [n (+ 1 (or (. run.retry-counts step.stepId) 0))]
     (when (<= n (or action.retryLimit 1))
       (tset run.retry-counts step.stepId n)
-      (when (and action.retryAfter (> action.retryAfter 0))
-        (socket.sleep action.retryAfter))
+      (wait-before-retry run action.retryAfter)
       (when action.workflowId
         (run.run-sub action.workflowId run.inputs))
+      (when action.stepId
+        (run-step-first run action.stepId step))
       i)))
 
 (fn next-index [run i step success?]

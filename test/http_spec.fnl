@@ -265,6 +265,30 @@
                                               :headers creds})
                       (assert.are.same {:accept "application/json"}
                                        (. seen 2 :headers)))))
+              (it "drops the headers authentication added, whatever their name"
+                  (fn []
+                    (let [(send seen) (site {"https://a.test/x" (moved "https://b.test/y")
+                                             "https://b.test/y" {:status 200
+                                                                 :headers {}}})]
+                      (http.follow-redirects send
+                                             {:method "GET"
+                                              :url "https://a.test/x"
+                                              :headers {:X-AppId "k"
+                                                        :accept "application/json"}
+                                              :sensitive-headers [:x-appid]})
+                      (assert.are.same {:accept "application/json"}
+                                       (. seen 2 :headers)))))
+              (it "drops credentials on redirects that only look same-origin"
+                  (fn []
+                    (let [target "https://evil.test?@a.test/y"
+                          (send seen) (site {"https://a.test/x" (moved target)
+                                             target {:status 200 :headers {}}})]
+                      (http.follow-redirects send
+                                             {:method "GET"
+                                              :url "https://a.test/x"
+                                              :headers creds})
+                      (assert.are.same {:accept "application/json"}
+                                       (. seen 2 :headers)))))
               (it "never follows https to http"
                   (fn []
                     (let [(send seen) (site {"https://a.test/x" (moved "http://a.test/x")})

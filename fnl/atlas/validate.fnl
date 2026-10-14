@@ -24,13 +24,16 @@ marked as one."
 
 (fn type-matches? [expected v]
   (let [actual (json-type v)]
-    (or (= expected actual) (and (= expected :number) (= actual :integer))
-        (and (= expected :object) (= (type v) :table) (= nil (next v))))))
+    (or (= expected actual) (and (= expected :number) (= actual :integer)))))
 
 (fn allowed-types [schema]
+  "The JSON types schema allows, or [] for any; nullable (OpenAPI 3.0) only
+adds null to a declared type."
   (let [t schema.type
-        types (if (= (type t) :table) (icollect [_ x (ipairs t)] x) [t])]
-    (when schema.nullable (table.insert types :null))
+        types (if (= (type t) :table) (icollect [_ x (ipairs t)] x)
+                  (= nil t) []
+                  [t])]
+    (when (and schema.nullable (next types)) (table.insert types :null))
     types))
 
 (fn show [v]
@@ -47,7 +50,7 @@ marked as one."
     (each [_ name (ipairs names)]
       (let [prop (?. schema :properties name)
             sub-path (.. path "." (tostring name))]
-        (if prop (check-value prop (. v name) sub-path errors)
+        (if (not= nil prop) (check-value prop (. v name) sub-path errors)
             (= false schema.additionalProperties)
             (table.insert errors (.. sub-path ": not allowed"))
             (= (type schema.additionalProperties) :table)
@@ -90,50 +93,54 @@ marked as one."
 ;; so a schema composed (directly or not) of itself is applied once
 (set check-value
      (fn [schema v path errors ?active]
-       (let [types (allowed-types schema)
-             active (doto (collect [k (pairs (or ?active {}))]
-                            k
-                            true)
-                      (tset schema true))
-             compose (fn [sub sub-errors]
-                       (when (not (. active sub))
-                         (check-value sub v path sub-errors active)))]
-         (if (and (> (length types) 0)
-                  (not (accumulate [ok false _ t (ipairs types) &until ok]
-                         (type-matches? t v))))
-             (table.insert errors
-                           (string.format "%s: expected %s, got %s" path
-                                          (table.concat types " or ")
-                                          (json-type v)))
-             (and schema.enum (not (accumulate [found false _ e (ipairs schema.enum)
-                                                &until found]
-                                     (= e v))))
-             (table.insert errors
-                           (string.format "%s: %s is not one of %s" path
-                                          (show v)
-                                          (table.concat (icollect [_ e (ipairs schema.enum)]
-                                                          (tostring e))
-                                                        ", ")))
-             (do
-               (each [_ sub (ipairs (or schema.allOf []))]
-                 (compose sub errors))
-               (let [alternatives (or schema.anyOf schema.oneOf)]
-                 (when (and alternatives
-                            (not (accumulate [ok false _ sub (ipairs alternatives)
-                                              &until ok]
-                                   (let [sub-errors []]
-                                     (compose sub sub-errors)
-                                     (= 0 (length sub-errors))))))
-                   (table.insert errors
-                                 (.. path
-                                     ": does not match any of the allowed schemas"))))
-               (match (json-type v)
-                 :object (check-object schema v path errors)
-                 :array (do
-                          (check-array schema v path errors)
-                          (when (or schema.properties schema.required)
-                            (check-object schema v path errors)))
-                 _ (check-scalar schema v path errors)))))))
+       ;; OpenAPI 3.1 boolean schemas: true allows anything, false nothing
+       (if (= schema true) nil (= schema false)
+           (table.insert errors (.. path ": not allowed"))
+           (let [types (allowed-types schema)
+                 active (doto (collect [k (pairs (or ?active {}))]
+                                k
+                                true)
+                          (tset schema true))
+                 compose (fn [sub sub-errors]
+                           (when (not (. active sub))
+                             (check-value sub v path sub-errors active)))]
+             (if (and (> (length types) 0)
+                      (not (accumulate [ok false _ t (ipairs types) &until ok]
+                             (type-matches? t v))))
+                 (table.insert errors
+                               (string.format "%s: expected %s, got %s" path
+                                              (table.concat types " or ")
+                                              (json-type v)))
+                 (and schema.enum
+                      (not (accumulate [found false _ e (ipairs schema.enum)
+                                        &until found]
+                             (= e v))))
+                 (table.insert errors
+                               (string.format "%s: %s is not one of %s" path
+                                              (show v)
+                                              (table.concat (icollect [_ e (ipairs schema.enum)]
+                                                              (tostring e))
+                                                            ", ")))
+                 (do
+                   (each [_ sub (ipairs (or schema.allOf []))]
+                     (compose sub errors))
+                   (let [alternatives (or schema.anyOf schema.oneOf)]
+                     (when (and alternatives
+                                (not (accumulate [ok false _ sub (ipairs alternatives)
+                                                  &until ok]
+                                       (let [sub-errors []]
+                                         (compose sub sub-errors)
+                                         (= 0 (length sub-errors))))))
+                       (table.insert errors
+                                     (.. path
+                                         ": does not match any of the allowed schemas"))))
+                   (match (json-type v)
+                     :object (check-object schema v path errors)
+                     :array (do
+                              (check-array schema v path errors)
+                              (when (or schema.properties schema.required)
+                                (check-object schema v path errors)))
+                     _ (check-scalar schema v path errors))))))))
 
 (fn check [schema value ?path]
   "Errors (a list of \"path: problem\" strings) for value against schema."

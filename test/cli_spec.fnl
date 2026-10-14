@@ -228,6 +228,15 @@
                     (assert.are.equal 5 code)
                     (assert.are.equal "" out)
                     (assert.are.equal "HTTP 503\n{\n  \"e\": 1\n}\n" err))))
+            (it "prints a text error body as it is"
+                (fn []
+                  (let [(code _ err) (capture #(cli.print-resp {:status 404
+                                                                :headers {}
+                                                                :body "not found here"
+                                                                :raw "not found here"}
+                                                               :json true))]
+                    (assert.are.equal 4 code)
+                    (assert.are.equal "HTTP 404\nnot found here\n" err))))
             (it "warns when pagination stopped on an error"
                 (fn []
                   (let [(_ _ err) (capture #(cli.print-resp {:status 200
@@ -828,6 +837,17 @@
                                    (complete "az flows createPet --i."))
                   (assert.are.same ["--i.zone=z1" "--i.zone=z2"]
                                    (complete "az flows createPet --i.zone="))))
+            (it "completes operations of a profile that inherits its schema"
+                (fn []
+                  (assert.are.same (icollect [_ e (ipairs (cli.complete-line "op exo "
+                                                                             completion-ctx))]
+                                     e.value)
+                                   (icollect [_ e (ipairs (cli.complete-line "op child "
+                                                                             {:config {:profiles {:base {:schema "S"}
+                                                                                                  :child {:extends "base"}}}
+                                                                              :load-schema (fn [_]
+                                                                                             completion-schema)}))]
+                                     e.value))))
             (it "completes shells"
                 (fn []
                   (assert.are.same ["bash" "fish" "zsh"]
@@ -859,6 +879,19 @@
                                                      1 true))
                         (assert.is_nil (text:find "SECRET" 1 true))
                         (assert.is_nil (text:find "Bearer t" 1 true)))))))
+            (it "redacts what authentication marked as sensitive"
+                (fn []
+                  (let [(_ _ err) (capture #((cli.wrap-log-request (fn []
+                                                                     {:status 200})) {:method "GET"
+                                                                                      :url "https://h/x"
+                                                                                      :query {:appid "s1"
+                                                                                              :page "2"}
+                                                                                      :headers {:X-AppId "s2"}
+                                                                                      :sensitive-headers [:x-appid]
+                                                                                      :sensitive-query [:appid]}))]
+                    (assert.is_nil (err:find "s1" 1 true))
+                    (assert.is_nil (err:find "s2" 1 true))
+                    (assert.is_truthy (err:find "page=2" 1 true)))))
             (it "logs the request body, tables as JSON"
                 (fn []
                   (let [log (fn [body]
@@ -980,6 +1013,20 @@
                                    :query {:region "us"}})
                     (assert.are.same {:api-version "2" :region "us"}
                                      (. sent 1 :query)))))
+            (it "marks the headers authentication adds as sensitive"
+                (fn []
+                  (let [sent []
+                        opts (cli.client-options "p"
+                                                 {:auth {:name "api-key"
+                                                         :params {:name "X-AppId"
+                                                                  :in "header"
+                                                                  :value "k"}}}
+                                                 {:no-paginate true :retry 0} {}
+                                                 (fn [req]
+                                                   (table.insert sent req)
+                                                   {:status 200 :headers {}}))]
+                    (opts.http-fn {:method "GET" :url "https://h/x"})
+                    (assert.are.same [:x-appid] (. sent 1 :sensitive-headers)))))
             (it "maps tls ca_cert to luasec's cafile"
                 (fn []
                   (assert.are.equal "ca.pem"
@@ -1002,6 +1049,23 @@
                                       :headers {:a "1" :b "2"}
                                       :timeout 9}
                                      (cli.resolve-profile "grandchild" profiles)))))
+            (it "lets a child's header win whatever its case"
+                (fn []
+                  (for [_ 1 5]
+                    (let [p (cli.resolve-profile "child"
+                                                 {:base {:headers {:Authorization "Bearer A"
+                                                                   :X-Base "1"}}
+                                                  :child {:extends "base"
+                                                          :headers {:authorization "Bearer B"}}})]
+                      (assert.are.same {:authorization "Bearer B" :X-Base "1"}
+                                       p.headers)))))
+            (it "lets false in a profile override true in the config"
+                (fn []
+                  (let [d (cli.display-options {:verbose false :no-color false}
+                                               {} {:verbose true :no-color true}
+                                               true)]
+                    (assert.is_false d.verbose)
+                    (assert.is_false d.no-color))))
             (it "rejects circular and missing extends"
                 (fn []
                   (assert.has.error #(cli.resolve-profile "a"
@@ -1078,6 +1142,18 @@
                   (assert.is_true (. (cli.display-options nil {:no-color true}
                                                           {} true)
                                      :no-color))))
+            (it "keeps credentials out of schema fetch errors"
+                (fn []
+                  (each [_ resp (ipairs [{:status 404 :headers {} :raw ""}
+                                         {:status 200
+                                          :headers {}
+                                          :raw "<html>"}])]
+                    (let [(ok err) (pcall cli.fetch-schema
+                                          "https://u:pw@h/s.json?api_key=SECRET"
+                                          {:transport #resp})]
+                      (assert.is_false ok)
+                      (assert.is_nil (: (tostring err) :find "SECRET" 1 true))
+                      (assert.is_nil (: (tostring err) :find "pw" 1 true))))))
             (it "rejects a fetched page that is not a schema"
                 (fn []
                   (let [(ok err) (pcall cli.fetch-schema "https://h/"
@@ -1108,6 +1184,31 @@
                                               (opts.http-fn {:method "GET"
                                                              :url "https://h/x"})))]
                     (assert.are.equal "> GET https://h/x\n" err))))))
+
+(describe "bash completion script"
+          (fn []
+            (it "treats candidates from the spec as data, never as commands or globs"
+                (fn []
+                  (let [(_ script) (capture cli.completion-bash)
+                        marker (os.tmpname)
+                        script-file (os.tmpname)]
+                    (os.remove marker)
+                    (with-open [f (io.open script-file :w)]
+                      (f:write script "\n")
+                      ;; candidates as a malicious spec could make them
+                      (f:write (.. "atlas() { printf '%s\\n' '$(touch " marker
+                                   ")' '*' 'ok'; }\n"))
+                      (f:write "COMP_LINE='atlas op x y --q.s='; COMP_POINT=${#COMP_LINE}\n")
+                      (f:write "COMP_WORDS=(atlas op x y --q.s =); COMP_CWORD=5\n")
+                      (f:write "_atlas_complete\nprintf '%s\\n' \"${COMPREPLY[@]}\"\n"))
+                    (let [p (io.popen (.. "cd /tmp && bash " script-file))
+                          out (p:read :*a)]
+                      (p:close)
+                      (os.remove script-file)
+                      (let [ran (io.open marker)]
+                        (when ran (ran:close) (os.remove marker))
+                        (assert.is_nil ran))
+                      (assert.are.equal (.. "$(touch " marker ")\n*\nok\n") out)))))))
 
 (describe "import-restish discoverability"
           (fn []
@@ -1164,6 +1265,13 @@
                     (assert.is_nil (cli.select-path data ".meta.count.x"))
                     (assert.is_nil (cli.select-path data ".meta.count.{a}"))
                     (assert.is_nil (cli.select-path false "{a}[0]"))))
+              (it "keeps an empty array an array when picking fields"
+                  (fn []
+                    (let [json (require :atlas.json)]
+                      (assert.is_true (json.array? (cli.select-path (json.array [])
+                                                                    "{a}")))
+                      (assert.is_true (json.array? (cli.select-path (json.array [])
+                                                                    "[].a"))))))
               (it "picks fields only from the objects of a mixed array"
                   (fn []
                     (assert.are.same [{:a 1}]

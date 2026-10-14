@@ -403,14 +403,19 @@ any auth flow; signing tools and query api-keys supply none up front."
       (let [in-url? (let [url (or req.url "")
                           param (.. (util.url-encode name) "=")]
                       (or (not= nil (url:find (.. "?" param) 1 true))
-                          (not= nil (url:find (.. "&" param) 1 true))))]
-        (base-fn (if in-url? req
-                     (doto (collect [k v (pairs req)] k v)
-                       (tset :query
-                             (doto (collect [k v (pairs (or req.query {}))]
-                                     k
-                                     v)
-                               (tset name value))))))))))
+                          (not= nil (url:find (.. "&" param) 1 true))))
+            out (collect [k v (pairs req)] k v)]
+        (when (not in-url?)
+          (set out.query (doto (collect [k v (pairs (or req.query {}))]
+                                 k
+                                 v)
+                           (tset name value))))
+        ;; logs and dry runs must mask it whatever its name
+        (set out.sensitive-query
+             (doto (icollect [_ n (ipairs (or req.sensitive-query []))]
+                     n)
+               (table.insert name)))
+        (base-fn out)))))
 
 (fn wrap-signing [auth-config base-fn]
   (when (and (= auth-config.name "external-tool")

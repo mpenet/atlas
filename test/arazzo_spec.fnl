@@ -685,6 +685,156 @@
                     (assert.are.equal 200
                                       (. result.steps :step1 :response :status)))))))
 
+(describe "step failures"
+          (fn []
+            (it "lets onFailure retry a request that failed in transport"
+                (fn []
+                  (let [n (counter)
+                        clients {:api (make-client {:op (fn []
+                                                          (n.inc)
+                                                          (if (= 1 (n.val))
+                                                              (error "connection refused"
+                                                                     0)
+                                                              (ok-resp {})))})}
+                        doc (one-step-doc {:operationId "op"
+                                           :onFailure [{:name "again"
+                                                        :type "retry"
+                                                        :retryLimit 2}]})]
+                    (arazzo.run-workflow doc "wf" {} clients {})
+                    (assert.are.equal 2 (n.val)))))
+            (it "reports a transport failure without internal locations"
+                (fn []
+                  (let [clients {:api (make-client {:op #(error "connection refused"
+                                                                0)})}
+                        (ok err) (pcall arazzo.run-workflow
+                                        (one-step-doc {:operationId "op"}) "wf"
+                                        {} clients {})]
+                    (assert.is_false ok)
+                    (assert.are.equal "step 's1' failed: request failed: connection refused"
+                                      err))))
+            (it "evaluates a workflow step's criteria without the previous response"
+                (fn []
+                  (let [clients {:api (make-client {:bad #(ok-resp {} 500)
+                                                    :good #(ok-resp {})})}
+                        doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "wf"
+                                          :steps [{:stepId "s0"
+                                                   :operationId "bad"
+                                                   :onFailure [{:name "go"
+                                                                :type "goto"
+                                                                :stepId "s"}]}
+                                                  {:stepId "s"
+                                                   :workflowId "sub"
+                                                   :successCriteria [{:condition "$statusCode == 500"}]}]}
+                                         {:workflowId "sub"
+                                          :steps [{:stepId "g"
+                                                   :operationId "good"}]}]}]
+                    (tset (. doc.workflows 1 :steps 1) :successCriteria
+                          [{:condition "$statusCode == 200"}])
+                    (assert.has.error #(arazzo.run-workflow doc "wf" {} clients
+                                                            {})))))))
+
+(describe "retry actions"
+          (fn []
+            (it "run the step named by stepId, then retry"
+                (fn []
+                  (let [log []
+                        n (counter)
+                        clients {:api (make-client {:a (fn []
+                                                         (n.inc)
+                                                         (table.insert log :a)
+                                                         (ok-resp {}
+                                                                  (if (= 1
+                                                                         (n.val))
+                                                                      401
+                                                                      200)))
+                                                    :refresh (fn []
+                                                               (table.insert log
+                                                                             :refresh)
+                                                               (ok-resp {}))})}
+                        doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "wf"
+                                          :steps [{:stepId "s"
+                                                   :operationId "a"
+                                                   :successCriteria [{:condition "$statusCode == 200"}]
+                                                   :onSuccess [{:name "done"
+                                                                :type "end"}]
+                                                   :onFailure [{:name "re"
+                                                                :type "retry"
+                                                                :stepId "r"}]}
+                                                  {:stepId "r"
+                                                   :operationId "refresh"}]}]}]
+                    (arazzo.run-workflow doc "wf" {} clients {})
+                    (assert.are.same [:a :refresh :a] log))))
+            (it "wait as long as the response's Retry-After asks"
+                (fn []
+                  (let [slept []
+                        socket (require :socket)
+                        real-sleep socket.sleep
+                        n (counter)
+                        clients {:api (make-client {:op (fn []
+                                                          (n.inc)
+                                                          (if (= 1 (n.val))
+                                                              {:status 503
+                                                               :headers {:retry-after "2"}
+                                                               :body {}}
+                                                              (ok-resp {})))})}
+                        doc (one-step-doc {:operationId "op"
+                                           :onFailure [{:name "again"
+                                                        :type "retry"
+                                                        :retryAfter 7}]})]
+                    (set socket.sleep #(table.insert slept $))
+                    (let [(ok err) (pcall arazzo.run-workflow doc "wf" {}
+                                          clients {})]
+                      (set socket.sleep real-sleep)
+                      (assert.is_true ok err))
+                    (assert.are.same [2] slept))))))
+
+(describe "request bodies"
+          (fn []
+            (it "use contentType and apply replacements"
+                (fn []
+                  (let [seen []
+                        clients {:api (make-client {:op (fn [req]
+                                                          (table.insert seen
+                                                                        req)
+                                                          (ok-resp {}))})}]
+                    (arazzo.run-workflow (one-step-doc {:operationId "op"
+                                                        :requestBody {:contentType "application/x-www-form-urlencoded"
+                                                                      :payload {:a {:b 1}
+                                                                                :keep "k"}
+                                                                      :replacements [{:target "/a/b"
+                                                                                      :value "$inputs.x"}
+                                                                                     {:target "/c"
+                                                                                      :value 3}]}})
+                                         "wf" {:x "new"} clients {})
+                    (assert.are.equal "application/x-www-form-urlencoded"
+                                      (. seen 1 :headers :content-type))
+                    (assert.are.same {:a {:b "new"} :keep "k" :c 3}
+                                     (. seen 1 :body)))))))
+
+(describe "parameters"
+          (fn []
+            (it "must say where they go"
+                (fn []
+                  (assert.has.error #(arazzo.run-workflow (one-step-doc {:operationId "op"
+                                                                         :parameters [{:name "id"
+                                                                                       :value "1"}]})
+                                                          "wf" {}
+                                                          {:api (make-client {:op #(ok-resp {})})}
+                                                          {})
+                                    "step 's1': parameter 'id' has no 'in' (path, query, header or cookie)")))
+            (it "are referenced with reference, not $ref"
+                (fn []
+                  (assert.has.error #(arazzo.run-workflow (one-step-doc {:operationId "op"
+                                                                         :parameters [{:$ref "#/components/parameters/p"}]})
+                                                          "wf" {}
+                                                          {:api (make-client {:op #(ok-resp {})})}
+                                                          {})
+                                    "step 's1': refer to reusable parameters with reference: $components.parameters.NAME, not $ref")))))
+
 (describe "workflow input defaults"
           (fn []
             (it "fill inputs that were not given"

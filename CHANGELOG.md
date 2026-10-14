@@ -11,6 +11,11 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - Header names and values containing CR, LF or NUL are rejected.
 - `-v` and `--dry-run` redact secret query parameters; `az` sends credentials to source schemas only after a 401/403.
 - external-tool signing and query api-key auth no longer modify the caller's request table.
+- Same-origin checks for redirects and pagination parse URLs as libcurl does: a crafted `Location` or `Link` such as `https://evil.example?@api.example.com/` was taken for the API's own origin, so credentials followed it to another host.
+- Documents named by a spec's external `$ref`s are fetched without the profile's headers or credentials unless they are on the spec's own origin.
+- The bash completion script treats the candidates it gets (operation names, enum values from the spec…) as data: `compgen -W` expanded `$(...)` in them, so a spec could run commands when completing.
+- On a redirect to another origin, the headers authentication added are dropped whatever their name, and logs and dry runs redact them and a query API key whatever their name; user info in URLs is redacted too.
+- The schema cache directory is private to the user (0700).
 
 ### Added
 
@@ -36,6 +41,10 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - **Breaking (library):** every `$ref` to the same place resolves to the same table, so recursive schemas are cyclic tables (`node.properties.next` is `node`) instead of being cut to `{}`. Code that walks `op.spec` or `op.body-schema` must not assume a tree, and should not serialise them as is. This makes resolution linear for any spec (it was exponential on heavily recursive ones such as Stripe's) and lets validation check recursive data at every depth.
 - **Breaking:** Arazzo runs fail when a source description cannot be loaded, and a plain `operationId` defined by several sources is an error; qualify it as `$sourceDescriptions.NAME.ID`.
 - Operation names are lowercase words joined by dashes whatever the operationId's style: `projects/list-cards`, `get_folders_id#get_shared_link` and `bookmarks-(-deprecated)` become `projects-list-cards`, `get-folders-id-get-shared-link` and `bookmarks-deprecated`. When two operationIds yield the same name, the first by path keeps it and the others are named after their method and path, the same way on every run.
+- Query parameters are serialized in their declared `style` and `explode` (`form`, `spaceDelimited`, `pipeDelimited`, `deepObject`); array path parameters use the `simple` style.
+- Arazzo: string comparisons in conditions are case-insensitive and `''` escapes a quote, as the spec says; a backslash is now an ordinary character. A misspelled expression (`$statuscode`) is an error rather than `null`, and payload text that merely starts with `$` is kept as is.
+- Arazzo: a request that fails in transport is a step failure, so `onFailure` and `retry` handle it; `retry` runs the step named by `stepId` first; a response's `Retry-After` overrules `retryAfter`; `requestBody.contentType` and `replacements` are supported; `$request.query.NAME` and `$request.path.NAME` work.
+- `--output` and `--arazzo-output` reject unknown values.
 - Building a client is linear in the size of the spec: Stripe's went from not finishing to 0.07 s, Kubernetes' from 1 s to 0.01 s.
 - The `ssl` options are `cafile`, `capath`, `certificate`, `key` and `verify`; other luasec options are no longer used.
 - The binaries link OpenSSL, libyaml, zlib and libcurl statically; the Linux binary no longer needs libssl or libyaml installed.
@@ -51,7 +60,15 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - JSON request bodies are encoded exactly and the same way every time: integers above 2^53 (IDs) are no longer rounded, floats are written in their shortest exact form (`0.1`, not `0.10000000000000001`), and object keys are sorted, so `--dry-run` and `--curl` output is reproducible.
 - Arazzo: workflow inputs take the `default` their schema declares when not given (help already showed it).
 - Arazzo: `$steps.ID.outputs.pet.name` (and the same for `$inputs` and `$workflows`) silently meant `outputs.pet`; names may contain dots, so it now names the output `pet.name`, and when there is none but there is a `pet`, the error points to the JSON pointer form `$steps.ID.outputs.pet#/name`.
-- `atlas profile list` shows the schema a profile inherits through `extends`.
+- `atlas profile list` shows the schema a profile inherits through `extends`, and keeps listing past a profile whose `extends` is broken.
+- Completion resolves `extends`; a child profile's header overrides its parent's whatever the case; `false` in a profile overrides `true` in the configuration.
+- Arrays inside Arazzo payloads and `--select` results stay arrays when empty.
+- A `$ref`'d path item whose schemas are recursive no longer overflows the stack.
+- Validation accepts OpenAPI 3.1 boolean schemas, applies `nullable` only with a `type`, and tells empty arrays from empty objects.
+- The request content type is chosen the same way on every run (JSON first), and no `Content-Type` is sent without a body.
+- Help shows 3.1 type arrays (`string | null`); YAML output quotes control characters and writes infinities as `.inf`.
+- Number fields accept only JSON numbers (no hex), and an integer too large for 64 bits stays text instead of being rounded.
+- `--server-index=0`, `--b.=1` and similar mistakes give clear errors instead of crashing; error responses with a text body are printed as they are.
 - Colours are only used when stdout is a terminal, and never when `NO_COLOR` is set: piping `atlas` into `jq` or a file gave escape codes.
 - YAML documents could be misread or rejected at random ("control characters are not allowed") when the garbage collector freed the text while libyaml was still reading it.
 - An operationId defined twice (Cloudflare has one) no longer hides one of the two operations.

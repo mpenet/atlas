@@ -15,10 +15,12 @@
   "The document in text (JSON or YAML), which must be a mapping; location
 names it in errors."
   (let [(ok parsed) (pcall yaml.decode text)]
-    (assert ok (string.format "failed to parse schema from '%s': %s" location
-                              (tostring parsed)))
+    (assert ok
+            (string.format "failed to parse schema from '%s': %s"
+                           (util.redact-url location) (tostring parsed)))
     (assert (= (type parsed) :table)
-            (string.format "'%s' is not an OpenAPI document" location))
+            (string.format "'%s' is not an OpenAPI document"
+                           (util.redact-url location)))
     parsed))
 
 (fn load-schema [path ?opts]
@@ -78,23 +80,32 @@ then the body when the operation has one, then an opts table."
         content-type (negotiate.pick-content-type op-spec)
         negotiated {:accept (negotiate.pick-accept op-spec)
                     :content-type content-type}
+        ;; how each declared query parameter is serialized
+        query-styles (collect [_ p (ipairs (or op-spec.parameters []))]
+                       (when (= p.in :query)
+                         (values p.name {:style p.style :explode p.explode})))
         url-for (fn [?req]
                   "Full request URL for {:path {name v} :query {}}."
                   (let [req (or ?req {})]
                     (util.append-query (operation-url client-opts.base-url path
                                                       req)
-                                       (or req.query {}))))
+                                       (or req.query {}) query-styles)))
         invoke (fn [?req]
                  "Call the operation with {:path {name v} :query {} :headers {} :body v :timeout n}."
                  (let [req (or ?req {})]
                    (client-opts.http-fn {:body req.body
-                                         :headers (merge-headers negotiated
+                                         ;; no Content-Type without a body
+                                         :headers (merge-headers (if (= nil
+                                                                        req.body)
+                                                                     {:accept negotiated.accept}
+                                                                     negotiated)
                                                                  (or client-opts.headers
                                                                      {})
                                                                  (or req.headers
                                                                      {}))
                                          :method (method:upper)
                                          :query req.query
+                                         : query-styles
                                          :ssl client-opts.ssl
                                          :timeout (or req.timeout
                                                       client-opts.timeout)
@@ -148,6 +159,14 @@ then method order, so that naming them is deterministic."
                          :op-spec (. path-item method)}))))
     entries))
 
+(fn ref-load-opts [load-opts source-url location]
+  "Loader options for a document a $ref points to: the spec's headers and
+credentials only go to the spec's own origin."
+  (let [origin (when source-url (util.origin source-url))]
+    (if (and origin (= origin (util.origin location)))
+        load-opts
+        {:ssl load-opts.ssl :credentials false})))
+
 (fn sorted [items]
   (doto (icollect [_ x (ipairs items)] x)
     table.sort))
@@ -199,7 +218,10 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
                    (load schema load-opts)
                    schema)
         deref (refs.resolver schema
-                             {:base source-url :load #(load $ load-opts)})
+                             {:base source-url
+                              :load #(load $
+                                           (ref-load-opts load-opts source-url
+                                                          $))})
         servers (or schema.servers [])
         index (or (?. ?opts :server-index) 1)
         server (when (and (not (?. ?opts :base-url)) (> (length servers) 0))

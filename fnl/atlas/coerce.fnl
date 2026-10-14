@@ -3,11 +3,17 @@
 (local json (require :atlas.json))
 
 (fn json-number [s]
-  "Parse s only if it is a JSON number literal (no leading zeros, hex, etc.)."
+  "The number s writes, if it is a JSON number literal (no leading zeros, hex,
+etc.) that Lua holds exactly: an integer beyond 64 bits or a number beyond
+the floating-point range gives nil."
   (when (or (s:match "^%-?0$") (s:match "^%-?0[%.eE]") (s:match "^%-?[1-9]"))
     (when (and (s:match "^%-?%d+%.?%d*[eE]?[%+%-]?%d*$") (not (s:match "%.$"))
                (not (s:match "%.[eE]")) (not (s:match "[eE][%+%-]?$")))
-      (tonumber s))))
+      (let [n (tonumber s)
+            integer-literal? (s:match "^%-?%d+$")]
+        (when (and n (not= n math.huge) (not= n (- math.huge))
+                   (or (not integer-literal?) (= (math.type n) :integer)))
+          n)))))
 
 (fn decode-json [s]
   (let [(ok v) (pcall json.decode s)]
@@ -18,8 +24,8 @@
 and true/false are converted and everything else stays a string."
   (match (?. ?schema :type)
     "string" s
-    "integer" (or (math.tointeger (tonumber s)) s)
-    "number" (or (tonumber s) s)
+    "integer" (or (math.tointeger (json-number s)) s)
+    "number" (or (json-number s) s)
     "boolean" (if (= s "true") true
                   (= s "false") false
                   s)
