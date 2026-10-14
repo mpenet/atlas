@@ -8,37 +8,37 @@ Two options:
 
 ### Option 1 — Standalone binary (recommended)
 
-No Lua runtime required. The binary embeds Lua, luasocket, luasec, and OpenSSL statically.
+No Lua runtime required. The binary embeds Lua, luasocket, luasec, libyaml and OpenSSL statically.
 
-Download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases), then install it:
+Download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases) (`atlas-macos-arm64` or `atlas-linux-x86_64`), then install it:
 
 ```sh
-install -m 755 atlas-bin /usr/local/bin/atlas
+install -m 755 atlas-macos-arm64 /usr/local/bin/atlas
 ```
 
 To build the binary from source instead:
 
 ```sh
-make deps     # install luarocks dependencies (fennel, lunajson, luasocket, luasec)
+make deps     # install luarocks dependencies (fennel, lunajson, luasocket, luasec, lyaml, busted)
 make binary   # produces bin/atlas-bin
+make check-binary  # runs it with Lua's module paths emptied, proving it is self-contained
 install -m 755 bin/atlas-bin /usr/local/bin/atlas
 ```
 
-Requires `lua`, `fennel`, `openssl`, and `pkg-config` to build.
+Requires `lua` (5.4+), `fennel`, `openssl`, `libyaml` and `pkg-config` to build.
 
 ### Option 2 — Lua script (requires a Lua runtime)
 
-Installs `atlas` as a Lua script that is run by the system Lua interpreter. Requires Lua 5.4+, luasocket, and luasec to be present at runtime.
+Installs `atlas` as a Lua script run by your Lua interpreter, together with the library. luarocks installs the runtime dependencies (lunajson, luasocket, luasec, lyaml; lyaml needs the libyaml headers) and compiles the Fennel sources, which needs the `fennel` executable on `PATH`.
 
 ```sh
 luarocks install atlas-oai
 ```
 
-Or build and install from source:
+From a checkout:
 
 ```sh
-make deps     # install luarocks dependencies
-make install  # builds standalone binary and installs to /usr/local/bin
+luarocks make atlas-oai-dev-1.rockspec
 ```
 
 ## Synopsis
@@ -80,8 +80,8 @@ atlas op https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 -v
 | `--body=JSON\|@file\|@-` | Request body — inline JSON, file path, or stdin |
 | `-d JSON\|@file\|@-` | Alias for `--body` |
 | `--body.KEY=VAL`, `--b.KEY=VAL` | Set individual body fields — supports deep dot paths: `--b.a.b.c=1` |
-| `--query.KEY=VAL`, `--q.KEY=VAL` | Query parameter (repeatable) |
-| `--header.KEY=VAL`, `--h.KEY=VAL` | Per-request header (repeatable) |
+| `--query.KEY=VAL`, `--q.KEY=VAL` | Query parameter; repeating the same key sends a list (`--q.tag=a --q.tag=b` → `?tag=a&tag=b`) |
+| `--header.KEY=VAL`, `--h.KEY=VAL` | Per-request header; repeating the same name joins the values with `, ` |
 | `--timeout=N` | Timeout in seconds |
 | `--max-pages=N` | Follow up to N pages of `Link: <…>; rel="next"` pagination (default 25) |
 | `--no-paginate` | Return only the first page |
@@ -338,6 +338,8 @@ atlas profile show <name>    # show fully resolved profile as JSON
 ## Authentication
 
 Add an `auth` block to a profile. Values prefixed with `env:` are read from environment variables at runtime.
+
+Authentication happens only when a request is actually sent: `--help`, `--list`, `--servers`, `--dry-run` and completion never open a browser or run an external tool (`--dry-run` shows `<redacted>` where the auth header would go; `--curl` does authenticate, since it prints a runnable command). Nor does a request whose explicit headers already cover what auth would add. A schema URL is fetched without credentials first, and with them only if the server answers 401/403. Auth headers are computed once per command and reused by retries and pagination; an authentication failure stops the command instead of being retried. A header set explicitly (`--h.Authorization=…` or the profile's `headers`) takes precedence over the auth header.
 
 ### Static credentials
 
@@ -703,8 +705,9 @@ atlas az myapi create-resource --b.name=foo --arazzo-output=progress
 
 Progress output uses color (suppressed by `--no-color`):
 - `→ stepId` — step is running (dim)
-- `✓ stepId  0.312s  HTTP 200  state=success` — step succeeded (green)
-- `✗ workflow failed  1.024s` — workflow failed (red)
+- `✓ stepId  0.312s  HTTP 200` — step succeeded (green), followed by its outputs
+- `✓ workflow createPet  1.024s` — workflow finished (green)
+- `✗ workflow createPet failed  1.024s` — workflow failed (red)
 
 ### Runtime expressions
 
@@ -739,16 +742,20 @@ Steps use `successCriteria` to determine pass/fail; all criteria must pass. A st
 On failure, `onFailure` actions run; on success, `onSuccess` actions. The workflow's `successActions`/`failureActions` apply to every step after the step's own actions; a step action with the same `name` replaces the workflow one. Supported action types:
 
 - `end` — stop the workflow.
-- `goto` — continue at `stepId`, or run `workflowId` and stop. A `goto` to the same step with `retryAfter` sleeps that many seconds first. A workflow aborts when any goto target is reached 50 times; raise this for long polling loops with `--max-gotos=N` (library: `:max-gotos` in the run options).
+- `goto` — continue at `stepId`, or run `workflowId` and stop. A `goto` to the same step with `retryAfter` sleeps that many seconds first. Each goto target may be jumped to at most 50 times before the workflow aborts; raise this for long polling loops with `--max-gotos=N` (library: `:max-gotos` in the run options).
 - `retry` — re-run the current step after `retryAfter` seconds, at most `retryLimit` times (default 1). With `workflowId`, that workflow runs before each retry. When retries are exhausted the step fails.
 
 Actions and parameters can be `{"reference": "$components.KIND.NAME"}` reusable objects pointing into the document's `components`; a `value` next to a parameter reference overrides the component's value.
 
 Step parameters with the same `name` and `in` as a workflow-level parameter replace it.
 
+### Inputs and dependencies
+
+Workflow inputs are checked against the workflow's `inputs` schema before anything runs (types, required, enums, …); `--no-validate` runs anyway. Workflows listed in a workflow's `dependsOn` run first, once each, with the same inputs; their outputs are available as `$workflows.ID.outputs.KEY`.
+
 ### Sub-workflows
 
-A step with `workflowId` instead of `operationId`/`operationPath` runs another workflow as a nested step. Inputs are passed via the step's `parameters`.
+A step with `workflowId` instead of `operationId`/`operationPath` runs another workflow as a nested step. Inputs are passed via the step's `parameters`. Such a step goes through the same `successCriteria`, `onSuccess`/`onFailure` and `outputs` handling as an operation step: a failing sub-workflow counts as a step failure that `onFailure` can handle, step `outputs` can read `$workflows.ID.outputs.KEY`, and a step that declares no `outputs` exposes the sub-workflow's outputs directly.
 
 ### Examples
 

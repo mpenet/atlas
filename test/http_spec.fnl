@@ -131,3 +131,143 @@
                     (assert.is_nil (payload:find "\r\nX-Evil" 1 true))
                     (assert.is_truthy (payload:find "name=\"a%22%0D%0AX-Evil: 1\""
                                                     1 true)))))))
+
+(describe "http.follow-redirects"
+          (fn []
+            (fn site [routes]
+              "Single-shot transport serving routes keyed by URL; records requests."
+              (let [seen []]
+                (values (fn [req]
+                          (table.insert seen req)
+                          (let [util (require :atlas.util)]
+                            (or (. routes
+                                   (util.append-query req.url (or req.query {})))
+                                {:status 404 :headers {}})))
+                        seen)))
+
+            (fn moved [location ?status]
+              {:status (or ?status 302) :headers {:location location}})
+
+            (let [creds {:authorization "Bearer s"
+                         :cookie "c=1"
+                         :x-api-key "k"
+                         :accept "application/json"}]
+              (it "follows same-origin redirects keeping headers"
+                  (fn []
+                    (let [(send seen) (site {"https://a.test/x" (moved "/y")
+                                             "https://a.test/y" {:status 200
+                                                                 :headers {}}})
+                          resp (http.follow-redirects send
+                                                      {:method "GET"
+                                                       :url "https://a.test/x"
+                                                       :headers creds})]
+                      (assert.are.equal 200 resp.status)
+                      (assert.are.equal "Bearer s"
+                                        (. seen 2 :headers :authorization)))))
+              (it "drops credentials when the origin changes"
+                  (fn []
+                    (let [(send seen) (site {"https://a.test/x" (moved "https://b.test/y")
+                                             "https://b.test/y" {:status 200
+                                                                 :headers {}}})]
+                      (http.follow-redirects send
+                                             {:method "GET"
+                                              :url "https://a.test/x"
+                                              :headers creds})
+                      (assert.are.same {:accept "application/json"}
+                                       (. seen 2 :headers)))))
+              (it "never follows https to http"
+                  (fn []
+                    (let [(send seen) (site {"https://a.test/x" (moved "http://a.test/x")})
+                          resp (http.follow-redirects send
+                                                      {:method "GET"
+                                                       :url "https://a.test/x"
+                                                       :headers {}})]
+                      (assert.are.equal 302 resp.status)
+                      (assert.are.equal 1 (length seen)))))
+              (it "does not follow redirects for other methods"
+                  (fn []
+                    (let [(send seen) (site {"https://a.test/x" (moved "/y" 307)})
+                          resp (http.follow-redirects send
+                                                      {:method "POST"
+                                                       :url "https://a.test/x"
+                                                       :headers {}})]
+                      (assert.are.equal 307 resp.status)
+                      (assert.are.equal 1 (length seen)))))
+              (it "gives up with an error after 5 redirects"
+                  (fn []
+                    (let [(send seen) (site {"https://a.test/loop" (moved "/loop"
+                                                                          301)})
+                          (ok err) (pcall http.follow-redirects send
+                                          {:method "GET"
+                                           :url "https://a.test/loop"
+                                           :headers {}})]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "too many redirects" 1 true))
+                      (assert.are.equal 6 (length seen)))))
+              (it "carries the query of the original request only on the first hop"
+                  (fn []
+                    (let [(send seen) (site {"https://a.test/x?q=1" (moved "/y?z=2"
+                                                                           308)
+                                             "https://a.test/y?z=2" {:status 200
+                                                                     :headers {}}})]
+                      (http.follow-redirects send
+                                             {:method "GET"
+                                              :url "https://a.test/x"
+                                              :query {:q "1"}
+                                              :headers {}})
+                      (assert.are.equal "https://a.test/y?z=2" (. seen 2 :url))
+                      (assert.is_nil (. seen 2 :query))))))))
+
+(describe "header safety"
+          (fn []
+            (it "rejects line breaks in header values"
+                (fn []
+                  (let [(ok err) (pcall http.encode-request
+                                        {:method "GET"
+                                         :url "https://h/x"
+                                         :headers {:x-a "v\r\nX-Injected: yes"}})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "header 'x-a' contains a line break" 1
+                                         true)))))
+            (it "rejects invalid header names"
+                (fn []
+                  (let [(ok err) (pcall http.encode-request
+                                        {:method "GET"
+                                         :url "https://h/x"
+                                         :headers {"bad name\r\n" "v"}})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "invalid header name" 1 true)))))
+            (it "accepts ordinary headers"
+                (fn []
+                  (assert.has_no.errors #(http.encode-request {:method "GET"
+                                                               :url "https://h/x"
+                                                               :headers {:X-Trace "a b; c=d"
+                                                                         :accept "*/*"}}))))))
+
+(describe "redirect edge cases"
+          (fn []
+            (it "treats the scheme case-insensitively when refusing https to http"
+                (fn []
+                  (let [seen []
+                        send (fn [req] (table.insert seen req)
+                               {:status 302
+                                :headers {:location "HTTP://a.test/x"}})
+                        resp (http.follow-redirects send
+                                                    {:method "GET"
+                                                     :url "https://a.test/x"
+                                                     :headers {}})]
+                    (assert.are.equal 302 resp.status)
+                    (assert.are.equal 1 (length seen)))))
+            (it "reports a redirect loop as an error"
+                (fn []
+                  (let [send (fn [] {:status 301 :headers {:location "/loop"}})
+                        (ok err) (pcall http.follow-redirects send
+                                        {:method "GET"
+                                         :url "https://a.test/loop"
+                                         :headers {}})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "too many redirects" 1 true)))))))

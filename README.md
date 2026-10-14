@@ -18,17 +18,17 @@ OpenAPI 3.x toolbox.
 
 ### CLI — option 1: standalone binary (recommended)
 
-No Lua runtime required. Download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases), then:
+No Lua runtime required. Download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases) (`atlas-macos-arm64` or `atlas-linux-x86_64`), then:
 
 ```sh
-install -m 755 atlas-bin /usr/local/bin/atlas
+install -m 755 atlas-macos-arm64 /usr/local/bin/atlas
 ```
 
 ### CLI — option 2: build from source
 
 ```sh
 make deps     # install luarocks dependencies
-make install  # build standalone binary and install to /usr/local/bin
+make install  # build the standalone binary and install it to /usr/local/bin
 ```
 
 ### Lua library

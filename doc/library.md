@@ -46,7 +46,7 @@ print(resp.status, resp.body.name)
 (atlas.client schema ?opts)
 ```
 
-Builds a client from a schema. `schema` is one of:
+Builds a client from a schema. `schema` is one of (YAML is read as YAML 1.2, so `no`, `on` and `1:20` stay strings, as OpenAPI requires):
 
 - A string URL (`https://…` or `http://…`) — fetched and parsed at call time
 - A local file path — read and parsed
@@ -182,7 +182,12 @@ Multipart file parts are tables with `:filename`, `:content` and an optional `:c
 
 ## $ref resolution
 
-All `$ref` pointers in the schema are resolved recursively before the client is built. Circular references are detected and replaced with an empty table. This means parameters, request bodies, and response schemas that use `$ref` work transparently — you do not need to pre-resolve the schema yourself.
+All `$ref`s are resolved when the client is built, so parameters, request bodies, response schemas and path items that use `$ref` work transparently:
+
+- Local refs (`#/components/schemas/Pet`), with JSON-pointer escapes (`~1`, `~0`) and percent-escapes decoded.
+- Refs into other documents (`common.yaml#/Pet`, `https://…/shared.json#/Error`), resolved relative to the document that contains them. Each document is loaded once; this needs the schema's location, i.e. passing a path or URL to `atlas.client` (or `:source-url` with a parsed table).
+- A reference back into its own chain (a recursive schema) becomes an empty schema, so resolution terminates.
+- A ref that points nowhere raises an error naming the ref, rather than silently dropping what it described.
 
 ## `atlas.servers`
 
@@ -233,7 +238,9 @@ The function receives a single table and must return a `{:status :headers :body}
   {:status 200 :headers {} :body {:ok true}})
 ```
 
-The default `atlas.http.request` function handles query-string encoding, content-type aware body encoding, timeouts and luasec SSL options — your replacement must handle all of these itself. `atlas.http.encode-body` and `atlas.http.decode-response` are exported if you want to reuse the default encoding.
+The default `atlas.http.request` function handles query-string encoding, content-type aware body encoding, timeouts and luasec SSL options — your replacement must handle all of these itself.
+
+It also follows redirects for GET and HEAD (301, 302, 303, 307, 308; up to 5, then an error). On a redirect to another origin, credential headers (`Authorization`, cookies, anything key/token/secret-like) are dropped; a redirect from `https` to `http` is not followed. Header names and values are checked before sending, so a value containing a line break is rejected rather than injecting extra headers. `atlas.http.encode-body` and `atlas.http.decode-response` are exported if you want to reuse the default encoding.
 
 ## Retries and pagination
 

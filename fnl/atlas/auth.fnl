@@ -86,7 +86,7 @@
           decoded))))
 
 (fn store-token [resp profile-name ?previous]
-  (assert (and (>= resp.status 200) (< resp.status 300))
+  (assert (util.success? resp.status)
           (let [detail (when (= (type resp.body) :table)
                          (or resp.body.error_description resp.body.error ""))]
             (.. "token request failed: HTTP " resp.status
@@ -111,7 +111,7 @@
     (when params.client_secret
       (tset form :client_secret (expand-env params.client_secret)))
     (let [(ok resp) (pcall post-form params.token_url form ssl)]
-      (when (and ok (>= resp.status 200) (< resp.status 300))
+      (when (and ok (util.success? resp.status))
         (store-token resp profile-name cached)))))
 
 ;; ---- client credentials ----
@@ -132,7 +132,7 @@
     (let [resp (post-form (or params.device_authorization_url
                               (error "oauth-device-authorization requires device_authorization_url"))
                           form ssl)]
-      (assert (and (>= resp.status 200) (< resp.status 300))
+      (assert (util.success? resp.status)
               (.. "device authorization request failed: HTTP " resp.status))
       (let [body (assert (json-body resp)
                          "device authorization response is not JSON")
@@ -160,8 +160,7 @@
             (if (not ok)
                 nil
                 (let [pbody (json-body poll-resp)]
-                  (if (and pbody (>= poll-resp.status 200)
-                           (< poll-resp.status 300))
+                  (if (and pbody (util.success? poll-resp.status))
                       (do
                         (io.stderr:write "\n")
                         (set token (store-token poll-resp profile-name)))
@@ -392,6 +391,17 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
                         {})
     _ {:authorization (.. "Bearer " (ensure-token profile-name auth-config ssl))}))
 
+(fn header-names [auth-config]
+  "Lowercased names of the headers get-headers will supply, without running
+any auth flow; signing tools and query api-keys supply none up front."
+  (match auth-config.name
+    "api-key" (if (api-key-in-query? auth-config) []
+                  [(: (or (?. auth-config :params :name) "") :lower)])
+    "external-tool" (if (= (?. auth-config :params :output) "bearer-token")
+                        ["authorization"]
+                        [])
+    _ ["authorization"]))
+
 (fn wrap-api-key-query [auth-config base-fn]
   (let [name (required-param auth-config :name)
         value (required-param auth-config :value)]
@@ -439,6 +449,7 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
       (wrap-signing auth-config base-fn)))
 
 {: get-headers
+ : header-names
  : wrap-http-fn
  : authenticate
  : clear-token

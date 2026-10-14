@@ -389,3 +389,85 @@
                     (assert.are.same {:default "" :enum ["" "pp"]}
                                      (. servers 1 :variables :env))
                     (assert.are.same {} (. servers 3 :variables)))))))
+
+(describe "client $ref handling"
+          (fn []
+            (it "resolves path items defined by $ref"
+                (fn []
+                  (let [c (atlas.client {:openapi "3.1.0"
+                                         :info {}
+                                         :servers [{:url "https://h"}]
+                                         :paths {"/a" {:$ref "#/components/pathItems/A"}}
+                                         :components {:pathItems {:A {:get {:operationId "getA"
+                                                                            :responses {}}}}}}
+                                        {:http-fn (mock-http)})]
+                    (assert.is_not_nil c.get-a))))
+            (it "raises for refs that resolve to nothing"
+                (fn []
+                  (let [(ok err) (pcall atlas.client
+                                        (schema {"/x" {:get {:operationId "getX"
+                                                             :parameters [{:$ref "#/components/parameters/Nope"}]
+                                                             :responses {}}}})
+                                        {:http-fn (mock-http)})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "unresolved $ref '#/components/parameters/Nope'"
+                                         1 true)))))
+            (it "follows refs into other files relative to the schema file"
+                (fn []
+                  (let [dir (os.tmpname)
+                        write (fn [name text]
+                                (let [f (io.open (.. dir "-" name) :w)]
+                                  (f:write text)
+                                  (f:close)))
+                        common (.. (dir:match "[^/]+$") "-common.yaml")]
+                    (write "common.yaml"
+                           "Pet:\n  type: object\n  required: [name]\n  properties:\n    name: {type: string}\n")
+                    (write "api.yaml"
+                           (.. "openapi: 3.0.0\ninfo: {}\nservers: [{url: 'https://h'}]\npaths:\n  /pets:\n    post:\n      operationId: addPet\n      requestBody:\n        content:\n          application/json:\n            schema: {$ref: '"
+                               common "#/Pet'}\n      responses: {}\n"))
+                    (let [c (atlas.client (.. dir "-api.yaml")
+                                          {:http-fn (mock-http)})]
+                      (os.remove (.. dir "-common.yaml"))
+                      (os.remove (.. dir "-api.yaml"))
+                      (assert.are.same ["name"] c.add-pet.body-schema.required)))))))
+
+(describe "URL joining and schema fetching"
+          (fn []
+            (it "joins a base URL with a trailing slash without doubling it"
+                (fn []
+                  (let [(http calls) (mock-http)
+                        c (atlas.client (schema {"/pets/{id}" {:get {:operationId "getPet"
+                                                                     :responses {}}}}
+                                                "https://h/v1/")
+                                        {:http-fn http})]
+                    (c.get-pet.invoke {:path {:id 1}})
+                    (assert.are.equal "https://h/v1/pets/1" (. calls 1 :url)))))
+            (it "does the same for a --base-url override"
+                (fn []
+                  (let [(http calls) (mock-http)
+                        c (atlas.client (schema {"/pets" {:get {:operationId "listPets"
+                                                                :responses {}}}})
+                                        {:http-fn http :base-url "https://x/"})]
+                    (c.list-pets.invoke)
+                    (assert.are.equal "https://x/pets" (. calls 1 :url)))))
+            (it "fetches a schema URL with the client's ssl and headers"
+                (fn []
+                  (let [seen []
+                        real-http (require :atlas.http)
+                        fake (collect [k v (pairs real-http)] k v)]
+                    (tset fake :fetch-text
+                          (fn [location opts]
+                            (table.insert seen opts)
+                            "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{}}"))
+                    (tset package.loaded :atlas.http fake)
+                    (tset package.loaded :atlas nil)
+                    (let [fresh (require :atlas)]
+                      (fresh.client "https://h/openapi.json"
+                                    {:ssl {:cafile "ca.pem"}
+                                     :headers {:authorization "t"}})
+                      (tset package.loaded :atlas.http real-http)
+                      (tset package.loaded :atlas nil)
+                      (assert.are.same {:ssl {:cafile "ca.pem"}
+                                        :headers {:authorization "t"}}
+                                       (. seen 1))))))))

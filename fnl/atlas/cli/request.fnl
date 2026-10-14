@@ -128,7 +128,8 @@ query names are warnings. Header names match case-insensitively."
   (if (or (= nil body) (not op.body-schema) (not op.content-type)
           (not (op.content-type:match "json")))
       []
-      (let [(ok value) (if (= (type body) :string) (pcall json.decode body)
+      (let [(ok value) (if (= (type body) :string)
+                           (pcall json.decode body nil validate.null)
                            (values true body))]
         (if ok (validate.check op.body-schema value :body) []))))
 

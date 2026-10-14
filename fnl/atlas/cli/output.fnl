@@ -15,18 +15,27 @@
         "<redacted>"
         value)))
 
+(fn sorted-headers [headers]
+  (let [names (icollect [k (pairs (or headers {}))]
+                k)]
+    (table.sort names)
+    (icollect [_ k (ipairs names)]
+      [k (tostring (. headers k))])))
+
 (fn wrap-log-request [http-fn]
   (fn [req]
-    (io.stderr:write (.. "> " (or req.method "?") " " (or req.url "?") "\n"))
+    (io.stderr:write (.. "> " (or req.method "?") " "
+                         (util.redact-url (util.append-query (or req.url "?")
+                                                             (or req.query {})))
+                         "\n"))
     (when req.body
       (io.stderr:write (.. "> body: "
                            (if (= (type req.body) :table)
                                (json.encode req.body)
                                (tostring req.body))
                            "\n")))
-    (when (and req.headers (next req.headers))
-      (each [k v (pairs req.headers)]
-        (io.stderr:write (.. "> " k ": " (tostring (redact-header k v)) "\n"))))
+    (each [_ [k v] (ipairs (sorted-headers req.headers))]
+      (io.stderr:write (.. "> " k ": " (tostring (redact-header k v)) "\n")))
     (http-fn req)))
 
 (fn op? [v]
@@ -113,13 +122,6 @@
                     (set i (+ n 1)))))))))
   cur)
 
-(fn sorted-headers [headers]
-  (let [names (icollect [k (pairs (or headers {}))]
-                k)]
-    (table.sort names)
-    (icollect [_ k (ipairs names)]
-      [k (tostring (. headers k))])))
-
 (fn request-text [req]
   "Human-readable request, credentials redacted."
   (let [(url payload headers) (http-mod.encode-request req)
@@ -159,12 +161,8 @@
       (pretty-mod.pretty v 0 use-color)))
 
 (fn header-lines [headers]
-  (let [names (icollect [k (pairs (or headers {}))]
-                k)]
-    (table.sort names)
-    (table.concat (icollect [_ k (ipairs names)]
-                    (.. k ": " (tostring (. headers k))))
-                  "\n")))
+  (table.concat (icollect [_ [k v] (ipairs (sorted-headers headers))]
+                  (.. k ": " v)) "\n"))
 
 (fn format-output [resp output use-color ?select]
   "Text to print for a successful response, or nil when there is nothing to show."
@@ -228,9 +226,20 @@
         (s) (s:gsub "%[string \"[^\"]*\"%]:%d+: " "")]
     s))
 
+(local exit-mt {:__tostring #$.message})
+
+(fn exit [code ?message]
+  "Stop the current command with an exit code; run prints ?message to stderr."
+  (error (setmetatable {:code code :message (or ?message "")} exit-mt) 0))
+
+(fn exit-status [err]
+  "(code message) for an error raised while running a command."
+  (if (= (getmetatable err) exit-mt)
+      (values err.code err.message)
+      (values 1 (strip-location (tostring err)))))
+
 (fn die [msg]
-  (io.stderr:write (.. (strip-location (tostring msg)) "\n"))
-  (os.exit 1))
+  (exit 1 (strip-location (tostring msg))))
 
 (fn executed-steps [result]
   "Step ids in the order they first ran."
@@ -271,36 +280,38 @@ variable shows the value in effect."
 (fn print-arazzo-result [result mode output no-color]
   (let [render #(render $ output (not no-color))]
     (match (or mode :final)
-      :final (when (next (or result.outputs {}))
-               (print (render result.outputs)))
-      :steps (do
-               (let [ordered (executed-steps result)]
-                 (each [_ step-id (ipairs ordered)]
-                   (let [step (. result.steps step-id)]
-                     (print (.. "--- " step-id " ---"))
-                     (when step.response
-                       (print (render step.response.body))))))
-               (when (next (or result.outputs {}))
-                 (print "--- outputs ---")
-                 (print (render result.outputs))))
-      :progress (when (next (or result.outputs {}))
-                  (print (render result.outputs)))
-      :full (do
-              (let [ordered (executed-steps result)]
-                (each [_ step-id (ipairs ordered)]
-                  (let [step (. result.steps step-id)]
-                    (print (.. "--- " step-id " request ---"))
-                    (when step.op-ref (print (.. "operation: " step.op-ref)))
-                    (when (and step.request step.request.body)
-                      (print (render step.request.body)))
-                    (print (.. "--- " step-id " response"
-                               (if (and step.response step.response.status)
-                                   (.. " HTTP " step.response.status)
-                                   "") " ---"))
-                    (when step.response (print (render step.response.body))))))
-              (when (next (or result.outputs {}))
-                (print "--- outputs ---")
-                (print (render result.outputs)))))))
+      ;; progress already went to stderr while the workflow ran
+      (where (or :final :progress))
+      (when (next (or result.outputs {}))
+        (print (render result.outputs)))
+      :steps
+      (do
+        (let [ordered (executed-steps result)]
+          (each [_ step-id (ipairs ordered)]
+            (let [step (. result.steps step-id)]
+              (print (.. "--- " step-id " ---"))
+              (when step.response
+                (print (render step.response.body))))))
+        (when (next (or result.outputs {}))
+          (print "--- outputs ---")
+          (print (render result.outputs))))
+      :full
+      (do
+        (let [ordered (executed-steps result)]
+          (each [_ step-id (ipairs ordered)]
+            (let [step (. result.steps step-id)]
+              (print (.. "--- " step-id " request ---"))
+              (when step.op-ref (print (.. "operation: " step.op-ref)))
+              (when (and step.request step.request.body)
+                (print (render step.request.body)))
+              (print (.. "--- " step-id " response"
+                         (if (and step.response step.response.status)
+                             (.. " HTTP " step.response.status)
+                             "") " ---"))
+              (when step.response (print (render step.response.body))))))
+        (when (next (or result.outputs {}))
+          (print "--- outputs ---")
+          (print (render result.outputs)))))))
 
 (fn list-arazzo-workflows [doc]
   (let [wfs (or doc.workflows [])]
@@ -331,6 +342,8 @@ variable shows the value in effect."
  : print-resp
  : strip-location
  : die
+ : exit
+ : exit-status
  : executed-steps
  : show-value
  : format-servers

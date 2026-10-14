@@ -162,15 +162,24 @@
 
 (describe "cli.client-options"
           (fn []
-            (it "merges profile headers with auth headers"
+            (it "adds auth headers to requests on first use, not up front"
                 (fn []
-                  (let [profile {:headers {:x-api-key "k"}
+                  (let [sent []
+                        profile {:headers {:x-api-key "k"}
                                  :auth {:name "external-tool"
                                         :params {:commandline "echo tok"
                                                  :output "bearer-token"}}}
-                        opts (cli.client-options "p" profile {:ssl {}} {})]
-                    (assert.are.equal "k" opts.headers.x-api-key)
-                    (assert.are.equal "Bearer tok" opts.headers.authorization))))
+                        opts (cli.client-options "p" profile {:ssl {} :retry 0}
+                                                 {}
+                                                 (fn [req]
+                                                   (table.insert sent req)
+                                                   {:status 200 :headers {}}))]
+                    (assert.are.same {:x-api-key "k"} opts.headers)
+                    (opts.http-fn {:method "GET"
+                                   :url "https://h/x"
+                                   :headers {:x-api-key "k"}})
+                    (assert.are.equal "Bearer tok"
+                                      (. sent 1 :headers :authorization)))))
             (it "prefers CLI over profile over config for timeout and base-url"
                 (fn []
                   (let [opts (cli.client-options "p"
@@ -182,14 +191,44 @@
                                                  {:timeout 1})]
                     (assert.are.equal 9 opts.timeout)
                     (assert.are.equal "https://cli" opts.base-url))))
-            (it "merges profile and auth headers case-insensitively, auth winning"
+            (it "does not retry authentication failures"
                 (fn []
-                  (let [profile {:headers {:Authorization "Basic static"}
-                                 :auth {:name "external-tool"
+                  (let [calls []
+                        opts (cli.client-options "p"
+                                                 {:auth {:name "external-tool"
+                                                         :params {:commandline "exit 1"
+                                                                  :output "bearer-token"}}}
+                                                 {:ssl {} :retry 3} {}
+                                                 (fn [req]
+                                                   (table.insert calls req)
+                                                   {:status 200 :headers {}}))
+                        socket (require :socket)
+                        t0 (socket.gettime)
+                        (ok err) (pcall opts.http-fn
+                                        {:method "GET"
+                                         :url "https://h/x"
+                                         :headers {}})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "authentication failed" 1 true))
+                    (assert.is_true (< (- (socket.gettime) t0) 0.5))
+                    (assert.are.equal 0 (length calls)))))
+            (it "lets an explicitly set header win over auth, case-insensitively"
+                (fn []
+                  (let [sent []
+                        profile {:auth {:name "external-tool"
                                         :params {:commandline "echo tok"
                                                  :output "bearer-token"}}}
-                        opts (cli.client-options "p" profile {:ssl {}} {})]
-                    (assert.are.same {:authorization "Bearer tok"} opts.headers))))
+                        opts (cli.client-options "p" profile {:ssl {} :retry 0}
+                                                 {}
+                                                 (fn [req]
+                                                   (table.insert sent req)
+                                                   {:status 200 :headers {}}))]
+                    (opts.http-fn {:method "GET"
+                                   :url "https://h/x"
+                                   :headers {:Authorization "Basic static"}})
+                    (assert.are.same {:Authorization "Basic static"}
+                                     (. sent 1 :headers)))))
             (it "merges profile server vars with CLI ones, CLI winning"
                 (fn []
                   (let [opts (cli.client-options "p"
@@ -426,7 +465,7 @@
                   (assert.is_nil (cli.paginate-options nil {:no-paginate true}
                                                        {}))))))
 
-(describe "review round 2"
+(describe "JSON bodies, dry-run redaction and curl output"
           (fn []
             (it "sends valid JSON bodies byte-for-byte"
                 (fn []
@@ -720,3 +759,115 @@
                                    (cli.complete-line "op exo "
                                                       {:config completion-ctx.config
                                                        :load-schema #(error "offline")}))))))
+
+(describe "request log (-v)"
+          (fn []
+            (it "logs the full URL with secret query parameters redacted"
+                (fn []
+                  (let [written []
+                        real io.stderr]
+                    (set io.stderr {:write (fn [_ s] (table.insert written s))})
+                    (let [(ok err) (pcall (cli.wrap-log-request (fn []
+                                                                  {:status 200}))
+                                          {:method "GET"
+                                           :url "https://h/x?api_key=SECRET"
+                                           :query {:page "2"}
+                                           :headers {:authorization "Bearer t"}})]
+                      (set io.stderr real)
+                      (assert.is_true ok err)
+                      (let [text (table.concat written)]
+                        (assert.is_truthy (text:find "> GET https://h/x?api_key=<redacted>&page=2"
+                                                     1 true))
+                        (assert.is_nil (text:find "SECRET" 1 true))
+                        (assert.is_nil (text:find "Bearer t" 1 true)))))))))
+
+(describe "explicit nulls and repeated params"
+          (fn []
+            (it "accepts null for a required nullable property"
+                (fn []
+                  (assert.are.same []
+                                   (cli.check-body {:content-type "application/json"
+                                                    :body-schema {:required ["a"]
+                                                                  :properties {:a {:type "string"
+                                                                                   :nullable true}}}}
+                                                   "{\"a\": null}"))))
+            (it "builds arrays from repeated query flags"
+                (fn []
+                  (assert.are.same {:tag ["a" "b" "c"] :one "x"}
+                                   (. (cli.parse-args ["op"
+                                                       "s"
+                                                       "o"
+                                                       "--q.tag=a"
+                                                       "--query.tag=b"
+                                                       "--q.tag=c"
+                                                       "--q.one=x"])
+                                      :query))))
+            (it "joins repeated header flags"
+                (fn []
+                  (assert.are.same {:accept "a/b, c/d"}
+                                   (. (cli.parse-args ["op"
+                                                       "s"
+                                                       "o"
+                                                       "--h.accept=a/b"
+                                                       "--h.accept=c/d"])
+                                      :headers))))))
+
+(describe "option table parsing"
+          (fn []
+            (it "accepts --flag VALUE as well as --flag=VALUE"
+                (fn []
+                  (let [p (cli.parse-args ["op"
+                                           "a"
+                                           "--timeout"
+                                           "5"
+                                           "--output"
+                                           "yaml"
+                                           "--retry=1"])]
+                    (assert.are.equal 5 p.timeout)
+                    (assert.are.equal "yaml" p.output)
+                    (assert.are.equal 1 p.retry))))
+            (it "rejects non-numeric values for numeric options"
+                (fn []
+                  (assert.has.error #(cli.parse-args ["op" "a" "--timeout=abc"])
+                                    "--timeout expects a number, got 'abc'")))
+            (it "rejects values on switches"
+                (fn []
+                  (assert.has.error #(cli.parse-args ["op" "a" "--list=yes"])
+                                    "--list takes no value")))
+            (it "requires a value for value options at the end of the line"
+                (fn []
+                  (assert.has.error #(cli.parse-args ["op" "a" "--timeout"])
+                                    "--timeout requires a value")))
+            (it "parses --ssl. and --server. families"
+                (fn []
+                  (let [p (cli.parse-args ["op"
+                                           "a"
+                                           "--ssl.verify=none"
+                                           "--server.zone=z"])]
+                    (assert.are.same {:verify "none"} p.ssl)
+                    (assert.are.same {:zone "z"} p.server-vars))))
+            (it "has one entry per option for usage and completion"
+                (fn []
+                  (let [seen {}]
+                    (each [_ o (ipairs cli.options)]
+                      (each [_ n (ipairs (or o.names []))]
+                        (assert.is_nil (. seen n) n)
+                        (tset seen n true))))))))
+
+(describe "CLI edge cases"
+          (fn []
+            (it "completion skips the values of separated options"
+                (fn []
+                  (assert.are.same ["add-pet" "list-pets"]
+                                   (complete "op --output yaml exo "))
+                  (assert.are.same ["list-pets"]
+                                   (complete "op --timeout 5 exo li"))))
+            (it "merges repeated headers regardless of case"
+                (fn []
+                  (assert.are.same {:X-A "1, 2"}
+                                   (. (cli.parse-args ["op"
+                                                       "s"
+                                                       "o"
+                                                       "--h.X-A=1"
+                                                       "--h.x-a=2"])
+                                      :headers))))))

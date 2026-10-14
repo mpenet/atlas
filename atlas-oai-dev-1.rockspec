@@ -26,33 +26,41 @@ dependencies = {
   "lyaml",
 }
 
+build_dependencies = {
+  "fennel",
+}
+
 build = {
-  type = "builtin",
-  modules = {
-    ["atlas"]           = "lua/atlas.lua",
-    ["atlas.auth"]      = "lua/atlas/auth.lua",
-    ["atlas.cache"]     = "lua/atlas/cache.lua",
-    ["atlas.cli"]       = "lua/atlas/cli.lua",
-    ["atlas.cli.args"]  = "lua/atlas/cli/args.lua",
-    ["atlas.cli.complete"] = "lua/atlas/cli/complete.lua",
-    ["atlas.cli.output"] = "lua/atlas/cli/output.lua",
-    ["atlas.cli.request"] = "lua/atlas/cli/request.lua",
-    ["atlas.cli.settings"] = "lua/atlas/cli/settings.lua",
-    ["atlas.coerce"]    = "lua/atlas/coerce.lua",
-    ["atlas.digest"]    = "lua/atlas/digest.lua",
-    ["atlas.doc"]       = "lua/atlas/doc.lua",
-    ["atlas.http"]      = "lua/atlas/http.lua",
-    ["atlas.negotiate"] = "lua/atlas/negotiate.lua",
-    ["atlas.paginate"]  = "lua/atlas/paginate.lua",
-    ["atlas.pretty"]    = "lua/atlas/pretty.lua",
-    ["atlas.retry"]     = "lua/atlas/retry.lua",
-    ["atlas.util"]      = "lua/atlas/util.lua",
-    ["atlas.validate"]  = "lua/atlas/validate.lua",
-    ["atlas.arazzo"]    = "lua/atlas/arazzo.lua",
-    ["atlas.arazzo.expr"] = "lua/atlas/arazzo/expr.lua",
-    ["atlas.yaml"]      = "lua/atlas/yaml.lua",
-  },
+  -- sources are Fennel; compile them, then install the generated Lua
+  type = "command",
+  -- needs the fennel executable on PATH (the build dependency's tree bin dir)
+  build_command = "make build",
   install = {
-    bin = { "bin/atlas" },
+    lua = {
+      ["atlas"]           = "lua/atlas.lua",
+      ["atlas.auth"]      = "lua/atlas/auth.lua",
+      ["atlas.cache"]     = "lua/atlas/cache.lua",
+      ["atlas.cli"]       = "lua/atlas/cli.lua",
+      ["atlas.cli.args"]  = "lua/atlas/cli/args.lua",
+      ["atlas.cli.complete"] = "lua/atlas/cli/complete.lua",
+      ["atlas.cli.output"] = "lua/atlas/cli/output.lua",
+      ["atlas.cli.request"] = "lua/atlas/cli/request.lua",
+      ["atlas.cli.settings"] = "lua/atlas/cli/settings.lua",
+      ["atlas.coerce"]    = "lua/atlas/coerce.lua",
+      ["atlas.digest"]    = "lua/atlas/digest.lua",
+      ["atlas.doc"]       = "lua/atlas/doc.lua",
+      ["atlas.http"]      = "lua/atlas/http.lua",
+      ["atlas.negotiate"] = "lua/atlas/negotiate.lua",
+      ["atlas.paginate"]  = "lua/atlas/paginate.lua",
+      ["atlas.pretty"]    = "lua/atlas/pretty.lua",
+      ["atlas.refs"]      = "lua/atlas/refs.lua",
+      ["atlas.retry"]     = "lua/atlas/retry.lua",
+      ["atlas.util"]      = "lua/atlas/util.lua",
+      ["atlas.validate"]  = "lua/atlas/validate.lua",
+      ["atlas.arazzo"]    = "lua/atlas/arazzo.lua",
+      ["atlas.arazzo.expr"] = "lua/atlas/arazzo/expr.lua",
+      ["atlas.yaml"]      = "lua/atlas/yaml.lua",
+    },
+    bin = { atlas = "bin/atlas" },
   },
 }

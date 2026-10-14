@@ -572,3 +572,27 @@
                     (wrapped {:method "GET"
                               :url "https://h/items?api_key=K&page=2"})
                     (assert.is_nil (?. sent 1 :query :api_key)))))))
+
+(describe "auth.header-names"
+          (fn []
+            (let [auth (reload-auth (pick-values 1 (seq-mock)))]
+              (it "names the header each auth type supplies, without authenticating"
+                  (fn []
+                    (assert.are.same ["authorization"]
+                                     (auth.header-names {:name "bearer"}))
+                    (assert.are.same ["authorization"]
+                                     (auth.header-names {:name "oauth-client-credentials"}))
+                    (assert.are.same ["authorization"]
+                                     (auth.header-names {:name "external-tool"
+                                                         :params {:output "bearer-token"}}))
+                    (assert.are.same ["x-api-key"]
+                                     (auth.header-names {:name "api-key"
+                                                         :params {:name "X-API-Key"
+                                                                  :in "header"}}))
+                    (assert.are.same []
+                                     (auth.header-names {:name "api-key"
+                                                         :params {:name "k"
+                                                                  :in "query"}}))
+                    (assert.are.same []
+                                     (auth.header-names {:name "external-tool"
+                                                         :params {}})))))))

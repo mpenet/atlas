@@ -11,14 +11,6 @@
 
 (require :lunajson)
 
-(require :lyaml.functional)
-
-(require :lyaml.implicit)
-
-(require :lyaml.explicit)
-
-(require :lyaml)
-
 (require :ltn12)
 
 (require :mime)
@@ -40,6 +32,8 @@
 (require :atlas.util)
 
 (require :atlas.digest)
+
+(require :atlas.refs)
 
 (require :atlas.coerce)
 

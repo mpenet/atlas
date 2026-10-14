@@ -3,111 +3,33 @@
 (local atlas (require :atlas))
 (local arazzo (require :atlas.arazzo))
 (local util (require :atlas.util))
-(local {: field-prefixes} (require :atlas.cli.args))
+(local http-mod (require :atlas.http))
+(local {: field-prefixes : options : option-by-name} (require :atlas.cli.args))
 (local {: load-config : load-schema-cached} (require :atlas.cli.settings))
 
 ;; ---- options and completion ----
-(local options
-       ;; [flag-as-shown flag-to-complete scope description]; scope is :op, :az or :any
-       [["--list" "--list" :op "List all operations"]
-        ["--help" "--help" :op "Show operation documentation"]
-        ["--body=JSON"
-         "--body="
-         :op
-         "Request body (inline JSON/YAML, @file, @-)"]
-        ["-d JSON" nil :op "Alias for --body"]
-        ["--body.KEY=VAL"
-         "--b."
-         :op
-         "Body field, deep dot paths (short: --b.KEY=VAL)"]
-        ["--query.KEY=VAL" "--q." :op "Query parameter (short: --q.KEY=VAL)"]
-        ["--header.KEY=VAL"
-         "--h."
-         :op
-         "Per-request header (short: --h.KEY=VAL)"]
-        ["--timeout=N" "--timeout=" :any "Timeout in seconds"]
-        ["--max-pages=N"
-         "--max-pages="
-         :op
-         "Max pages to follow via Link rel=next (default: 25)"]
-        ["--no-paginate" "--no-paginate" :op "Return only the first page"]
-        ["--retry=N"
-         "--retry="
-         :any
-         "Retries for 408/429/5xx and network errors (default: 2)"]
-        ["--retry-unsafe"
-         "--retry-unsafe"
-         :any
-         "Also retry POST/PUT/PATCH/DELETE"]
-        ["--retry-max-wait=N"
-         "--retry-max-wait="
-         :any
-         "Max seconds to wait between retries (default: 300)"]
-        ["--base-url=URL" "--base-url=" :any "Override base URL"]
-        ["--servers"
-         "--servers"
-         :op
-         "List the schema's servers and their variables"]
-        ["--server-index=N"
-         "--server-index="
-         :any
-         "Use the schema's Nth server (default: 1)"]
-        ["--server.NAME=VAL"
-         "--server."
-         :any
-         "Set a server URL variable (e.g. --server.zone=de-fra-1)"]
-        ["--output=FORMAT"
-         "--output="
-         :any
-         "json (default), yaml, raw, status or headers"]
-        ["--select=PATH"
-         "--select="
-         :op
-         "Select nested value (e.g. .items[0].name, .items[].{id,name})"]
-        ["--no-color" "--no-color" :any "Disable colored output"]
-        ["-v, --verbose" "--verbose" :any "Show status, headers and requests"]
-        ["--reload" "--reload" :op "Re-fetch and re-cache the schema"]
-        ["--ignore-status"
-         "--ignore-status"
-         :op
-         "Treat HTTP error responses as output; exit 0"]
-        ["--no-validate"
-         "--no-validate"
-         :op
-         "Send even if required params are missing or the body is invalid"]
-        ["--dry-run" "--dry-run" :op "Print the request instead of sending it"]
-        ["--curl"
-         "--curl"
-         :op
-         "Print an equivalent curl command instead of sending"]
-        ["--cache-ttl=N"
-         "--cache-ttl="
-         :op
-         "Schema cache TTL in seconds (default: 3600)"]
-        ["--profile=NAME" "--profile=" :az "Profile for auth, TLS and headers"]
-        ["-i KEY=VAL" nil :az "Workflow input"]
-        ["--input.KEY=VAL" "--i." :az "Workflow input (short: --i.KEY=VAL)"]
-        ["--inputs=JSON"
-         "--inputs="
-         :az
-         "All inputs as a JSON/YAML object (or @file)"]
-        ["--help"
-         "--help"
-         :az
-         "Show a workflow's inputs and steps (or list workflows)"]
-        ["--arazzo-output=MODE"
-         "--arazzo-output="
-         :az
-         "final (default), steps, progress, full"]
-        ["--max-gotos=N"
-         "--max-gotos="
-         :az
-         "Max visits per goto target before aborting (default: 50)"]])
+(fn shown [o]
+  "How usage displays an option."
+  (or o.shown (let [name (. o.names 1)]
+                (match o.value
+                  nil name
+                  :number (.. name "=N")
+                  :body (.. name "=JSON")
+                  :inputs (.. name "=JSON")
+                  _ (.. name "=" (or o.arg "VALUE"))))))
+
+(fn completion [o]
+  "What flag completion offers for an option, or nil for short-only ones."
+  (or o.family (let [long (accumulate [found nil _ n (ipairs o.names)
+                                       &until found]
+                            (when (n:match "^%-%-") n))]
+                 (when long
+                   (if o.value (.. long "=") long)))))
 
 (fn scope-options [scope]
-  (icollect [_ [shown complete opt-scope help] (ipairs options)]
-    (when (or (= opt-scope scope) (= opt-scope :any))
-      {: shown : complete : help})))
+  (icollect [_ o (ipairs options)]
+    (when (or (= o.scope scope) (= o.scope :any))
+      {:shown (shown o) :complete (completion o) :help o.help})))
 
 (fn usage []
   (print "Usage: atlas <command> [args...] [options]")
@@ -188,7 +110,8 @@ once a name and = are typed."
                      (var skip false)
                      (each [_ w (ipairs words)]
                        (if skip (set skip false)
-                           (or (= w "-d") (= w "-i")) (set skip true)
+                           ;; an option given as `--name value` consumes the next word
+                           (?. option-by-name w :value) (set skip true)
                            (not (w:match "^%-")) (table.insert out w)))
                      out)
         [cmd target name] positional
@@ -223,12 +146,13 @@ once a name and = are typed."
                   c)
         entries (if (current:match "^%-%-(%a+)%.")
                     (let [(prefix rest) (current:match "^%-%-(%a+)%.(.*)$")
-                          kind (if (= prefix :server) :server
-                                   (. field-prefixes prefix))]
+                          kind (. field-prefixes prefix)]
                       (if kind ((field-entries prefix kind context) rest) []))
                     (current:match "^%-")
-                    (icollect [_ o (ipairs (scope-options (if (= cmd :az) :az
-                                                              :op)))]
+                    (icollect [_ o (ipairs (scope-options (match cmd
+                                                            :az :az
+                                                            :auth :auth
+                                                            _ :op)))]
                       (when o.complete {:value o.complete :help o.help}))
                     (= nil cmd)
                     (icollect [_ c (ipairs [:auth :az :completion :op :profile])]
@@ -319,7 +243,8 @@ atlas __complete [--describe] LINE-UP-TO-CURSOR"
         ctx {:config (let [(ok cfg) (pcall load-config)] (if ok cfg {}))
              :load-schema (fn [src]
                             (if (src:match "^https?://")
-                                (load-schema-cached src 3600 false)
+                                (load-schema-cached src
+                                                    {:transport http-mod.request})
                                 (atlas.load-schema src)))
              :load-doc arazzo.load-doc}]
     (each [_ e (ipairs (if line (complete-entries line ctx) []))]

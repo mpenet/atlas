@@ -140,3 +140,15 @@
                                                         :steps []}
                                                        nil [])
                                        :find "Inputs: none" 1 true))))))
+
+(describe "doc.build-cli usage line"
+          (fn []
+            (it "includes the op subcommand"
+                (fn []
+                  (let [{: build-cli} (require :atlas.doc)]
+                    (assert.is_truthy (: (build-cli "/pets/{id}" :get
+                                                    {:operationId "getPet"
+                                                     :responses {}})
+                                         :find
+                                         "Usage: atlas op <profile-or-schema> get-pet <id>"
+                                         1 true)))))))

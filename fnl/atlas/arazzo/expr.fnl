@@ -11,18 +11,9 @@
 ;; ---- JSON Pointer ----
 
 (fn json-pointer [obj ptr]
-  "Resolve a JSON Pointer string (/foo/0/bar) into obj."
+  "Resolve a JSON Pointer string (/foo/0/bar) into obj; nil for an empty pointer."
   (when (and obj ptr (> (length ptr) 0))
-    (accumulate [cur obj seg (ptr:gmatch "[^/]+")]
-      (when (= (type cur) :table)
-        (let [key (pick-values 1
-                               (-> seg
-                                   (: :gsub "~1" "/")
-                                   (: :gsub "~0" "~")))
-              n (when (key:match "^%d+$") (tonumber key))]
-          (if (and n (= nil (. cur key)))
-              (. cur (+ n 1))
-              (. cur key)))))))
+    (util.json-pointer obj ptr)))
 
 ;; ---- expression resolution ----
 

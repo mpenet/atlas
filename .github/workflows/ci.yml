@@ -30,3 +30,31 @@ jobs:
 
       - name: Run tests
         run: make test
+
+  format:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.4"
+
+      - name: Build fnlfmt 0.4.0
+        run: |
+          git clone --depth 1 --branch 0.4.0 https://git.sr.ht/~technomancy/fnlfmt /tmp/fnlfmt
+          cd /tmp/fnlfmt && LUA_PATH="./?.lua;;" make fnlfmt
+
+      - name: Check formatting
+        run: make fmt-check FNLFMT=/tmp/fnlfmt/fnlfmt
+
+  binary:
+    # Lua 5.4 tests, the static Linux binary and its self-containment check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and check in Docker
+        run: docker build --target builder -t atlas-check .

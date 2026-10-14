@@ -5,9 +5,14 @@
   (and (= (type v) :number) (= v (math.floor v)) (not= v math.huge)
        (not= v (- math.huge))))
 
+(local null
+       ;; stands for an explicit JSON null, which decoding would otherwise drop
+       (setmetatable {} {:__tostring #"null"}))
+
 (fn json-type [v]
   "JSON type name of a decoded value; empty tables count as arrays."
-  (match (type v)
+  (match (if (= v null) :null (type v))
+    :null :null
     :nil :null
     :boolean :boolean
     :string :string
@@ -47,10 +52,10 @@
             (check-value schema.additionalProperties (. v name) sub-path errors))))))
 
 (fn check-array [schema v path errors]
-  (when (and schema.minItems (< (length v) schema.minItems))
+  (when (and (= (type schema.minItems) :number) (< (length v) schema.minItems))
     (table.insert errors
                   (string.format "%s: fewer than %d items" path schema.minItems)))
-  (when (and schema.maxItems (> (length v) schema.maxItems))
+  (when (and (= (type schema.maxItems) :number) (> (length v) schema.maxItems))
     (table.insert errors
                   (string.format "%s: more than %d items" path schema.maxItems)))
   (when schema.items
@@ -59,20 +64,22 @@
 
 (fn check-scalar [schema v path errors]
   (when (= (type v) :string)
-    (when (and schema.minLength (< (utf8.len v) schema.minLength))
+    (when (and (= (type schema.minLength) :number)
+               (< (or (utf8.len v) (length v)) schema.minLength))
       (table.insert errors
                     (string.format "%s: shorter than %d characters" path
                                    schema.minLength)))
-    (when (and schema.maxLength (> (utf8.len v) schema.maxLength))
+    (when (and (= (type schema.maxLength) :number)
+               (> (or (utf8.len v) (length v)) schema.maxLength))
       (table.insert errors
                     (string.format "%s: longer than %d characters" path
                                    schema.maxLength))))
   (when (= (type v) :number)
-    (when (and schema.minimum (< v schema.minimum))
+    (when (and (= (type schema.minimum) :number) (< v schema.minimum))
       (table.insert errors
                     (string.format "%s: less than %s" path
                                    (tostring schema.minimum))))
-    (when (and schema.maximum (> v schema.maximum))
+    (when (and (= (type schema.maximum) :number) (> v schema.maximum))
       (table.insert errors
                     (string.format "%s: greater than %s" path
                                    (tostring schema.maximum))))))
@@ -123,4 +130,4 @@
     (check-value (or schema {}) value (or ?path "value") errors)
     errors))
 
-{: check}
+{: check : null}

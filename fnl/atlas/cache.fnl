@@ -26,10 +26,14 @@
 
 (fn put [url schema]
   (let [dir (cache-dir)]
-    (os.execute (.. "mkdir -p '" (dir:gsub "'" "'\\''") "'"))
-    (let [f (io.open (cache-path url) :w)]
+    (os.execute (.. "mkdir -p " (util.shell-quote dir)))
+    ;; write then rename, so a concurrent reader never sees a partial entry
+    (let [path (cache-path url)
+          tmp (.. path ".tmp" (math.random 1 1000000000))
+          f (io.open tmp :w)]
       (when f
         (f:write (json.encode {:url url :cached_at (os.time) :schema schema}))
-        (f:close)))))
+        (f:close)
+        (os.rename tmp path)))))
 
-{: get : put}
+{: get : put :path cache-path}

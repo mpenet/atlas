@@ -1156,3 +1156,140 @@
                     (assert.are.same {:type "object"
                                       :properties {:zip {:type "string"}}}
                                      (arazzo.workflow-inputs doc wf)))))))
+
+(describe "sub-workflow steps"
+          (fn []
+            (fn doc-with [outer-step ?inner-ok]
+              {:arazzo "1.0.0"
+               :info {}
+               :workflows [{:workflowId "inner"
+                            :steps [{:stepId "i1"
+                                     :operationId (if (= false ?inner-ok)
+                                                      "fail"
+                                                      "op")
+                                     :successCriteria [{:condition "$statusCode == 200"}]
+                                     :outputs {:v "$response.body#/v"}}]
+                            :outputs {:result "$steps.i1.outputs.v"}}
+                           {:workflowId "outer"
+                            :steps [(doto outer-step (tset :stepId "sub")
+                                      (tset :workflowId "inner"))
+                                    {:stepId "after" :operationId "after"}]
+                            :outputs {:x "$steps.sub.outputs.x"
+                                      :raw "$steps.sub.outputs.result"}}]})
+
+            (fn clients-logging [log]
+              {:api (make-client {:op (fn [] (table.insert log :op)
+                                        (ok-resp {:v 7}))
+                                  :fail (fn [] (table.insert log :fail)
+                                          (ok-resp {} 500))
+                                  :after (fn [] (table.insert log :after)
+                                           (ok-resp {}))})})
+
+            (it "maps step outputs from the sub-workflow"
+                (fn []
+                  (let [result (arazzo.run-workflow (doc-with {:outputs {:x "$workflows.inner.outputs.result"}})
+                                                    "outer" {}
+                                                    (clients-logging []) {})]
+                    (assert.are.equal 7 result.outputs.x))))
+            (it "keeps exposing the sub-workflow outputs when the step declares none"
+                (fn []
+                  (let [result (arazzo.run-workflow (doc-with {}) "outer" {}
+                                                    (clients-logging []) {})]
+                    (assert.are.equal 7 result.outputs.raw))))
+            (it "applies successCriteria and actions"
+                (fn []
+                  (let [log []]
+                    (arazzo.run-workflow (doc-with {:successCriteria [{:condition "$workflows.inner.outputs.result == 8"}]
+                                                    :onFailure [{:name "stop"
+                                                                 :type "end"}]})
+                                         "outer" {} (clients-logging log) {})
+                    (assert.are.same [:op] log))))
+            (it "lets onFailure handle a failing sub-workflow"
+                (fn []
+                  (let [log []]
+                    (arazzo.run-workflow (doc-with {:onFailure [{:name "skip"
+                                                                 :type "goto"
+                                                                 :stepId "after"}]}
+                                                   false)
+                                         "outer" {} (clients-logging log) {})
+                    (assert.are.same [:fail :after] log))))
+            (it "reports a failing sub-workflow without actions"
+                (fn []
+                  (let [(ok err) (pcall arazzo.run-workflow (doc-with {} false)
+                                        "outer" {} (clients-logging []) {})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "step 'sub' failed: step 'i1' failed success criteria"
+                                         1 true)))))))
+
+(describe "goto limit"
+          (fn []
+            (it "allows exactly max-gotos gotos to a step"
+                (fn []
+                  (let [c (counter)
+                        clients {:api (make-client {:op (fn [] (c.inc)
+                                                          (ok-resp {}))})}
+                        doc (one-step-doc {:operationId "op"
+                                           :onSuccess [{:name "again"
+                                                        :type "goto"
+                                                        :stepId "s1"
+                                                        :criteria [{:condition "$statusCode == 200"}]}]})]
+                    (assert.has.error #(arazzo.run-workflow doc "wf" {} clients
+                                                            {:max-gotos 3}))
+                    (assert.are.equal 4 (c.val)))))))
+
+(describe "workflow dependsOn"
+          (fn []
+            (it "runs dependencies first and exposes their outputs"
+                (fn []
+                  (let [log []
+                        clients {:api (make-client {:login (fn []
+                                                             (table.insert log
+                                                                           :login)
+                                                             (ok-resp {:t "tok"}))
+                                                    :use (fn []
+                                                           (table.insert log
+                                                                         :use)
+                                                           (ok-resp {}))})}
+                        doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "auth"
+                                          :steps [{:stepId "l"
+                                                   :operationId "login"
+                                                   :outputs {:t "$response.body#/t"}}]
+                                          :outputs {:token "$steps.l.outputs.t"}}
+                                         {:workflowId "main"
+                                          :dependsOn ["auth"]
+                                          :steps [{:stepId "u"
+                                                   :operationId "use"}]
+                                          :outputs {:seen "$workflows.auth.outputs.token"}}]}
+                        result (arazzo.run-workflow doc "main" {} clients {})]
+                    (assert.are.same [:login :use] log)
+                    (assert.are.equal "tok" result.outputs.seen))))))
+
+(describe "workflow cycles"
+          (fn []
+            (it "reports dependsOn cycles"
+                (fn []
+                  (let [doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "a"
+                                          :dependsOn ["b"]
+                                          :steps []}
+                                         {:workflowId "b"
+                                          :dependsOn ["a"]
+                                          :steps []}]}
+                        (ok err) (pcall arazzo.run-workflow doc "a" {} {} {})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "workflow cycle: a -> b -> a" 1 true)))))
+            (it "reports a step calling its own workflow"
+                (fn []
+                  (let [doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "w"
+                                          :steps [{:stepId "s" :workflowId "w"}]}]}
+                        (ok err) (pcall arazzo.run-workflow doc "w" {} {} {})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "workflow cycle: w -> w" 1 true)))))))

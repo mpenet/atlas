@@ -6,7 +6,10 @@
                :number "\27[33m"
                :bool "\27[35m"
                :null "\27[31m"
-               :punct "\27[90m"})
+               :punct "\27[90m"
+               :dim "\27[2m"
+               :ok "\27[32m"
+               :fail "\27[31m"})
 
 (fn c [color s use-color]
   (if use-color (.. (. colors color) s colors.reset) s))
@@ -109,6 +112,13 @@
       (: :gsub "\r" "\\r")
       (: :gsub "\t" "\\t")))
 
+(fn yaml-key [k]
+  "k as a mapping key that reads back as the same string; canonical integers
+such as response codes stay bare."
+  (if (and (k:match "^%d+$") (= k (tostring (math.tointeger (tonumber k))))) k
+      (yaml-needs-quotes? k) (.. "\"" (yaml-escape k) "\"")
+      k))
+
 (fn yaml [v ?indent ?use-color]
   (let [ind (or ?indent 0)
         uc (not= ?use-color false)
@@ -129,7 +139,7 @@
                    (.. "\n" (table.concat lines "\n")))
                  (let [lines []]
                    (each [_ k (ipairs (sorted-keys v))]
-                     (let [key (tostring k)
+                     (let [key (yaml-key (tostring k))
                            rendered (yaml (. v k) (+ ind 1) uc)]
                        (if (rendered:match "^\n")
                            (table.insert lines
@@ -147,4 +157,4 @@
       :boolean (c :bool (tostring v) uc)
       _ (c :null "null" uc))))
 
-{: pretty : yaml}
+{: pretty : yaml :paint c}

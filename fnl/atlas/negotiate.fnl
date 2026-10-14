@@ -30,4 +30,4 @@
       (table.sort types)
       (table.concat types ", "))))
 
-{: pick-content-type : pick-accept}
+{: pick-content-type : pick-accept : pick-media-type}

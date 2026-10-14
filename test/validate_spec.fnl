@@ -92,3 +92,29 @@
             (it "accepts anything for an empty schema"
                 (fn []
                   (assert.are.same [] (errors {} {:anything [1 2]}))))))
+
+(describe "validate edge cases"
+          (fn []
+            (it "treats validate.null as a present null"
+                (fn []
+                  (let [schema {:type "object"
+                                :required ["a"]
+                                :properties {:a {:type "string" :nullable true}}}]
+                    (assert.are.same [] (errors schema {:a validate.null}))
+                    (assert.are.same ["body.a: expected string, got null"]
+                                     (errors {:properties {:a {:type "string"}}}
+                                             {:a validate.null})))))
+            (it "does not crash on invalid UTF-8"
+                (fn []
+                  (assert.are.same []
+                                   (errors {:type "string" :minLength 1} "\255"))))))
+
+(describe "validate with odd schemas"
+          (fn []
+            (it "ignores bounds that are not numbers"
+                (fn []
+                  (assert.are.same []
+                                   (errors {:type "integer"
+                                            :maximum "18446744073709551615"
+                                            :minLength "x"}
+                                           5))))))

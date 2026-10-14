@@ -79,3 +79,17 @@
                                        "#c"
                                        "plain"]}]
                         (assert.are.same v (ayaml.parse (yaml v 0 false)))))))))
+
+(describe "yaml keys"
+          (fn []
+            (it "quotes keys that would not read back as the same string"
+                (fn []
+                  (let [ayaml (require :atlas.yaml)
+                        v {"a: b" 1
+                           "#c" 2
+                           "true" 3
+                           "" 4
+                           "- x" 5
+                           "plain" 6
+                           "007" 7}]
+                    (assert.are.same v (ayaml.parse (yaml v 0 false))))))))

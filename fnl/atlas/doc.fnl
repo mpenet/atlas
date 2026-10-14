@@ -1,6 +1,7 @@
 ;; ABOUTME: Renders human-readable help for an operation, in CLI or library form.
 ;; ABOUTME: The text backs --help in the CLI and the docstring of library ops.
 (local util (require :atlas.util))
+(local negotiate (require :atlas.negotiate))
 
 (fn params-of-kind [op-spec kind]
   (icollect [_ p (ipairs (or op-spec.parameters []))]
@@ -34,10 +35,8 @@
 
 (fn body-schema [request-body]
   (let [content request-body.content
-        schema (or (?. content :application/json :schema)
-                   (?. content :application/x-www-form-urlencoded :schema)
-                   (let [(k) (next (or content {}))]
-                     (when k (?. content k :schema))))]
+        media-type (negotiate.pick-media-type content)
+        schema (when media-type (?. content media-type :schema))]
     (when (and schema schema.properties)
       (let [required-set {}]
         (each [_ r (ipairs (or schema.required []))]
@@ -97,7 +96,7 @@ params heading and an optional body hint, which differ between CLI and library."
                      (table.insert parts "[-d JSON|@file|@-]"))
                    (when (> (length query-params) 0)
                      (table.insert parts "[--q.KEY=VAL ...]"))
-                   (.. "atlas <profile-or-schema> " (table.concat parts " "))))
+                   (.. "atlas op <profile-or-schema> " (table.concat parts " "))))
         :query-heading "Query params (--q.KEY=VAL):"
         :body-hint "  Use -d JSON, --body=@file, --body=@- for stdin, or --b.KEY=VAL for individual fields"})
 
@@ -146,9 +145,7 @@ params heading and an optional body hint, which differ between CLI and library."
                                (path method) (ptr:match "^(.+)/([^/]+)$")]
                            (if path
                                (.. (method:upper) " "
-                                   (pick-values 1
-                                                (-> path (: :gsub "~1" "/")
-                                                    (: :gsub "~0" "~"))))
+                                   (util.unescape-pointer path))
                                step.operationPath))
       "?"))
 

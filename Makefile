@@ -75,7 +75,7 @@ SOCKET_CORE_SRCS = luasocket.c timeout.c buffer.c io.c auxiliar.c compat.c \
 LUASEC_SRCS      = ssl.c context.c config.c options.c x509.c ec.c
 LYAML_SRCS       = yaml.c parser.c emitter.c scanner.c
 
-.PHONY: build binary check-binary check-globals clean deps fmt fmt-check install native-libs test
+.PHONY: build binary check-binary check-globals check-manifests clean deps fmt fmt-check install native-libs test
 .DELETE_ON_ERROR:
 
 deps:
@@ -92,7 +92,7 @@ $(LUA_TARGETS): $(LUA_DIR)/%.lua: $(FNL_DIR)/%.fnl
 	@mkdir -p $(dir $@)
 	$(FENNEL) --compile $< > $@
 
-test: build check-globals
+test: build check-globals check-manifests
 	rm -rf build/test-home && mkdir -p build/test-home
 	XDG_CACHE_HOME=$(CURDIR)/build/test-home/cache XDG_CONFIG_HOME=$(CURDIR)/build/test-home/config \
 	LUA_PATH="./$(LUA_DIR)/?.lua;./$(LUA_DIR)/?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" busted test/
@@ -165,6 +165,15 @@ binary: build native-libs
 	  --native-module $(NATIVE_BUILD)/libssl_lua.a \
 	  --native-module $(NATIVE_BUILD)/liblyaml_ext.a
 	strip bin/atlas-bin
+
+# Every module must be installed by the rockspec and bundled in the binary;
+# both lists are maintained by hand.
+check-manifests:
+	@missing=0; for f in $(FNL_SOURCES); do \
+	  m=$$(echo $$f | sed -e 's|^$(FNL_DIR)/||' -e 's|\.fnl$$||' -e 's|/|.|g'); \
+	  grep -q "\[\"$$m\"\]" atlas-oai-dev-1.rockspec || { echo "missing from rockspec: $$m"; missing=1; }; \
+	  grep -q "(require :$$m)" fnl/atlas-bin.fnl || { echo "missing from atlas-bin.fnl: $$m"; missing=1; }; \
+	done; exit $$missing
 
 # A name used before its definition compiles to a global lookup that is
 # nil at runtime; fail the build instead.

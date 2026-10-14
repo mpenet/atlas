@@ -1,6 +1,7 @@
 ;; ABOUTME: Builds callable API clients from OpenAPI 3.x schemas at runtime;
 ;; ABOUTME: each operation is invocable positionally or with a structured request.
 (local util (require :atlas.util))
+(local refs (require :atlas.refs))
 
 (local negotiate (require :atlas.negotiate))
 
@@ -34,13 +35,11 @@ tables override earlier ones regardless of case."
         (and d (not= d "")) d
         nil)))
 
-(fn make-operation [client-opts root-schema path path-item method op-spec]
-  (let [op-spec (doto (util.deref-deep root-schema op-spec)
+(fn make-operation [client-opts deref path path-item method op-spec]
+  (let [op-spec (doto (deref op-spec)
                   (tset :parameters
-                        (util.merge-parameters (util.deref-deep root-schema
-                                                                path-item.parameters)
-                                               (util.deref-deep root-schema
-                                                                op-spec.parameters))))
+                        (util.merge-parameters (deref path-item.parameters)
+                                               (deref op-spec.parameters))))
         param-names (util.extract-path-params path)
         n-path (length param-names)
         has-body? (not= nil op-spec.requestBody)
@@ -48,7 +47,8 @@ tables override earlier ones regardless of case."
         negotiated {:accept (negotiate.pick-accept op-spec)
                     :content-type content-type}
         base-url-for (fn [req]
-                       (.. client-opts.base-url
+                       ;; servers often end in / while paths start with one
+                       (.. (pick-values 1 (client-opts.base-url:gsub "/+$" ""))
                            (util.resolve-path path (or req.path {}))))
         url-for (fn [?req]
                   "Full request URL for {:path {name v} :query {}}."
@@ -138,13 +138,19 @@ Overrides must name declared variables and respect their enum."
   "Build an API client from an OpenAPI 3.x schema.
 
 schema — parsed schema table, local file path, or http(s):// URL
-?opts — {:base-url \"https://...\" :server-index n :server-vars {:name value} :headers {} :http-fn custom-fn}
+?opts — {:base-url \"https://...\" :server-index n :server-vars {:name value} :headers {} :http-fn custom-fn
+         :load-schema (fn [location ssl headers]) to fetch schema documents yourself}
 base-url defaults to schema.servers[1].url with :server-vars applied"
   (let [source-url (or (when (= (type schema) :string)
                          schema) (?. ?opts :source-url))
+        ssl (?. ?opts :ssl)
+        headers (?. ?opts :headers)
+        load (or (?. ?opts :load-schema) load-schema)
         schema (if (= (type schema) :string)
-                   (load-schema schema)
+                   (load schema ssl headers)
                    schema)
+        deref (refs.resolver schema
+                             {:base source-url :load #(load $ ssl headers)})
         servers (or schema.servers [])
         index (or (?. ?opts :server-index) 1)
         server (when (and (not (?. ?opts :base-url)) (> (length servers) 0))
@@ -167,11 +173,13 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
                      :ssl (?. ?opts :ssl)
                      :timeout (?. ?opts :timeout)}
         client {}]
-    (each [path methods (pairs (or schema.paths {}))]
-      (each [method op-spec (pairs methods)]
-        (when (and (= (type op-spec) :table) op-spec.operationId)
-          (tset client (util.camel->kebab op-spec.operationId)
-                (make-operation client-opts schema path methods method op-spec)))))
+    (each [path item (pairs (or schema.paths {}))]
+      (let [path-item (if (. item "$ref") (deref item) item)]
+        (each [method op-spec (pairs path-item)]
+          (when (and (= (type op-spec) :table) op-spec.operationId)
+            (tset client (util.camel->kebab op-spec.operationId)
+                  (make-operation client-opts deref path path-item method
+                                  op-spec))))))
     client))
 
 {:client client :load-schema load-schema :servers servers}

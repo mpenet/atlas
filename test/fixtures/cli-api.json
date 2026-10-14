@@ -1,0 +1,19 @@
+{"openapi": "3.0.0",
+ "info": {"title": "CLI test API", "version": "1"},
+ "servers": [{"url": "https://api.test"}],
+ "paths": {
+  "/pets": {
+   "get": {"operationId": "listPets", "summary": "List pets",
+           "parameters": [{"name": "status", "in": "query", "schema": {"enum": ["available", "sold"]}}],
+           "responses": {"200": {"description": "ok", "content": {"application/json": {}}}}},
+   "post": {"operationId": "addPet",
+            "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["name"],
+                                                                         "properties": {"name": {"type": "string"}}}}}},
+            "responses": {"201": {"description": "created", "content": {"application/json": {}}}}}},
+  "/pets/{id}": {
+   "get": {"operationId": "getPet",
+           "responses": {"200": {"description": "ok", "content": {"application/json": {}}}}}},
+  "/secure": {
+   "get": {"operationId": "getSecure",
+           "parameters": [{"name": "Authorization", "in": "header", "required": true}],
+           "responses": {"200": {"description": "ok"}}}}}}

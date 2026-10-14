@@ -212,3 +212,31 @@
                 (fn []
                   (assert.are.equal "https://h/x?api_key=<redacted>&page=2"
                                     (util.redact-url "https://h/x?api_key=SECRET&page=2"))))))
+
+(describe "json-pointer"
+          (fn []
+            (it "returns the whole value for an empty pointer"
+                (fn []
+                  (assert.are.same {:a 1} (util.json-pointer {:a 1} ""))))
+            (it "decodes ~1 before ~0"
+                (fn []
+                  (assert.are.equal 1
+                                    (util.json-pointer {"a/b" {"~1" 1}}
+                                                       "/a~1b/~01"))))
+            (it "indexes arrays 0-based but prefers a matching string key"
+                (fn []
+                  (assert.are.equal "b"
+                                    (util.json-pointer {:x ["a" "b"]} "/x/1"))
+                  (assert.are.equal "s" (util.json-pointer {"1" "s"} "/1"))))
+            (it "returns nil for missing paths"
+                (fn []
+                  (assert.is_nil (util.json-pointer {:a 1} "/a/b"))))))
+
+(describe "form-encode objects"
+          (fn []
+            (it "rejects object values instead of dropping them"
+                (fn []
+                  (let [(ok err) (pcall util.form-encode {:filter {:x 1}})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "'filter' is an object" 1 true)))))))

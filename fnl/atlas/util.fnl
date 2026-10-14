@@ -1,29 +1,23 @@
-;; ABOUTME: Shared helpers: $ref resolution, URL/form encoding, path templating,
-;; ABOUTME: reference resolution, header lookup and atlas directories.
-(fn resolve-ref [root ref-str]
-  (when (and root (ref-str:match "^#/"))
-    (var cur root)
-    (let [path (ref-str:sub 3)]
-      (each [part (path:gmatch "[^/]+")]
-        (when cur (set cur (. cur part)))))
-    cur))
+;; ABOUTME: Shared helpers: JSON pointers, URL/form encoding, path templating,
+;; ABOUTME: URL resolution, header lookup, secrets and atlas directories.
+(fn unescape-pointer [segment]
+  "A JSON Pointer segment with ~1 and ~0 unescaped (in that order)."
+  (pick-values 1 (-> segment (: :gsub "~1" "/") (: :gsub "~0" "~"))))
 
-(fn deref-deep [root obj ?seen]
-  (if (not= (type obj) :table)
-      obj
-      (let [ref (. obj "$ref")]
-        (if ref
-            (if (?. ?seen ref)
-                {}
-                (let [resolved (resolve-ref root ref)
-                      seen (collect [k v (pairs (or ?seen {}))]
-                             k
-                             v)]
-                  (tset seen ref true)
-                  (deref-deep root (or resolved {}) seen)))
-            (collect [k v (pairs obj)]
-              k
-              (deref-deep root v ?seen))))))
+(fn success? [status]
+  "True for 2xx HTTP statuses."
+  (and (= (type status) :number) (>= status 200) (< status 300)))
+
+(fn json-pointer [obj ptr]
+  "Value at JSON Pointer ptr (RFC 6901) in obj: \"\" is obj itself, ~1 and ~0
+are unescaped, numeric segments index arrays 0-based."
+  (accumulate [cur obj seg (ptr:gmatch "/([^/]*)")]
+    (when (= (type cur) :table)
+      (let [key (unescape-pointer seg)
+            n (when (key:match "^%d+$") (tonumber key))]
+        (if (and n (= nil (. cur key)))
+            (. cur (+ n 1))
+            (. cur key))))))
 
 (fn camel->kebab [s]
   (let [(s) (s:gsub "(%u+)(%u%l)" "%1-%2")
@@ -64,6 +58,15 @@
   "Quote s as a single POSIX shell word."
   (.. "'" (pick-values 1 (: (tostring s) :gsub "'" "'\\''")) "'"))
 
+(fn origin [url]
+  "scheme://host:port as the transport will connect, default port explicit.
+Parsed by luasocket so it agrees with where requests actually go."
+  (let [parsed ((. (require :socket.url) :parse) url)]
+    (when (and parsed parsed.scheme parsed.host)
+      (let [scheme (parsed.scheme:lower)]
+        (.. scheme "://" (parsed.host:lower) ":"
+            (or parsed.port (if (= scheme "https") "443" "80")))))))
+
 (fn header [headers name]
   "Case-insensitive header lookup."
   (let [wanted (name:lower)]
@@ -75,11 +78,13 @@
                (: (tostring s) :gsub "[^%w%-%.%_%~]"
                   (fn [c] (string.format "%%%02X" (string.byte c))))))
 
+(fn percent-decode [s]
+  "s with %XX escapes decoded; + is left as is (URI syntax)."
+  (pick-values 1 (s:gsub "%%(%x%x)" (fn [h] (string.char (tonumber h 16))))))
+
 (fn url-decode [s]
-  (pick-values 1
-               (-> s
-                   (: :gsub "+" " ")
-                   (: :gsub "%%(%x%x)" (fn [h] (string.char (tonumber h 16)))))))
+  "Decode form/query text: + is a space, then %XX escapes."
+  (percent-decode (pick-values 1 (s:gsub "+" " "))))
 
 (fn secret-name? [name]
   "True when a header or query parameter name looks like it carries a credential."
@@ -106,6 +111,10 @@ Array values repeat the key (OpenAPI style=form, explode=true)."
     (each [_ k (ipairs keys)]
       (let [v (. params k)
             vs (if (= (type v) :table) v [v])]
+        (when (and (= (type v) :table) (= nil (. v 1)) (not= nil (next v)))
+          (error (.. "'" (tostring k)
+                     "' is an object; query and form values must be scalars or lists")
+                 0))
         (each [_ x (ipairs vs)]
           (table.insert parts (.. (url-encode k) "=" (url-encode x))))))
     (table.concat parts "&")))
@@ -168,7 +177,6 @@ with the same name and location."
 {: camel->kebab
  : extract-path-params
  : resolve-path
- : deref-deep
  : url-encode
  : url-decode
  : form-encode
@@ -181,4 +189,9 @@ with the same name and location."
  : replace-all
  : shell-quote
  : secret-name?
- : redact-url}
+ : redact-url
+ : origin
+ : json-pointer
+ : unescape-pointer
+ : success?
+ : percent-decode}

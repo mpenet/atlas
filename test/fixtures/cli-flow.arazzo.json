@@ -1,0 +1,9 @@
+{"arazzo": "1.0.0", "info": {"title": "flows", "version": "1"},
+ "sourceDescriptions": [{"name": "api", "type": "openapi", "url": "./cli-api.json"}],
+ "workflows": [{"workflowId": "fetchPet",
+                "inputs": {"type": "object", "properties": {"id": {"type": "string"}}},
+                "steps": [{"stepId": "get", "operationId": "getPet",
+                           "parameters": [{"in": "path", "name": "id", "value": "$inputs.id"}],
+                           "successCriteria": [{"condition": "$statusCode == 200"}],
+                           "outputs": {"name": "$response.body#/name"}}],
+                "outputs": {"name": "$steps.get.outputs.name"}}]}

@@ -96,6 +96,14 @@ support a module-level setting, so it is restored afterwards."
               (table.unpack result 2 result.n)
               (error (. result 2) 0))))))
 
+(fn check-header [name value]
+  "Raise for names that aren't HTTP tokens and values with CR, LF or NUL,
+which would let a value inject extra headers."
+  (when (not (: (tostring name) :match "^[!#$%%&'*+%-.^_`|~%w]+$"))
+    (error (string.format "invalid header name %q" (tostring name)) 0))
+  (when (: (tostring value) :find "[\r\n%z]")
+    (error (string.format "header '%s' contains a line break or NUL" name) 0)))
+
 (fn encode-request [req]
   "Wire form of a request: (url payload headers), with the content type
 replaced when body encoding chose one."
@@ -106,9 +114,53 @@ replaced when body encoding chose one."
                     (values k v)))]
     (when content-type
       (tset headers :content-type content-type))
+    (each [k v (pairs headers)]
+      (check-header k v))
     (values (util.append-query req.url (or req.query {})) payload headers)))
 
-(fn request [req]
+(local redirect-status {301 true 302 true 303 true 307 true 308 true})
+
+(fn redirect-target [req resp]
+  "The request to send next for a followable redirect, or nil. Only GET and
+HEAD are followed; https never goes to http; credential headers are dropped
+when the origin changes."
+  (let [location (util.header resp.headers "location")
+        method (: (or req.method "GET") :upper)]
+    (when (and (. redirect-status resp.status) location
+               (or (= method "GET") (= method "HEAD")))
+      (let [from (util.append-query req.url (or req.query {}))
+            target ((. (require :socket.url) :absolute) from location)
+            same-origin? (= (util.origin target) (util.origin from))]
+        (when (not (and (: (from:lower) :match "^https:")
+                        (: (target:lower) :match "^http:")))
+          (doto (collect [k v (pairs req)] k v)
+            (tset :url target)
+            (tset :query nil)
+            (tset :headers (if same-origin?
+                               req.headers
+                               (collect [k v (pairs (or req.headers {}))]
+                                 (when (not (util.secret-name? k))
+                                   (values k v)))))))))))
+
+(fn follow-redirects [send req]
+  "Call send, following redirects (at most 5, then an error) as
+redirect-target allows."
+  (var current req)
+  (var resp (send req))
+  (var hops 0)
+  (var next-req (redirect-target current resp))
+  (while next-req
+    (when (>= hops 5)
+      (error (.. "too many redirects from " (util.redact-url req.url)) 0))
+    (set hops (+ hops 1))
+    (set current next-req)
+    (set resp (send current))
+    (set next-req (redirect-target current resp)))
+  resp)
+
+(fn send [req]
+  "One HTTP exchange; luasocket's own redirect handling is disabled because it
+re-sends every header to whatever host the Location names."
   (let [(url payload headers) (encode-request req)
         requester (if (url:match "^https://") https socket-http)
         body-out []
@@ -119,6 +171,7 @@ replaced when body encoding chose one."
       (tset headers :content-length (tostring (length payload))))
     (tset req-table :url url)
     (tset req-table :method req.method)
+    (tset req-table :redirect false)
     (tset req-table :headers headers)
     (tset req-table :source (when payload (ltn12.source.string payload)))
     (tset req-table :sink (ltn12.sink.table body-out))
@@ -129,6 +182,9 @@ replaced when body encoding chose one."
                              (util.redact-url url) (tostring code)))
       (decode-response code resp-headers (table.concat body-out)))))
 
+(fn request [req]
+  (follow-redirects send req))
+
 (fn fetch-text [location ?opts]
   "Return the text at location: an http(s):// URL or a local file path.
 ?opts: {:ssl {} :headers {}}"
@@ -137,7 +193,7 @@ replaced when body encoding chose one."
                            :url location
                            :headers (?. ?opts :headers)
                            :ssl (?. ?opts :ssl)})]
-        (assert (and (>= resp.status 200) (< resp.status 300))
+        (assert (util.success? resp.status)
                 (string.format "HTTP %s fetching %s" resp.status location))
         resp.raw)
       (let [(f err) (io.open location :r)]
@@ -147,4 +203,9 @@ replaced when body encoding chose one."
           (f:close)
           content))))
 
-{: request : encode-request : fetch-text : encode-body : decode-response}
+{: request
+ : follow-redirects
+ : encode-request
+ : fetch-text
+ : encode-body
+ : decode-response}

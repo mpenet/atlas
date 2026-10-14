@@ -1,7 +1,6 @@
 ;; ABOUTME: Wraps an http-fn to follow Link rel="next" pagination on GET
 ;; ABOUTME: requests, concatenating JSON array pages into one response.
 (local json (require :lunajson))
-(local socket-url (require :socket.url))
 (local util (require :atlas.util))
 
 (fn link-params-rel [params]
@@ -23,14 +22,6 @@ URLs are delimited by <>, so commas inside them are safe."
                 (= rel "next"))
           url)))))
 
-(fn origin [url]
-  "scheme://host:port as the transport will connect, default port explicit."
-  (let [parsed (socket-url.parse url)]
-    (when (and parsed parsed.scheme parsed.host)
-      (let [scheme (parsed.scheme:lower)]
-        (.. scheme "://" (parsed.host:lower) ":"
-            (or parsed.port (if (= scheme "https") "443" "80")))))))
-
 (fn resolve-next [current ref]
   (if (= (ref:sub 1 1) "?")
       (.. (current:match "^[^?#]*") ref)
@@ -38,7 +29,7 @@ URLs are delimited by <>, so commas inside them are safe."
 
 (fn array-text [resp]
   "Text between the outer brackets of a 2xx JSON array response, or nil."
-  (when (and (>= resp.status 200) (< resp.status 300) resp.raw)
+  (when (and (util.success? resp.status) resp.raw)
     (resp.raw:match "^%s*%[(.*)%]%s*$")))
 
 (fn wrap [http-fn opts]
@@ -62,7 +53,7 @@ survive. opts: {:max-pages n} (default 25)"
                 (let [link (next-link resp.headers)
                       target (when link (resolve-next url link))]
                   (if (or (not target) (>= (length chunks) max-pages)
-                          (not= (origin target) (origin first-url)))
+                          (not= (util.origin target) (util.origin first-url)))
                       (set done true)
                       (let [page (http-fn {:method "GET"
                                            :url target
