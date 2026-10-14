@@ -218,7 +218,7 @@ $(NATIVE_BUILD)/libatlas_curl.a: c/atlas_curl.c $(NATIVE_STAMP)
 	$(CC) -O2 -Wall -DCURL_STATICLIB -I$(LUA_INC) -I$(CURL_PREFIX)/include -c c/atlas_curl.c -o $(NATIVE_BUILD)/atlas_curl.o
 	ar rcs $@ $(NATIVE_BUILD)/atlas_curl.o
 
-binary: build native-libs
+binary: $(LUA_TARGETS) native-libs
 	LUA_PATH="./$(LUA_DIR)/?.lua;./$(LUA_DIR)/?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" \
 	CC_OPTS="$(CURL_PREFIX)/lib/libcurl.a $(OPENSSL_LDFLAGS) $(ZLIB_LDFLAGS) $(LIBYAML_LDFLAGS) $(SYSTEM_LDFLAGS) $(STATIC_LDFLAGS)" \
 	$(FENNEL) --compile-binary fnl/atlas-bin.fnl \
