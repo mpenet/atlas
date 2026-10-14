@@ -1,14 +1,23 @@
-# Atlas CLI
+# CLI reference
 
-A standalone OpenAPI 3.x CLI. Point it at a schema or named profile and call operations directly from the shell.
+Every command, option and configuration key of `atlas`. For a walkthrough, start with the [README](../README.md) and the [guide](guide.md); workflows have [their own page](arazzo.md).
+
+- [Installation](#installation)
+- [Commands](#commands)
+- [Options](#options)
+- [Requests](#requests)
+- [Responses](#responses)
+- [Configuration](#configuration)
+- [Authentication](#authentication)
+- [TLS and proxies](#tls-and-proxies)
+- [Servers](#servers)
+- [Schema cache](#schema-cache)
+- [Shell completion](#shell-completion)
+- [Exit codes](#exit-codes)
 
 ## Installation
 
-Two options:
-
-### Option 1 — Standalone binary (recommended)
-
-No Lua runtime required. The binary embeds Lua, luasocket, libcurl, libyaml and OpenSSL statically.
+### Standalone binary
 
 Download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases) (`atlas-macos-arm64`, `atlas-macos-x86_64`, `atlas-linux-x86_64` or `atlas-linux-arm64`), then install it:
 
@@ -23,815 +32,426 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 gh attestation verify atlas-macos-arm64 --repo mpenet/atlas
 ```
 
-The Linux binaries depend only on glibc. HTTPS needs the system's CA certificates (the `ca-certificates` package on minimal Linux images) — see [TLS verification and proxies](#tls-verification-and-proxies).
+The binary embeds Lua, luasocket, libcurl, libyaml and OpenSSL. The Linux binaries depend only on glibc. HTTPS needs the system's CA certificates (the `ca-certificates` package on minimal Linux images); see [TLS and proxies](#tls-and-proxies).
 
-To build the binary from source instead:
+### From source
 
 ```sh
-make deps     # install luarocks dependencies (fennel, lunajson, luasocket, lyaml, busted)
-make binary   # produces bin/atlas-bin
-make check-binary  # runs it with Lua's module paths emptied and checks it links only system libraries
-make install       # installs bin/atlas-bin as /usr/local/bin/atlas (PREFIX=... to change)
+# fennel, lunajson, luasocket, lyaml, busted
+make deps
+# produces bin/atlas-bin
+make binary
+# runs it with Lua's module paths emptied, and checks it links only system libraries
+make check-binary
+# installs bin/atlas-bin as /usr/local/bin/atlas (PREFIX=... and DESTDIR=... to change)
+make install
 ```
 
-Requires `lua` (5.4+), `fennel`, `openssl`, `libyaml`, `pkg-config` and `curl` to build: the build downloads the libcurl sources, checks them against a pinned checksum and links them in statically.
+Building needs `lua` (5.4 or later), `fennel`, `openssl`, `libyaml`, `pkg-config` and `curl`: the build downloads the libcurl sources, checks them against a pinned checksum and links them in statically.
 
-### Option 2 — Lua script (requires a Lua runtime)
+### With luarocks
 
-Installs `atlas` as a Lua script run by your Lua interpreter, together with the library. luarocks installs the runtime dependencies (lunajson, luasocket, lyaml; lyaml needs the libyaml headers) and compiles the libcurl binding, which needs the libcurl headers (`libcurl4-openssl-dev` on Debian/Ubuntu, `libcurl-devel` on Fedora; macOS ships them) and compiles the Fennel sources, which needs the `fennel` executable on `PATH`.
+Installs `atlas` as a Lua script, together with the [library](library.md):
 
 ```sh
 luarocks install atlas-oai
 ```
 
-From a checkout:
+luarocks installs the Lua dependencies (lunajson, luasocket, lyaml) and compiles the libcurl binding, which needs the libcurl headers (`libcurl4-openssl-dev` on Debian and Ubuntu, `libcurl-devel` on Fedora; macOS ships them) and the libyaml headers. From a checkout: `luarocks make atlas-oai-dev-1.rockspec`.
 
-```sh
-luarocks make atlas-oai-dev-1.rockspec
-```
-
-## Synopsis
+## Commands
 
 ```
-atlas op  <schema-or-profile> [operation] [path-params...] [options]
-atlas az  <name-or-file> [workflow-id] [path-params...] [options]
-atlas arazzo <name-or-file> [workflow-id] [path-params...] [options]   # alias for az
-atlas profile <list|show> [name]
+atlas op <profile-or-schema> [operation] [path-params...] [options]
+atlas az <name-or-file> [workflow-id] [path-params...] [options]
+atlas profile list
+atlas profile show <name>
+atlas profile import-restish [file] [--dry-run]
 atlas auth <profile> [--logout]
 atlas completion <fish|bash|zsh>
+atlas --version
 ```
 
-## Basic usage
+| Command | Description |
+|---------|-------------|
+| `op` | Call an operation. The first argument is a profile name, or a spec's URL or file path (JSON or YAML). Without an operation, lists the operations. |
+| `az` | Run an [Arazzo workflow](arazzo.md) (`arazzo` is an alias). Without a workflow id, lists the workflows. |
+| `profile list` | Profiles with the schema each one uses, inherited ones included. |
+| `profile show` | A profile as atlas uses it, `extends` resolved. |
+| `profile import-restish` | Adds the APIs of a Restish configuration as profiles; see [Moving from Restish](guide.md#moving-from-restish). |
+| `auth` | Authenticates a profile now: for static credentials and external tools, prints the headers that would be sent; for OAuth, runs the flow again. `--logout` deletes the cached token. |
+| `completion` | Prints the completion script for a shell; see [Shell completion](#shell-completion). |
+| `--version` | Prints atlas's version and the libcurl/OpenSSL build it uses. |
+
+Operation names are the spec's `operationId`s in lowercase, dash-separated words: `getPetById` → `get-pet-by-id`, `projects/list_cards` → `projects-list-cards`. An operation without `operationId` is named after its method and path: `GET /pets/{petId}` → `get-pets-pet-id`. When two operationIds would get the same name, the first by path keeps it and the other is named after its method and path.
+
+## Options
+
+Options go anywhere after the command. `--name=value` and `--name value` are equivalent. `--` ends the options: everything after it is positional (for a path parameter starting with `-`). Unknown options are an error.
+
+### Operations (`op`)
+
+| Option | Description |
+|--------|-------------|
+| `--list` | List the operations with their summaries |
+| `--help` | Show an operation's documentation (or list the operations) |
+| `-d VALUE`, `--body=VALUE` | Request body: JSON or YAML inline, `@file`, or `@-` for stdin; see [Body](#body) |
+| `--b.KEY=VAL`, `--body.KEY=VAL` | One body field; dotted keys build nested objects (`--b.disk.size=10`) |
+| `--q.KEY=VAL`, `--query.KEY=VAL` | Query parameter; repeating a key sends a list (`--q.tag=a --q.tag=b`) |
+| `--h.KEY=VAL`, `--header.KEY=VAL` | Request header; repeating a name joins the values with `, ` |
+| `--select=PATH` | Print only part of the response; see [Selecting](#selecting) |
+| `--output=FORMAT` | `json` (default), `yaml`, `raw`, `status` or `headers`; see [Output formats](#output-formats) |
+| `--no-color` | Never colour the output (colours are only used on a terminal anyway) |
+| `-v`, `--verbose` | Log the request and the response status and headers on stderr |
+| `--dry-run` | Print the request instead of sending it; credentials redacted |
+| `--curl` | Print an equivalent `curl` command instead of sending (credentials included) |
+| `--no-validate` | Send even when the request doesn't match the spec; see [Checks](#checks-before-sending) |
+| `--ignore-status` | Treat 4xx and 5xx responses as successes: print the body on stdout, exit 0 |
+| `--timeout=N` | Give up on a request after N seconds |
+| `--retry=N` | Retries for 408, 429, 500, 502, 503 and 504 responses and network errors (default 2); see [Retries](#retries) |
+| `--retry-unsafe` | Also retry POST, PUT, PATCH and DELETE |
+| `--retry-max-wait=N` | Longest wait between retries, in seconds (default 300) |
+| `--max-pages=N` | Most pages to follow; see [Pagination](#pagination) (default 25) |
+| `--no-paginate` | Return the first page only |
+| `--base-url=URL` | Send requests to URL instead of the spec's server |
+| `--servers` | List the spec's servers and their variables; see [Servers](#servers) |
+| `--server-index=N` | Use the spec's Nth server (default 1) |
+| `--server.NAME=VAL` | Set a server URL variable |
+| `--ssl.KEY=VAL` | TLS option: `cafile`, `capath`, `certificate`, `key`, `verify` (`--ssl.verify=none` skips verification) |
+| `--reload` | Fetch the spec again instead of using the cache |
+| `--cache-ttl=N` | How long a fetched spec stays cached, in seconds (default 3600) |
+
+### Workflows (`az`)
+
+`az` takes `--help`, `--output`, `--no-color`, `-v`, `--no-validate`, `--timeout`, the retry options, `--base-url`, `--server-index`, `--server.` and `--ssl.` as above; `-d` and `--b.` set workflow inputs. And:
+
+| Option | Description |
+|--------|-------------|
+| `-i KEY=VAL`, `--i.KEY=VAL`, `--input.KEY=VAL` | Workflow input |
+| `--inputs=VALUE` | All inputs as a JSON or YAML object, inline or `@file` |
+| `--profile=NAME` | Profile to authenticate with |
+| `--arazzo-output=MODE` | `final` (default), `steps`, `progress` or `full`; see [Output modes](arazzo.md#output-modes) |
+| `--max-gotos=N` | Most jumps to a single step before the workflow aborts (default 50) |
+
+`--dry-run` and `--curl` are refused: later steps depend on real responses. Use `-v` to log every request.
+
+### Others
+
+| Option | Commands | Description |
+|--------|----------|-------------|
+| `--logout` | `auth` | Delete the profile's cached token |
+| `--dry-run` | `profile import-restish` | Show the profiles that would be added |
+
+## Requests
+
+### Path parameters
+
+Path parameters are positional, in the order they appear in the path, and sent exactly as typed (percent-encoded). `--help` shows them.
 
 ```sh
-# list all operations
-atlas op https://petstore3.swagger.io/api/v3/openapi.json --list
-
-# show documentation for an operation
-atlas op https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id --help
-
-# call an operation
-atlas op https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42
-
-# query parameters
-atlas op https://petstore3.swagger.io/api/v3/openapi.json find-pets-by-status --q.status=available
-
-# verbose — print status line and response headers
-atlas op https://petstore3.swagger.io/api/v3/openapi.json get-pet-by-id 42 -v
+atlas op petstore get-pet-by-id 7
 ```
 
-Operations are named after their `operationId` in kebab-case (`getPetById` → `get-pet-by-id`); one without `operationId` is named after its method and path (`GET /pets/{petId}` → `get-pets-pet-id`).
-
-## Options reference
-
-| Flag | Description |
-|------|-------------|
-| `--list` | List all operations with summaries |
-| `--help` | Show documentation for an operation (or list all if no operation given) |
-| `--body=JSON\|@file\|@-` | Request body — inline JSON, file path, or stdin |
-| `-d JSON\|@file\|@-` | Alias for `--body` |
-| `--body.KEY=VAL`, `--b.KEY=VAL` | Set individual body fields — supports deep dot paths: `--b.a.b.c=1` |
-| `--query.KEY=VAL`, `--q.KEY=VAL` | Query parameter; repeating the same key sends a list (`--q.tag=a --q.tag=b` → `?tag=a&tag=b`) |
-| `--header.KEY=VAL`, `--h.KEY=VAL` | Per-request header; repeating the same name joins the values with `, ` |
-| `--timeout=N` | Timeout in seconds |
-| `--max-pages=N` | Follow up to N pages of `Link: <…>; rel="next"` pagination (default 25) |
-| `--no-paginate` | Return only the first page |
-| `--retry=N` | Retry 408/429/500/502/503/504 responses and network errors up to N times (default 2). Honors `Retry-After`, otherwise backs off 1s, 2s, 4s… Only GET/HEAD/OPTIONS unless `--retry-unsafe` |
-| `--retry-unsafe` | Also retry POST/PUT/PATCH/DELETE (only for idempotent endpoints) |
-| `--retry-max-wait=N` | Cap on a single wait between retries, in seconds (default 300) |
-| `--base-url=URL` | Override the base URL from the schema |
-| `--servers` | List the schema's servers with their variables (default, allowed values, value in effect); `*` marks the server in use |
-| `--server-index=N` | Use the schema's Nth server instead of the first, e.g. the second of several environments |
-| `--server.NAME=VAL` | Set a variable in the schema's server URL, e.g. `--server.zone=de-fra-1` for `https://api-{zone}.example.com`. Checked against the variable's `enum`; unset variables use their `default` |
-| `--output=FORMAT` | Output format: `json` (default), `yaml`, `raw`, `status`, `headers` |
-| `--select=PATH` | Extract a value from the response — see [Response selection](#response-selection) |
-| `--no-color` | Disable colored JSON output |
-| `-v`, `--verbose` | Print request details and response headers; for Arazzo, enables live step progress |
-| `--reload` | Bypass the schema cache and re-fetch |
-| `--dry-run` | Print the request (method, URL, headers, body) instead of sending it. Credentials are redacted. Auth and signing still run, so the output shows what would be sent |
-| `--curl` | Print an equivalent, runnable `curl` command instead of sending (credentials included) |
-| `--no-validate` | Send the request even when atlas finds problems: missing required query/header parameters, or a body that doesn't match the schema |
-| `--ignore-status` | Treat 4xx/5xx responses like successes: print the body to stdout with the chosen `--output`, exit 0 |
-| `--cache-ttl=N` | Schema cache TTL in seconds (default: 3600) |
-| `--` | End of options: everything after is positional (e.g. a path param starting with `-`) |
-
-Unknown options are rejected with an error rather than ignored.
-
-## Checks before sending
-
-Before sending, atlas compares the request with the operation's declared parameters:
-
-- A required query parameter or header that is missing is an error, naming the flag to add (e.g. `--q.zone=…`). Headers count wherever they come from: `--h.`, the profile, or auth.
-- A query parameter the operation doesn't declare (often a typo) prints a warning listing the declared names; the request is still sent.
-- For JSON operations, the body is checked against the request schema: required properties, types, `enum`, nested objects and arrays, `additionalProperties: false`, length/range/item-count bounds, `allOf`/`anyOf`/`oneOf`. Errors name the exact place, e.g. `body.instance-type: required` or `body.disks[0].size: expected integer, got string`. (`pattern` and `format` are not checked.)
-
-All problems are reported together, and nothing is sent. `--no-validate` sends anyway, for specs that are stricter or looser than the real API.
-
-## Request body
-
-Three ways to supply a body:
+### Query parameters and headers
 
 ```sh
-# inline JSON
-atlas op myapi add-pet -d '{"name":"Rex","status":"available"}'
+atlas op petstore find-pets-by-status --q.status=available
+atlas op myapi list-items --q.tag=a --q.tag=b --h.X-Request-Id=42
+```
+
+A profile's `query` and `headers` are added to every request; values given on the command line win.
+
+### Body
+
+```sh
+# inline JSON (or YAML)
+atlas op myapi add-pet -d '{"name": "Rex", "status": "available"}'
 
 # from a file
-atlas op myapi add-pet --body=@pet.json
+atlas op myapi add-pet -d @pet.json
 
 # from stdin
 cat pet.json | atlas op myapi add-pet -d @-
 
-# individual fields (typed from the request body schema)
+# field by field
 atlas op myapi add-pet --b.name=Rex --b.status=available --b.age=3
 
-# nested fields — dot-separated path, intermediate objects created and merged
-atlas op myapi create-vm --b.instance-type.id=abc123 --b.disk-size=10
+# nested fields
+atlas op myapi create-vm --b.instance-type.id=abc123 --b.disk.size=10
 ```
 
-How `-d`/`--body` is read depends on the operation's request content type:
+`--b.` fields are merged: `--b.a.b=1 --b.a.c=2` gives `{"a": {"b": 1, "c": 2}}`. With `-d` as well, the fields are merged over its object.
 
-- JSON, form (`application/x-www-form-urlencoded`) and `multipart/form-data` operations accept JSON or YAML.
-- Any other type (`application/octet-stream`, `text/plain`, XML, images, …) is sent byte-for-byte: `atlas op myapi upload-image -d @photo.png`.
+Field values take their type from the request schema: a `string` property keeps `007` as `"007"`, `integer` and `number` properties become numbers, `boolean` takes `true` or `false`, and `array` and `object` properties take JSON (`--b.tags='["a","b"]'`). A field the schema doesn't describe follows JSON's rules: `42`, `-1.5`, `true` and `false` become numbers and booleans, anything else stays a string.
 
-For `multipart/form-data` operations, a field whose value starts with `@` becomes a file part (file name taken from the path); use `@@` for a literal leading `@`:
+How `-d` is read depends on the operation's request content type:
 
-```sh
-atlas op myapi upload-form --body.description=avatar --body.file=@photo.png
-```
+- JSON, form (`application/x-www-form-urlencoded`) and `multipart/form-data` operations take JSON or YAML.
+- Any other type (`application/octet-stream`, `text/plain`, XML, images…) is sent byte for byte: `atlas op myapi upload-image -d @photo.png`.
 
-`--body.KEY=VAL` flags are deep-merged: `--body.a.b=1 --body.a.c=2` produces `{"a":{"b":1,"c":2}}`. When combined with `--body=…`, the fields are merged over that JSON object.
+For `multipart/form-data`, a field whose value starts with `@` becomes a file part, named after the file: `--b.file=@photo.png`. Write `@@` for a value that starts with a literal `@`.
 
-Field values are typed using the operation's request body schema: a `string` property keeps `007` as `"007"`, `integer`/`number` properties become numbers, `boolean` accepts `true`/`false`, and `array`/`object` properties take JSON. Fields without a schema follow JSON literal rules: `42`, `-1.5`, `true` and `false` are converted; anything else, including `007` or `0x10`, stays a string.
+JSON bodies are encoded with object keys in sorted order, integers exactly and decimals in their shortest exact form, so the same command always sends the same bytes.
 
-Path parameters are always sent exactly as typed, percent-encoded.
+### Checks before sending
 
-## Pagination
+Before sending, atlas compares the request with the operation's description:
 
-For GET operations that return a JSON array with a `Link: <…>; rel="next"` header, atlas follows the next links and returns all items as one array. Each page is requested with the same headers (auth included); links to another origin (scheme, host or port) are not followed. It stops after `--max-pages` pages (default 25, also settable as `max-pages` in a profile or the config). If a later page fails, the items collected so far are printed and a warning names the failing status. `--no-paginate` returns the first page as-is. Arazzo workflows never paginate, so step expressions keep referring to a single response.
+- A required query parameter or header that is missing is an error naming the option to add (`--q.status=…`). Headers count wherever they come from: `--h.`, the profile, or authentication.
+- A query parameter the operation doesn't declare (often a typo) prints a warning listing the declared ones; the request is still sent.
+- A JSON body is checked against the request schema: required properties, types, `enum`, nested objects and arrays, `additionalProperties: false`, lengths, ranges and item counts, `allOf`, `anyOf` and `oneOf`. Errors name the exact place, such as `body.disks[0].size: expected integer, got string`. `pattern` and `format` are not checked.
 
-## Response selection
+All problems are reported together and nothing is sent. `--no-validate` sends anyway, for specs stricter or looser than the API they describe.
 
-`--select` extracts a nested value from the JSON response using a path expression.
+### Retries
 
-| Syntax | Meaning |
+Responses with status 408, 429, 500, 502, 503 or 504, and network errors, are retried up to `--retry` times (default 2), for GET, HEAD and OPTIONS requests only unless `--retry-unsafe` is given. atlas waits as long as the response's `Retry-After` header asks, at most `--retry-max-wait` seconds, and otherwise 1, 2, 4… seconds. An authentication failure is never retried.
+
+### Pagination
+
+When a GET response is a JSON array and has a `Link: <…>; rel="next"` header, atlas follows the links and prints all items as one array. Every page is requested with the same headers and credentials; a link to another origin (scheme, host or port) is not followed. atlas stops after `--max-pages` pages (default 25). If a later page fails, the items collected so far are printed with a warning naming the failing status. `--no-paginate` prints the first page as it is.
+
+## Responses
+
+### Output formats
+
+| `--output` | Prints |
+|------------|--------|
+| `json` | The body as indented JSON with sorted keys (the default) |
+| `yaml` | The body as YAML |
+| `raw` | The body exactly as received; with `--select`, the selected value (objects and arrays as JSON, strings as they are) |
+| `status` | The status code |
+| `headers` | The response headers, one `name: value` per line, sorted |
+
+Output is coloured only when stdout is a terminal, and never when the `NO_COLOR` environment variable is set or `--no-color` is given. When a successful response has no body, `HTTP <status>` is printed on stderr instead.
+
+A 4xx or 5xx response is printed on stderr, after an `HTTP <status>` line, and atlas exits with `4` or `5`; `--ignore-status` prints it like a success instead.
+
+### Selecting
+
+`--select` prints part of a JSON response:
+
+| Syntax | Selects |
 |--------|---------|
-| `.key` | Object field |
-| `[N]` | Array index (0-based) |
-| `[]` | Iterate all array elements |
-| `.{f1,f2}` | Pick fields from an object or each element of an array |
-
-Examples:
+| `.key` | A field of an object |
+| `[N]` | Element N of an array, from 0 |
+| `[]` | Every element of an array; the rest of the path applies to each |
+| `{a,b}` | Fields `a` and `b` of an object, or of each object of an array |
 
 ```sh
-# scalar field
-atlas op myapi get-inventory --select=.available
-
-# nested field
-atlas op myapi get-pet-by-id 42 --select=.category.name
-
-# first element of an array
-atlas op myapi find-pets-by-status --select=.pets[0].name
-
-# all names in an array
-atlas op myapi find-pets-by-status --select=.pets[].name
-
-# pick fields from each object in an array
-atlas op myapi find-pets-by-status --select=.pets[].{id,name,status}
-
-# chained
-atlas op myapi find-pets-by-status --select=.pets[].category.name
+atlas op petstore get-pet-by-id 7 --select .category.name
+atlas op petstore find-pets-by-status --q.status=sold --select '[0].name'
+atlas op petstore find-pets-by-status --q.status=sold --select '[].name'
+atlas op petstore find-pets-by-status --q.status=sold --select '[].{id,name}'
 ```
 
-When `--select` matches multiple values (via `[]`), all matches are printed one per line. If the path does not match, nothing is printed and exit status is 0.
+The selection is printed in the chosen `--output` format; `[]` gives an array. A path that matches nothing prints nothing (and `HTTP <status>` on stderr), and atlas exits 0.
 
-## Output formats
+### Verbose output
 
-| `--output` | Description |
-|-----------|-------------|
-| `json` | Pretty-printed JSON with color (default) |
-| `yaml` | Pretty-printed YAML |
-| `raw` | `tostring()` of the body — useful for plain-text responses |
-| `status` | HTTP status code only |
-| `headers` | Response headers only, one per line (`key: value`) |
-
-HTTP 4xx/5xx responses are always printed to stderr and exit with status 1.
-
-## Verbose mode
-
-`-v` / `--verbose` enables full request and response detail across both regular calls and Arazzo workflows:
-
-- **Regular calls**: logs `> METHOD URL`, request headers, and body to stderr before the response; then prints the status line and response headers.
-- **Arazzo**: enables live step progress on stderr (see [Arazzo output modes](#output-modes-1)) and logs each HTTP request as it is made.
+`-v` logs, on stderr, each request (`> METHOD URL` with the query, then its headers and body) and, once the response arrives, its status, timing and headers:
 
 ```
-> GET https://api.example.com/pets/42
-> accept: application/json
-HTTP 200  0.124s
+> GET https://petstore3.swagger.io/api/v3/pet/7
+> accept: application/json, application/xml
+> authorization: Bearer <redacted>
+HTTP 200  0.475s
 content-type: application/json
 ...
-
-{ ... body ... }
 ```
 
-## Profiles
+Credentials are redacted: every header and query parameter whose name contains `auth`, `cookie`, `key`, `token`, `secret`, `sig` or `passw` (so `Authorization`, `X-API-Key`, `api_key`, `X-Signature`…). The scheme of an `Authorization` header stays visible (`Bearer <redacted>`).
 
-Save named configurations in `~/.config/atlas/config.json` (`$XDG_CONFIG_HOME/atlas/config.json` when `XDG_CONFIG_HOME` is set):
+### Dry runs
+
+`--dry-run` prints the request that would be sent, without sending it or authenticating: the header authentication would add shows as `<redacted>`. `--curl` prints a runnable `curl` command instead; it does authenticate, and its output contains the credentials.
+
+## Configuration
+
+The configuration is `~/.config/atlas/config.json` (`$XDG_CONFIG_HOME/atlas/config.json` when `XDG_CONFIG_HOME` is set):
 
 ```json
 {
+  "output": "yaml",
   "profiles": {
     "petstore": {
       "schema": "https://petstore3.swagger.io/api/v3/openapi.json",
       "timeout": 30
-    },
-    "myapi": {
-      "schema": "https://api.example.com/openapi.json",
-      "base-url": "https://staging.example.com",
-      "headers": { "authorization": "Bearer <token>" },
-      "timeout": 30
     }
+  },
+  "arazzo": {
+    "pets": {"file": "/home/me/workflows/petstore.arazzo.yaml", "profile": "petstore"}
   }
 }
 ```
 
-Use a profile name instead of a schema URL:
+Settings apply in this order, first found wins: command-line option, profile, top level of the configuration, default. File paths in the configuration are used as written: `~` is not expanded, and relative paths are relative to the current directory.
 
-```sh
-atlas op petstore --list
-atlas op petstore get-pet-by-id 42
-atlas op myapi add-pet -d '{"name":"Rex"}'
-```
+### Top level
 
-### Global config fields
-
-Top-level fields in `config.json` apply to all invocations as defaults:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `no-color` | bool | Disable colored output globally |
-| `output` | string | Default output format (`json`, `yaml`, `raw`, `status`, `headers`) |
-| `verbose` | bool | Always print status line and response headers |
-| `timeout` | number | Default timeout in seconds |
+| Key | Type | Description |
+|-----|------|-------------|
+| `profiles` | object | Profiles by name; see below |
+| `arazzo` | object | Named workflow documents; see [Arazzo](arazzo.md#named-workflow-documents) |
+| `output` | string | Default output format |
+| `no-color` | boolean | Never colour the output |
+| `verbose` | boolean | Always log requests and responses |
+| `timeout` | number | Default timeout, in seconds |
+| `max-pages` | number | Default page limit |
 | `retry` | object | Retry defaults: `{"attempts": 2, "unsafe": false, "max-wait": 300}` |
 
-```json
-{
-  "no-color": true,
-  "output": "yaml",
-  "verbose": false,
-  "timeout": 30,
-  "profiles": { ... }
-}
-```
+### Profiles
 
-### Profile fields
+| Key | Type | Description |
+|-----|------|-------------|
+| `schema` | string | The spec's URL or file path |
+| `extends` | string | Profile to inherit from |
+| `base-url` | string | Send requests here instead of the spec's server |
+| `server-index` | number | Which of the spec's servers to use, from 1 |
+| `server` | object | Server URL variables, e.g. `{"region": "eu"}` |
+| `headers` | object | Headers sent with every request |
+| `query` | object | Query parameters sent with every request |
+| `auth` | object | Authentication; see [Authentication](#authentication) |
+| `tls` | object | `cert`, `key`, `ca_cert`, `insecure`; see [TLS and proxies](#tls-and-proxies) |
+| `ssl` | object | `cafile`, `capath`, `certificate`, `key`, `verify`; merged with `tls`, which wins |
+| `timeout` | number | Timeout, in seconds |
+| `retry` | object | Retry settings, like the top-level `retry` |
+| `max-pages` | number | Page limit |
+| `cache-ttl` | number | How long the fetched spec stays cached, in seconds |
+| `output` | string | Output format |
+| `no-color` | boolean | Never colour the output |
+| `verbose` | boolean | Always log requests and responses |
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `schema` | string | Schema URL or local path |
-| `base-url` | string | Override the schema's server URL |
-| `server` | object | Server URL variables, e.g. `{"zone": "de-fra-1"}`; `--server.NAME=VAL` overrides per call |
-| `server-index` | number | Which of the schema's servers to use (1-based); `--server-index=N` overrides per call |
-| `query` | object | Query parameters added to every request, e.g. `{"api-version": "2"}`; `--q.` values win |
-| `headers` | object | Default headers for every request |
-| `timeout` | number | Default timeout in seconds |
-| `cache-ttl` | number | Schema cache TTL override for this profile |
-| `no-color` | bool | Disable colored output for this profile |
-| `output` | string | Default output format for this profile |
-| `verbose` | bool | Always print status line and response headers |
-| `retry` | object | Retry settings for this profile, same shape as the top-level `retry` |
-| `auth` | object | Authentication configuration — see [Authentication](#authentication) |
-| `tls` | object | mTLS configuration (`cert`, `key`, `ca_cert`, `insecure`) — see [mTLS](#mtls) |
-| `ssl` | object | TLS options (`cafile`, `capath`, `certificate`, `key`, `verify`) merged with `tls` |
-| `extends` | string | Inherit from another profile |
+A profile with `extends` takes every key of the profile it names and overrides them with its own, except `headers`, which are merged key by key. Chains (`a` extends `b` extends `c`) work; a cycle is an error. `atlas profile show NAME` prints the result.
 
-Resolution order for `no-color`, `output`, `verbose`, and `timeout`: CLI flag → profile → global config.
-
-### Profile inheritance
-
-Use `extends` to derive from another profile:
-
-```json
-{
-  "profiles": {
-    "myapi": {
-      "schema": "https://api.example.com/openapi.json",
-      "base-url": "https://api.example.com",
-      "tls": { "cert": "/path/to/client.pem", "key": "/path/to/client.key" },
-      "auth": { "name": "oauth-authorization-code", "params": { "..." : "..." } }
-    },
-    "myapi-staging": {
-      "extends": "myapi",
-      "schema": "https://staging.example.com/openapi.json",
-      "base-url": "https://staging.example.com"
-    }
-  }
-}
-```
-
-Rules:
-- `headers` are **deep-merged** — child adds or overrides individual keys, parent keys survive.
-- All other fields are **replaced** when present in the child.
-- Chains (`A extends B extends C`) are supported.
-- Circular `extends` references are detected and raise an error.
-
-```sh
-# inspect the fully-resolved profile
-atlas profile show myapi-staging
-```
-
-## Profile management
-
-```sh
-atlas profile list           # list all profiles (name + schema)
-atlas profile show <name>    # show fully resolved profile as JSON
-```
-
-
-## Moving from Restish
-
-`atlas profile import-restish` adds your Restish APIs to the atlas config as profiles:
-
-```sh
-atlas profile import-restish --dry-run   # show what would be added
-atlas profile import-restish             # add them (config.json.bak keeps the previous file)
-atlas profile import-restish ~/path/to/restish.json
-```
-
-Without a path it looks where Restish does: `restish.json` (Restish 2) or the older `apis.json` in `$RSH_CONFIG_DIR`, `$XDG_CONFIG_HOME/restish`, `~/.config/restish`, then `~/Library/Application Support/restish` and `~/.restish`.
-
-Each API becomes a profile named after it (its non-default profiles become `API.PROFILE`). Existing atlas profiles with the same name are kept, never overwritten.
-
-| Restish | atlas profile |
-|---|---|
-| `base` / `base_url` (+ `operation_base`) | `base-url` |
-| `spec_files[0]` / `spec_url` | `schema` |
-| `headers`, `query` | `headers`, `query` |
-| `tls` / `client_cert`, `client_key`, `ca_cert`, `insecure` | `tls` |
-| `server_variables` | `server` |
-| `auth` (`name` or `type`), `auth_ref` | `auth`; `http-basic` → `basic`, `oauth-device-code` → `oauth-device-authorization`, `scopes` → `scope` |
-
-Settings without an atlas equivalent are listed as warnings rather than dropped silently: APIs without `spec_files` (Restish discovers specs, atlas needs `schema`), extra `spec_files`, `issuer_url` OIDC discovery, `credentials`, `tls_signer`, `url_overrides`, `pagination`.
 ## Authentication
 
-Add an `auth` block to a profile. Values prefixed with `env:` are read from environment variables at runtime.
+A profile's `auth` names a method and its parameters. Any parameter written `env:NAME` is read from the environment variable `NAME` when needed.
 
-Authentication happens only when a request is actually sent: `--help`, `--list`, `--servers`, `--dry-run` and completion never open a browser or run an external tool (`--dry-run` shows `<redacted>` where the auth header would go; `--curl` does authenticate, since it prints a runnable command). Nor does a request whose explicit headers already cover what auth would add. A schema URL is fetched without credentials first, and with them only if the server answers 401/403. Auth headers are computed once per command and reused by retries and pagination; an authentication failure stops the command instead of being retried. A header set explicitly (`--h.Authorization=…` or the profile's `headers`) takes precedence over the auth header.
+Authentication runs only when a request is sent: never for `--help`, `--list`, `--servers`, `--dry-run` or completion, nor when the request's own headers already provide what it would add. A spec fetched from a URL is requested without credentials first, and with them only if the server answers 401 or 403. Credentials are computed once per command, reused by retries and pagination, and a header given explicitly (with `--h.` or in the profile's `headers`) wins over the one authentication adds.
 
-### Static credentials
-
-For APIs that take a fixed token, username/password, or API key. Secrets usually come from the environment via `env:`.
+### `bearer`
 
 ```json
-{"auth": {"name": "bearer", "params": {"token": "env:API_TOKEN"}}}
+{"name": "bearer", "params": {"token": "env:API_TOKEN"}}
 ```
+
+Sends `Authorization: Bearer <token>`.
+
+### `basic`
 
 ```json
-{"auth": {"name": "basic", "params": {"username": "me", "password": "env:API_PASSWORD"}}}
+{"name": "basic", "params": {"username": "me", "password": "env:API_PASSWORD"}}
 ```
+
+### `api-key`
 
 ```json
-{"auth": {"name": "api-key", "params": {"name": "X-API-Key", "in": "header", "value": "env:API_KEY"}}}
+{"name": "api-key", "params": {"name": "X-API-Key", "in": "header", "value": "env:API_KEY"}}
 ```
 
-With `"in": "query"` the key is added as a query parameter to every request instead (`?api_key=…`).
+With `"in": "query"`, the key is sent as a query parameter instead.
 
-`atlas auth <profile>` prints the resulting headers, which is handy to check what will be sent.
+### `oauth-authorization-code`
 
-### OAuth 2.0 — Authorization Code
-
-Opens a browser, listens on a local callback server, and caches the token. Uses PKCE S256. Tokens are refreshed automatically.
-
-```json
-{
-  "auth": {
-    "name": "oauth-authorization-code",
-    "params": {
-      "authorize_url": "https://auth.example.com/oauth/authorize",
-      "token_url": "https://auth.example.com/oauth/token",
-      "client_id": "my-client",
-      "scope": "openid email",
-      "redirect_host": "127.0.0.1",
-      "redirect_port": 8484,
-      "redirect_path": "/callback"
-    }
-  }
-}
-```
-
-`redirect_host`, `redirect_port`, and `redirect_path` must match a redirect URI registered with your OAuth provider. Defaults: `127.0.0.1`, random port, `/callback`.
-
-If `client_secret` is omitted the flow runs as a public client (PKCE only):
-
-```json
-"client_secret": "env:MY_CLIENT_SECRET"
-```
-
-### OAuth 2.0 — Client Credentials
-
-For service-to-service or CI use:
-
-```json
-{
-  "auth": {
-    "name": "oauth-client-credentials",
-    "params": {
-      "token_url": "https://auth.example.com/oauth/token",
-      "client_id": "env:CLIENT_ID",
-      "client_secret": "env:CLIENT_SECRET",
-      "scope": "read write",
-      "audience": "https://api.example.com"
-    }
-  }
-}
-```
-
-`scope` and `audience` are optional.
-
-### OAuth 2.0 — Device Authorization
-
-For headless environments (CI, SSH sessions, devices without a browser). Atlas displays a user code and URL on stderr, then polls until the user approves on another device.
-
-```json
-{
-  "auth": {
-    "name": "oauth-device-authorization",
-    "params": {
-      "device_authorization_url": "https://auth.example.com/oauth/device/authorize",
-      "token_url": "https://auth.example.com/oauth/token",
-      "client_id": "my-client",
-      "scope": "openid email"
-    }
-  }
-}
-```
-
-Atlas handles `authorization_pending` polling, `slow_down` backoff (adds 5 s per instruction), and `expired_token` / `access_denied` errors. Tokens are cached and refreshed automatically.
-
-### External tool
-
-Delegates authentication to an arbitrary shell command.
-
-```json
-{
-  "auth": {
-    "name": "external-tool",
-    "params": {
-      "commandline": "my-auth-helper",
-      "omitbody": false,
-      "output": "bearer-token"
-    }
-  }
-}
-```
+Opens the browser, receives the code on a local callback server, and exchanges it for a token, with PKCE (S256).
 
 | Param | Description |
 |-------|-------------|
-| `commandline` | Shell command executed via `/bin/sh -c` |
-| `omitbody` | Omit the request body from stdin (default: `false`) |
-| `output` | `"bearer-token"` for plain-token mode (see below) |
+| `authorize_url` | The provider's authorization endpoint |
+| `token_url` | The provider's token endpoint |
+| `client_id` | Client id |
+| `client_secret` | Client secret; leave it out for a public client |
+| `scope` | Scopes, space-separated |
+| `redirect_host`, `redirect_port`, `redirect_path` | The callback address, which must match a redirect URI registered with the provider (default `127.0.0.1`, a random port, `/callback`) |
 
-**Default mode (per-request signing):** the command is called for every request. Atlas writes a JSON object to stdin:
+### `oauth-client-credentials`
 
-```json
-{"method":"GET","uri":"https://api.example.com/items","headers":{},"body":""}
-```
+For services and CI: `token_url`, `client_id`, `client_secret`, and optionally `scope` and `audience`.
 
-The command must write a JSON object to stdout with headers to inject:
+### `oauth-device-authorization`
 
-```json
-{"headers":{"X-Signature":["abc123"],"Authorization":["Bearer tok"]}}
-```
+For machines without a browser: prints a code and a URL on stderr, then waits while you approve on another device. Params: `device_authorization_url`, `token_url`, `client_id`, and optionally `scope`.
 
-**Bearer-token mode (`"output": "bearer-token"`):** the command is called once, receives no stdin, and must write a plain token to stdout. Atlas prepends `Bearer ` and injects the `Authorization` header. There is no token cache for this mode.
+OAuth tokens are cached in `~/.cache/atlas/tokens/<profile>.json` (mode 0600; `$XDG_CACHE_HOME` replaces `~/.cache` when set) and refreshed when they expire. `atlas auth <profile>` signs in again; `atlas auth <profile> --logout` deletes the token.
 
-### Token management
+### `external-tool`
 
-```sh
-# force re-authentication (clears cache, runs flow again)
-atlas auth myapi
+Runs a command (through `/bin/sh -c`) that provides the credentials.
 
-# clear cached token without re-authenticating
-atlas auth myapi --logout
+| Param | Description |
+|-------|-------------|
+| `commandline` | The command |
+| `output` | `bearer-token` to read a token, see below; leave out to sign each request |
+| `omitbody` | `true` to leave the body out of what the command receives |
 
-# for external-tool: print what headers the tool produces
-atlas auth myapi
-```
-
-Tokens are stored in `~/.cache/atlas/tokens/<profile>.json` (mode 0600; `$XDG_CACHE_HOME` replaces `~/.cache` when set).
-
-## mTLS
-
-Add a `tls` block for mutual TLS. The schema is also fetched using the client certificate.
+To sign requests, the command runs for every request. It receives the request on stdin:
 
 ```json
-{
-  "tls": {
-    "cert": "/path/to/client.pem",
-    "key": "/path/to/client.key",
-    "insecure": false
-  }
-}
+{"method": "GET", "uri": "https://api.example.com/items?a=1", "headers": {}, "body": ""}
 ```
 
-| Key | Description |
-|-----|-------------|
-| `cert` | Path to PEM client certificate |
-| `key` | Path to PEM private key |
-| `ca_cert` | PEM bundle of CAs to trust instead of the system's |
-| `insecure` | Set `true` to skip server certificate verification |
-
-For a CA directory or the other TLS options, use `ssl` alongside or instead of `tls`:
+and prints the headers to add on stdout:
 
 ```json
-"ssl": { "cafile": "/etc/ssl/internal-ca.pem" }
+{"headers": {"X-Signature": ["abc123"]}}
 ```
 
-`tls` and `ssl` are merged, with `tls` taking precedence for fields they share.
+With `"output": "bearer-token"`, the command runs once per atlas invocation, receives nothing, and prints a token; atlas sends `Authorization: Bearer <token>`.
 
-## TLS verification and proxies
+## TLS and proxies
 
-Server certificates are always verified, chain and host name, unless a profile sets `"insecure": true` or you pass `--ssl.verify=none`. atlas trusts the system's CA bundle: `$SSL_CERT_FILE` when set, else the bundle at the usual place for macOS and the major Linux distributions, else `$SSL_CERT_DIR`. With none of them, HTTPS requests fail rather than go unverified.
+Server certificates are verified, both the chain and the host name, against the system's CA certificates: the file named by `SSL_CERT_FILE` when set, else the usual bundle of macOS and of the major Linux distributions, else the directory named by `SSL_CERT_DIR`. Without any of them, HTTPS requests fail rather than go unverified.
 
-Requests go through the proxy named by `https_proxy`/`HTTPS_PROXY` (HTTPS), `http_proxy` (HTTP) or `all_proxy`/`ALL_PROXY`, except for hosts in `no_proxy`/`NO_PROXY`.
-
-### Combined example (OAuth Authorization Code + mTLS)
+A profile's `tls` sets a client certificate for mutual TLS (also used to fetch the spec), or a CA bundle to trust instead of the system's:
 
 ```json
-{
-  "profiles": {
-    "internal-api": {
-      "schema": "https://api.internal.example.com/openapi.json",
-      "tls": {
-        "cert": "/home/user/.pki/client.pem",
-        "key": "/home/user/.pki/client.key"
-      },
-      "auth": {
-        "name": "oauth-authorization-code",
-        "params": {
-          "authorize_url": "https://dex.internal.example.com/auth",
-          "token_url": "https://dex.internal.example.com/token",
-          "client_id": "my-cli",
-          "scope": "openid email groups",
-          "redirect_host": "localhost",
-          "redirect_port": 8484,
-          "redirect_path": "/"
-        }
-      }
-    }
-  }
-}
+"tls": {"cert": "/path/to/client.pem", "key": "/path/to/client.key", "ca_cert": "/path/to/ca.pem"}
 ```
 
-## Schema caching
+`"insecure": true`, or `--ssl.verify=none` for one command, turns verification off. Don't use it outside of testing.
 
-Schemas fetched from URLs are cached in `~/.cache/atlas/schemas/` (or `$XDG_CACHE_HOME/atlas/schemas/`) with a 1-hour TTL.
+`ssl` takes the same settings under other names (`certificate`, `key`, `cafile`), plus `capath`, a directory of CA certificates; `tls` wins when both set the same thing.
 
-```sh
-# force re-fetch
-atlas op myapi --reload --list
+Requests go through the proxy named by `https_proxy` or `HTTPS_PROXY` (HTTPS requests), `http_proxy` (HTTP requests; libcurl ignores the upper-case form, which CGI environments can set from a request header) or `all_proxy`/`ALL_PROXY`, except for the hosts listed in `no_proxy`/`NO_PROXY`. The proxy URL can carry credentials (`http://user:secret@proxy:3128`).
 
-# set TTL to 5 minutes for this invocation
-atlas op myapi --cache-ttl=300 get-pet-by-id 42
+## Servers
+
+Requests go to the first server the spec lists. `--servers` shows them all, with their variables:
+
+```console
+$ atlas op myapi --servers
+* 1. https://api-{region}.example.com — Production
+       region = eu  (default: eu; one of: eu, us)
+  2. https://staging.example.com — Staging
 ```
 
-Set `cache-ttl` in the profile to persist a non-default TTL.
+`*` marks the server in use. `--server-index=2` (or `server-index` in a profile) picks another one, `--server.region=us` (or `server` in a profile) sets a variable, and `--base-url` (or `base-url`) replaces the server altogether. Values outside a variable's allowed values are an error.
+
+## Schema cache
+
+Specs fetched from a URL are cached in `~/.cache/atlas/schemas/` (`$XDG_CACHE_HOME/atlas/schemas/` when set) for an hour. `--reload` fetches the spec again, and `--cache-ttl` or a profile's `cache-ttl` change how long it stays cached.
 
 ## Shell completion
 
 ```sh
-# fish — install permanently
+# fish
 atlas completion fish > ~/.config/fish/completions/atlas.fish
 
-# bash — add to ~/.bashrc (works with the bash 3.2 shipped by macOS)
+# bash, in ~/.bashrc (works with the bash 3.2 of macOS)
 eval "$(atlas completion bash)"
 
-# zsh — add to ~/.zshrc after compinit
+# zsh, in ~/.zshrc after compinit
 eval "$(atlas completion zsh)"
 ```
 
-Completion understands the whole command line:
-
-- Subcommands, profile names (after `op`, `auth`, `profile show`), shell names
-- Operation names after `op <profile>` (fish also shows each operation's summary)
-- `--q.`/`--query.` and `--h.`/`--header.`: the operation's declared query parameters and headers
-- `--b.`/`--body.`: the request body's top-level properties
-- `--server.`: the selected server's variables
-- After `NAME=`: allowed values for parameters, body properties, inputs and server variables that declare an `enum` (e.g. `--server.zone=<TAB>` lists the zones)
-- `az`: configured Arazzo names, workflow ids, and `--i.` workflow inputs
-- Flags for the current subcommand
-
-Schemas fetched from URLs come from the schema cache, so completion doesn't hit the network once a schema has been used.
-
-## Arazzo workflow execution
-
-Atlas executes [Arazzo 1.0](https://spec.openapis.org/arazzo/latest.html) workflow documents — multi-step API sequences with conditional branching, output passing between steps, polling loops, and criterion-based success checks. This is particularly useful for APIs where mutations are asynchronous: an Arazzo workflow can call the mutating operation and then poll a status endpoint until the operation completes, returning the final result — all in a single command.
-
-### Usage
-
-```sh
-atlas az <name-or-file> [workflow-id] [path-params...] [options]
-```
-
-`atlas arazzo` is an alias for `atlas az`.
-
-- `<name-or-file>` — a name from `~/.config/atlas/config.json` (see below), a local file path, or an `http(s)://` URL.
-- If `workflow-id` is omitted, all available workflows are listed.
-- `atlas az <name-or-file> <workflow-id> --help` shows the workflow's summary, its inputs (type, required, allowed values, default, description; `$ref`s resolved), which inputs can be given positionally, and the steps with the operations they call.
-- The Arazzo document's `sourceDescriptions` of type `openapi` are loaded automatically as API clients. Relative source URLs resolve against the Arazzo document's own location.
-- Profile headers, OAuth/external-tool auth, TLS settings, timeout, `base-url`, `server-index` and `server` variables apply to every request. `base-url` and `server-index` are rejected when the document has more than one `openapi` source, since they would be ambiguous; server variables go to the sources that declare them.
-
-### Configuration
-
-Add an `"arazzo"` section to `~/.config/atlas/config.json` to name Arazzo files and attach defaults:
-
-```json
-{
-  "arazzo": {
-    "myapi": {
-      "file": "./workflows/myapi.arazzo.json",
-      "profile": "myapi-prod",
-      "inputs": {
-        "region": "eu-west-1"
-      }
-    }
-  }
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `file` | Path or URL of the Arazzo document |
-| `profile` | Atlas profile to use for authentication and TLS (see [Profiles](#profiles)) |
-| `inputs` | Default workflow inputs, overridden by CLI flags |
-
-This composes directly with existing profiles: the named profile's auth (OAuth, mTLS, external-tool signing) and TLS settings are applied automatically to every API call made by the workflow. Override at runtime with `--profile=NAME`.
-
-```sh
-# use the profile configured in the arazzo entry
-atlas az myapi create-resource --b.name=foo
-
-# override the profile for this invocation
-atlas az myapi create-resource --b.name=foo --profile=myapi-staging
-```
-
-### Path parameters
-
-Workflow inputs used as path parameters (`"value": "$inputs.NAME"`) can be passed as positional arguments after the workflow ID, in the order they first appear in the workflow's step parameters. Steps always fill path parameters by name, so the order in the Arazzo document doesn't matter for the request itself:
-
-```sh
-# workflow with one path param (e.g. id)
-atlas az myapi get-resource <uuid>
-
-# multiple path params
-atlas az myapi update-resource <resource-id> <version-id>
-```
-
-Named `-i` flags still work as an override:
-
-```sh
-atlas az myapi get-resource <uuid> -i id=override
-```
-
-### Request body
-
-For operations with a request body, pass it with the same flags as regular CLI calls:
-
-```sh
-# inline JSON
-atlas az myapi create-resource -d '{"name":"foo","size":10}'
-
-# individual fields — supports deep dot-notation, fields are merged
-atlas az myapi create-resource --b.name=foo --b.size=10
-
-# nested fields (e.g. reference types with an id)
-atlas az myapi create-vm \
-  --b.instance-type.id=abc123 \
-  --b.template.id=def456 \
-  --b.disk-size=50
-```
-
-### Workflow inputs
-
-Additional named inputs (not path params or body) use:
-
-```sh
-# short flag
-atlas az myapi my-workflow -i timeout=30 -i region=eu
-
-# long flag (or --i.timeout=30)
-atlas az myapi my-workflow --input.timeout=30
-
-# JSON blob (all inputs at once)
-atlas az myapi my-workflow --inputs='{"timeout":30,"region":"eu"}'
-# or from a file
-atlas az myapi my-workflow --inputs=@inputs.json
-```
-
-Merge priority (highest last): config `inputs` → positional path params → `--inputs` blob → `--body`/`-d` object → individual `-i`/`--input.*`/`--body.*` fields.
-
-Individual field values are typed by the workflow's `inputs` JSON Schema, with the same rules as `--body.KEY=VAL` for regular calls.
-
-### Output modes
-
-| Mode | Description |
-|------|-------------|
-| `final` | Workflow outputs only (default) |
-| `steps` | Each step's response body, then final outputs |
-| `progress` | Live step tracking on stderr as steps execute, then final outputs |
-| `full` | Like `steps` but also shows operation reference and request body per step |
-
-```sh
-atlas az myapi create-resource --b.name=foo --arazzo-output=progress
-```
-
-`-v` / `--verbose` is equivalent to `progress` mode and additionally logs every HTTP request (method, URL, headers, body) to stderr. Credentials in logged headers (`Authorization`, cookies, and names containing `key`, `token`, `secret`, `signature` or `password`) are redacted. Step outputs (declared in the Arazzo document) are printed after each step using the `--output` format.
-
-Progress output uses color (suppressed by `--no-color`):
-- `→ stepId` — step is running (dim)
-- `✓ stepId  0.312s  HTTP 200` — step succeeded (green), followed by its outputs
-- `✓ workflow createPet  1.024s` — workflow finished (green)
-- `✗ workflow createPet failed  1.024s` — workflow failed (red)
-
-### Runtime expressions
-
-| Expression | Resolves to |
-|------------|-------------|
-| `$inputs.KEY` | Workflow input (`$inputs.KEY#/ptr` for a JSON Pointer into it) |
-| `$statusCode` | HTTP status of current response |
-| `$method` | HTTP method of current request |
-| `$url` | URL of current request, query string included |
-| `$response.body#/ptr` | JSON Pointer into response body |
-| `$response.header.NAME` | Response header (case-insensitive) |
-| `$request.body#/ptr` | JSON Pointer into request body |
-| `$request.header.NAME` | Request header (case-insensitive) |
-| `$steps.ID.outputs.KEY` | Named output from a previous step |
-| `$steps.ID.response.body#/ptr` | Response body from a previous step |
-| `$steps.ID.response.header.NAME` | Response header from a previous step |
-| `$workflows.ID.outputs.KEY` | Output of a workflow already run by this workflow |
-| `$sourceDescriptions.NAME.OPID` | Operation `OPID` in source `NAME` (for `operationId`; required when several sources define `OPID`) |
-| `$find(ARRAY, FIELD, VALUE[, RETURN])` | Atlas extension: first element of `ARRAY` whose `FIELD` equals `VALUE`, or its `RETURN` field |
-| `{$expr}` | Template string substitution |
-
-### Success criteria
-
-Steps use `successCriteria` to determine pass/fail; all criteria must pass. A step without criteria succeeds. Supported criterion types:
-
-- **Simple** — the Arazzo condition language: comparisons `== != < <= > >=`, logical `&& || !`, parentheses, string literals in `'single'` or `"double"` quotes, numbers, `true`, `false`, `null`. `&&` binds tighter than `||`.
-  - `$statusCode == 200`
-  - `($statusCode == 200 || $statusCode == 201) && $response.body#/state != 'failed'`
-  - Values from responses are compared as values; they are never interpreted as part of the condition.
-- **Regex** — `{"type":"regex","context":"$statusCode","condition":"^2"}`. Atlas evaluates the pattern as a [Lua pattern](https://www.lua.org/manual/5.4/manual.html#6.4.1) rather than an ECMAScript regex. Simple anchors and literals behave the same; for character classes use `%d` (digit), `%w` (alphanumeric), `%s` (space), and `%` to escape (`%.`). There is no alternation (`a|b`) or `{m,n}` repetition: `^2%d%d$` matches any 2xx status.
-
-On failure, `onFailure` actions run; on success, `onSuccess` actions. The workflow's `successActions`/`failureActions` apply to every step after the step's own actions; a step action with the same `name` replaces the workflow one. Supported action types:
-
-- `end` — stop the workflow.
-- `goto` — continue at `stepId`, or run `workflowId` and stop. A `goto` to the same step with `retryAfter` sleeps that many seconds first. Each goto target may be jumped to at most 50 times before the workflow aborts; raise this for long polling loops with `--max-gotos=N` (library: `:max-gotos` in the run options).
-- `retry` — re-run the current step after `retryAfter` seconds, at most `retryLimit` times (default 1). With `workflowId`, that workflow runs before each retry. When retries are exhausted the step fails.
-
-Actions and parameters can be `{"reference": "$components.KIND.NAME"}` reusable objects pointing into the document's `components`; a `value` next to a parameter reference overrides the component's value.
-
-Step parameters with the same `name` and `in` as a workflow-level parameter replace it.
-
-### Inputs and dependencies
-
-Workflow inputs are checked against the workflow's `inputs` schema before anything runs (types, required, enums, …); `--no-validate` runs anyway. Workflows listed in a workflow's `dependsOn` run first, once each, with the same inputs; their outputs are available as `$workflows.ID.outputs.KEY`.
-
-### Sub-workflows
-
-A step with `workflowId` instead of `operationId`/`operationPath` runs another workflow as a nested step. Inputs are passed via the step's `parameters`. Such a step goes through the same `successCriteria`, `onSuccess`/`onFailure` and `outputs` handling as an operation step: a failing sub-workflow counts as a step failure that `onFailure` can handle, step `outputs` can read `$workflows.ID.outputs.KEY`, and a step that declares no `outputs` exposes the sub-workflow's outputs directly.
-
-### Examples
-
-```sh
-# list all workflows in a named file
-atlas az myapi
-
-# run a workflow, show progress
-atlas az myapi create-resource \
-  --b.name=foo \
-  --b.size=10 \
-  -v
-
-# async operation — workflow polls until complete, returns result
-atlas az myapi create-vm \
-  --b.instance-type.id=abc123 \
-  --b.template.id=def456 \
-  --b.disk-size=50 \
-  --output=yaml \
-  -v
-
-# load from URL, override profile
-atlas az https://example.com/workflows.json deploy-service \
-  --b.image=myapp:latest \
-  --profile=prod
-```
+Completion offers commands, profile names, operations (fish also shows their summaries), the declared query parameters and headers after `--q.` and `--h.`, the body's properties after `--b.`, server variables after `--server.`, allowed values after `NAME=`, workflow documents, workflows and their inputs after `--i.`, and the options of the current command. Specs come from the schema cache, so completion doesn't wait for the network once a spec has been used.
 
 ## Exit codes
 
 | Code | Meaning |
 |------|---------|
-| 0 | Success (or any HTTP status with `--ignore-status`) |
-| 1 | Network error, bad arguments, authentication failure, or failed Arazzo workflow |
-| 4 | HTTP 4xx response |
-| 5 | HTTP 5xx response |
+| 0 | Success, including any response with `--ignore-status` |
+| 1 | Anything else that went wrong: bad arguments, a request that fails the checks, a network or TLS error, an authentication failure, a failed workflow |
+| 4 | The API answered with a 4xx status |
+| 5 | The API answered with a 5xx status |

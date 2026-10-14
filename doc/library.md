@@ -1,6 +1,8 @@
-# Atlas — Lua/Fennel Library
+# Library
 
-Atlas turns any OpenAPI 3.x schema into a callable Lua/Fennel API client. Operations become functions; path parameters, request bodies, query params, and headers are handled automatically.
+The engine behind the `atlas` command line, for use from Fennel or Lua: it turns any OpenAPI 3 description into a client whose operations are functions. Path parameters, request bodies, query parameters and headers are handled for you, with the same encoding, TLS verification and redirect handling as the CLI; retries and pagination are available as wrappers you opt into.
+
+Looking for the command line? Start with the [README](../README.md).
 
 ## Installation
 
@@ -149,13 +151,13 @@ The trailing `?opts` table accepts the same `:query`, `:headers` and `:timeout` 
 `invoke` and positional calls return a table:
 
 ```fennel
-{:status  200
+{:status 200
  :headers {:content-type "application/json" ...}
- :body    <decoded-json-or-string>
- :raw     "<response body exactly as received>"}
+ :body <decoded-json-or-string>
+ :raw "<response body exactly as received>"}
 ```
 
-- JSON responses (`application/json`, `*/*+json`) are decoded into Lua tables; malformed JSON falls back to the raw string.
+- JSON responses (`application/json`, `*/*+json`) are decoded into Lua tables, arrays marked as such (see [JSON values](#json-values)); malformed JSON falls back to the raw string.
 - Other content types (text, HTML, XML, …) are returned as strings, untouched.
 - Responses without a `Content-Type` are decoded when they parse as JSON.
 - An empty body produces `nil` for `:body`.
@@ -254,10 +256,12 @@ Both are opt-in `http-fn` wrappers, composable with your own:
 (local retry (require :atlas.retry))
 (local paginate (require :atlas.paginate))
 
+;; retry.wrap: 408/429/5xx and network errors, Retry-After aware
+;; paginate.wrap: follows Link rel="next" on GET arrays
 (atlas.client schema
               {:http-fn (-> http.request
-                            (retry.wrap {:attempts 3})       ; 408/429/5xx + network errors, Retry-After aware
-                            (paginate.wrap {:max-pages 10}))}) ; follows Link rel="next" on GET arrays
+                            (retry.wrap {:attempts 3})
+                            (paginate.wrap {:max-pages 10}))})
 ```
 
 `retry.wrap` options: `:attempts` (extra tries), `:unsafe` (also retry non-GET/HEAD/OPTIONS), `:max-wait` (cap per wait, seconds). A paginated response has `:pages`, and `:next-page-status` when a later page failed.
@@ -274,21 +278,22 @@ Both are opt-in `http-fn` wrappers, composable with your own:
 
 ## Operation metadata
 
-Each operation on the client exposes metadata fields:
+Each operation on the client exposes metadata fields, e.g. `(. client.get-pet-by-id :path)`:
 
-```fennel
-(. client.get-pet-by-id :summary)      ;; "Find pet by ID" (or nil)
-(. client.get-pet-by-id :has-body)    ;; true if operation has requestBody
-(. client.get-pet-by-id :path-params)  ;; ["petId"], in template order
-(. client.get-pet-by-id :operation-id) ;; "getPetById"
-(. client.get-pet-by-id :name)         ;; "get-pet-by-id", its key in the client
-(. client.get-pet-by-id :path)         ;; "/pet/{petId}"
-(. client.get-pet-by-id :method)       ;; "get"
-(. client.get-pet-by-id :body-schema)  ;; requestBody schema for the chosen content type
-(. client.add-pet :content-type)       ;; "application/json" (nil without requestBody)
-(. client.get-pet-by-id :fnl/docstring) ;; multi-line Fennel REPL documentation (rendered on first access)
-(. client.get-pet-by-id :spec)         ;; the operation object from the schema, $refs resolved
-```
+| Field | Example | Description |
+|-------|---------|-------------|
+| `:name` | `"get-pet-by-id"` | Its key in the client |
+| `:operation-id` | `"getPetById"` | The spec's `operationId` (nil when it has none) |
+| `:method` | `"get"` | HTTP method |
+| `:path` | `"/pet/{petId}"` | Path template |
+| `:path-params` | `["petId"]` | Path parameters, in template order |
+| `:parameters` | | Declared parameters, path-level ones merged in |
+| `:summary` | `"Find pet by ID"` | Summary, or nil |
+| `:has-body` | `false` | Whether the operation takes a request body |
+| `:content-type` | `"application/json"` | Request content type atlas chose, nil without a body |
+| `:body-schema` | | Request body schema for that content type |
+| `:spec` | | The operation object from the spec, `$ref`s resolved (may contain cycles) |
+| `:fnl/docstring` | | Documentation for the Fennel REPL, rendered on first access |
 
 ## Fennel REPL integration
 
