@@ -17,6 +17,14 @@ Every command, option and configuration key of `atlas`. For a walkthrough, start
 
 ## Installation
 
+### Homebrew
+
+```sh
+brew install mpenet/tap/atlas
+```
+
+On macOS or Linux. The full name is needed: Homebrew's own `atlas` is another tool. The formula installs the release binary below, plus bash, zsh and fish completion; `brew upgrade` follows new releases.
+
 ### Standalone binary
 
 Download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases) (`atlas-macos-arm64`, `atlas-macos-x86_64`, `atlas-linux-x86_64` or `atlas-linux-arm64`), then install it:

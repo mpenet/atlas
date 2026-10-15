@@ -2,6 +2,12 @@
 
 All notable changes to atlas. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Homebrew: `brew install mpenet/tap/atlas` (macOS and Linux, with shell completion); releases update the tap.
+
 ## [1.0.0-beta2] - 2026-10-15
 
 The first beta with release binaries: 1.0.0-beta1 was published without them, and its release can no longer take files. The code is that of 1.0.0-beta1: see its section of [CHANGELOG.md](https://github.com/mpenet/atlas/blob/main/CHANGELOG.md) for the changes since 1.0.0-alpha14.

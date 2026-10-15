@@ -15,7 +15,15 @@ Point `atlas` at a spec and every operation becomes a command, with its own help
 
 ## Install
 
-Download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases) (`atlas-macos-arm64`, `atlas-macos-x86_64`, `atlas-linux-x86_64` or `atlas-linux-arm64`), then:
+With [Homebrew](https://brew.sh), on macOS or Linux:
+
+```sh
+brew install mpenet/tap/atlas
+```
+
+The full name is needed: Homebrew's own `atlas` is another tool. It installs the release binary below, with shell completion.
+
+Or download the binary for your platform from the [releases page](https://github.com/mpenet/atlas/releases) (`atlas-macos-arm64`, `atlas-macos-x86_64`, `atlas-linux-x86_64` or `atlas-linux-arm64`), then:
 
 ```sh
 install -m 755 atlas-macos-arm64 /usr/local/bin/atlas
