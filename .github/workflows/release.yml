@@ -45,7 +45,7 @@ jobs:
           luarocks --local install lyaml
           echo "$HOME/.luarocks/bin" >> "$GITHUB_PATH"
 
-      # Lua, OpenSSL and libyaml from pinned sources, for macOS 12 and later
+      # Lua, libyaml, mbedTLS and libcurl from pinned sources, for macOS 12 and later
       - name: Build binary
         run: make binary FENNEL=fennel DEPS_FROM_SOURCE=1
 

@@ -4,9 +4,9 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
-### Security
+### Changed
 
-- The Linux binaries are built on Alpine 3.24 and so link OpenSSL 3.5 (LTS); the previous ones linked OpenSSL 3.3, which is no longer supported. They are static position-independent executables.
+- The binaries use mbedTLS (3.6 LTS) for TLS instead of OpenSSL: about 2 MB instead of 5.5 MB. Certificate verification, client certificates (`certificate`/`key`, RSA or EC) and the CA file and directory work as before; TLS 1.0 and 1.1 are refused. The binaries no longer contain OpenSSL 3.3, which is out of support. The Linux binaries are built on Alpine 3.24 and are static position-independent executables.
 
 ## [1.0.0-beta3] - 2026-10-15
 

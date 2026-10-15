@@ -40,7 +40,7 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 gh attestation verify atlas-macos-arm64 --repo mpenet/atlas
 ```
 
-The binary embeds Lua, luasocket, libcurl, libyaml and OpenSSL. The macOS binaries run on macOS 12 or later; the Linux binaries are fully static (built against musl), so they run on any distribution, old or new. HTTPS needs the system's CA certificates (the `ca-certificates` package on minimal Linux images); see [TLS and proxies](#tls-and-proxies).
+The binary embeds Lua, luasocket, libcurl, mbedTLS and libyaml. The macOS binaries run on macOS 12 or later; the Linux binaries are fully static (built against musl), so they run on any distribution, old or new. HTTPS needs the system's CA certificates (the `ca-certificates` package on minimal Linux images); see [TLS and proxies](#tls-and-proxies).
 
 ### From source
 
@@ -55,7 +55,7 @@ make check-binary
 make install
 ```
 
-Building needs a C compiler, `lua` (5.4 or later) and `luarocks`, `fennel`, `openssl`, `libyaml`, `pkg-config`, `unzip` and `curl`: the build downloads the libcurl sources, checks them against a pinned checksum and links them in statically.
+Building needs a C compiler, `lua` (5.4 or later) and `luarocks`, `fennel`, `libyaml`, `pkg-config`, `unzip` and `curl`: the build downloads the mbedTLS and libcurl sources, checks them against pinned checksums and links them in statically.
 
 ### With luarocks
 
@@ -89,7 +89,7 @@ atlas --version
 | `profile import-restish` | Adds the APIs of a Restish configuration as profiles; see [Moving from Restish](guide.md#moving-from-restish). |
 | `auth` | Authenticates a profile now: for static credentials and external tools, prints the headers that would be sent (and a query API key, or the signing command); for OAuth, runs the flow again. `--logout` deletes the cached token. |
 | `completion` | Prints the completion script for a shell; see [Shell completion](#shell-completion). |
-| `--version` | Prints atlas's version and the libcurl/OpenSSL build it uses. |
+| `--version` | Prints atlas's version and the libcurl and TLS library builds it uses. |
 
 Operation names are the spec's `operationId`s in lowercase, dash-separated words: `getPetById` → `get-pet-by-id`, `projects/list_cards` → `projects-list-cards`. An operation without `operationId` is named after its method and path: `GET /pets/{petId}` → `get-pets-pet-id`. When two operationIds would get the same name, the first by path keeps it and the other is named after its method and path.
 

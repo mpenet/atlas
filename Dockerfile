@@ -3,8 +3,8 @@
 FROM alpine:3.24 AS builder
 
 RUN apk add --no-cache \
-    lua5.4 lua5.4-dev build-base pkgconf unzip wget curl ca-certificates bash \
-    openssl-dev openssl-libs-static yaml-dev yaml-static zlib-dev zlib-static \
+    lua5.4 lua5.4-dev build-base pkgconf unzip bzip2 wget curl ca-certificates bash \
+    yaml-dev yaml-static zlib-dev zlib-static \
     curl-dev \
   && ln -s /usr/bin/lua5.4 /usr/local/bin/lua
 

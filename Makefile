@@ -10,16 +10,14 @@ LUA_TARGETS = $(FNL_SOURCES:$(FNL_DIR)/%.fnl=$(LUA_DIR)/%.lua)
 UNAME_S := $(shell uname -s)
 
 # ---- dependencies built from source (DEPS_FROM_SOURCE=1) ----
-# For release binaries with a known minimum macOS version: Lua, OpenSSL and
-# libyaml are built from pinned, checksummed sources for
+# For release binaries with a known minimum macOS version: Lua and libyaml
+# are built from pinned, checksummed sources for
 # MACOSX_DEPLOYMENT_TARGET, instead of using the system's or Homebrew's
 # (which target the machine they were built on).
 DEPS_FROM_SOURCE ?=
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 LUA_VERSION      = 5.4.9
 LUA_SHA256       = 2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6
-OPENSSL_VERSION  = 3.5.9
-OPENSSL_SHA256   = 603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
 LIBYAML_VERSION  = 0.2.5
 LIBYAML_SHA256   = c642ae9b75fee120b2d96c712538bd2cf283228d2337df2cf2988e3c02678ef4
 ifneq ($(DEPS_FROM_SOURCE),)
@@ -27,7 +25,6 @@ ifneq ($(DEPS_FROM_SOURCE),)
   DEPS_PREFIX    = $(abspath $(NATIVE_BUILD)/deps)
   LUA_INC        := $(DEPS_PREFIX)/include
   LUA_LIB        := $(DEPS_PREFIX)/lib/liblua.a
-  OPENSSL_PREFIX := $(DEPS_PREFIX)
   LIBYAML_INC    := $(DEPS_PREFIX)/include
   export MACOSX_DEPLOYMENT_TARGET
 endif
@@ -36,6 +33,7 @@ endif
 NATIVE_BUILD     ?= build/native
 SOCKET_SRC       = $(NATIVE_BUILD)/luasocket/src
 CURL_PREFIX      = $(abspath $(NATIVE_BUILD)/curl)
+MBEDTLS_PREFIX   = $(abspath $(NATIVE_BUILD)/mbedtls)
 LYAML_SRC        = $(NATIVE_BUILD)/lyaml/ext/yaml
 
 # ---- auto-detected tool paths (override if needed) ----
@@ -52,13 +50,11 @@ LUA_LIB         ?= $(or $(wildcard $(_LUA_LIBDIR)/liblua5.4.a),\
                          $(wildcard $(_LUA_LIBDIR)/liblua5.5.a),\
                          $(wildcard $(_LUA_LIBDIR)/liblua.a),\
                          $(_LUA_LIBDIR)/liblua.a)
-OPENSSL_PREFIX  ?= $(shell pkg-config --variable=prefix openssl 2>/dev/null)
 LIBYAML_INC     ?= $(shell pkg-config --variable=includedir yaml-0.1 2>/dev/null)
 _LIBYAML_LIBDIR := $(if $(DEPS_FROM_SOURCE),$(DEPS_PREFIX)/lib,$(shell pkg-config --variable=libdir yaml-0.1 2>/dev/null))
-_OPENSSL_LIBDIR := $(if $(DEPS_FROM_SOURCE),$(DEPS_PREFIX)/lib,$(shell pkg-config --variable=libdir openssl 2>/dev/null))
 _ZLIB_LIBDIR    := $(shell pkg-config --variable=libdir zlib 2>/dev/null)
 
-# The binary links OpenSSL, libyaml and zlib statically, so it runs without
+# The binary links mbedTLS, libyaml and zlib statically, so it runs without
 # them installed; only system libraries stay dynamic (check-binary enforces it).
 # STATIC_LDFLAGS=-static links those too, for a fully static binary: right
 # with musl (the Linux release build), wrong with glibc, whose resolver
@@ -76,8 +72,8 @@ else
   SOCKET_CFLAGS_EXTRA =
   SHA256 = sha256sum
 endif
-OPENSSL_LDFLAGS ?= -L$(_OPENSSL_LIBDIR) $(or $(wildcard $(_OPENSSL_LIBDIR)/libssl.a),-lssl) \
-                   $(or $(wildcard $(_OPENSSL_LIBDIR)/libcrypto.a),-lcrypto)
+TLS_LDFLAGS = $(MBEDTLS_PREFIX)/lib/libmbedtls.a $(MBEDTLS_PREFIX)/lib/libmbedx509.a \
+              $(MBEDTLS_PREFIX)/lib/libmbedcrypto.a
 LIBYAML_LDFLAGS ?= -L$(_LIBYAML_LIBDIR) $(or $(wildcard $(_LIBYAML_LIBDIR)/libyaml.a),-lyaml)
 
 SOCKET_CFLAGS = -O2 $(SOCKET_CFLAGS_EXTRA) -DLUASOCKET_NODEBUG \
@@ -88,11 +84,17 @@ LYAML_CFLAGS  = -O2 -DVERSION=\"$(LYAML_VERSION)\" -I$(LUA_INC) -I$(LIBYAML_INC)
 SOCKET_CORE_SRCS = luasocket.c timeout.c buffer.c io.c auxiliar.c compat.c \
                    options.c inet.c usocket.c except.c select.c tcp.c udp.c
 
-# libcurl for the binary: HTTP(S) only, built against the OpenSSL above;
-# CA certificates are located at runtime (atlas.tls), so none are compiled in
+# TLS for the binary's libcurl: mbedTLS (LTS branch), small and enough for
+# HTTPS clients; built from its pinned, checksummed release
+MBEDTLS_VERSION = 3.6.7
+MBEDTLS_SHA256  = a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6
+
+# libcurl for the binary: HTTP(S) only, built against mbedTLS; CA
+# certificates are located at runtime (atlas.tls), so none are compiled in
 CURL_VERSION = 8.23.0
 CURL_SHA256  = e3de77cfa6367083c776a26647fc9f633b538c06c3baa73d931a252ac8f72b49
-CURL_CONFIGURE_FLAGS = --disable-shared --enable-static --with-openssl=$(OPENSSL_PREFIX) \
+CURL_CONFIGURE_FLAGS = --disable-shared --enable-static \
+  --with-mbedtls=$(MBEDTLS_PREFIX) --without-openssl \
   --with-zlib --without-ca-bundle --without-ca-path \
   --disable-ftp --disable-file --disable-ldap --disable-ldaps --disable-rtsp \
   --disable-dict --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
@@ -147,10 +149,11 @@ install: binary
 
 # ---- standalone binary ----
 
-# the stamp names the libcurl version, so changing it rebuilds the libraries
-NATIVE_STAMP = $(NATIVE_BUILD)/.stamp-curl-$(CURL_VERSION)
+# the stamp names the libcurl and mbedTLS versions, so changing either
+# rebuilds the libraries
+NATIVE_STAMP = $(NATIVE_BUILD)/.stamp-curl-$(CURL_VERSION)-mbedtls-$(MBEDTLS_VERSION)
 
-DEPS_STAMP = $(NATIVE_BUILD)/.deps-lua-$(LUA_VERSION)-openssl-$(OPENSSL_VERSION)-yaml-$(LIBYAML_VERSION)
+DEPS_STAMP = $(NATIVE_BUILD)/.deps-lua-$(LUA_VERSION)-yaml-$(LIBYAML_VERSION)
 
 native-libs: $(NATIVE_STAMP) $(NATIVE_BUILD)/libatlas_curl.a
 
@@ -158,7 +161,7 @@ native-libs: $(NATIVE_STAMP) $(NATIVE_BUILD)/libatlas_curl.a
 fetch = curl -fsSL -o $(2) $(1) && echo "$(3)  $(2)" | $(SHA256) -c -
 
 $(DEPS_STAMP):
-	@echo "Building Lua $(LUA_VERSION), OpenSSL $(OPENSSL_VERSION), libyaml $(LIBYAML_VERSION) for macOS $(MACOSX_DEPLOYMENT_TARGET)..."
+	@echo "Building Lua $(LUA_VERSION) and libyaml $(LIBYAML_VERSION) for macOS $(MACOSX_DEPLOYMENT_TARGET)..."
 	rm -rf $(NATIVE_BUILD)/deps-src && mkdir -p $(NATIVE_BUILD)/deps-src
 	cd $(NATIVE_BUILD)/deps-src && $(call fetch,https://www.lua.org/ftp/lua-$(LUA_VERSION).tar.gz,lua.tar.gz,$(LUA_SHA256)) && tar xzf lua.tar.gz
 	$(MAKE) -C $(NATIVE_BUILD)/deps-src/lua-$(LUA_VERSION) $(if $(filter Darwin,$(UNAME_S)),macosx,linux) > /dev/null
@@ -166,10 +169,6 @@ $(DEPS_STAMP):
 	cd $(NATIVE_BUILD)/deps-src && $(call fetch,https://pyyaml.org/download/libyaml/yaml-$(LIBYAML_VERSION).tar.gz,yaml.tar.gz,$(LIBYAML_SHA256)) && tar xzf yaml.tar.gz
 	cd $(NATIVE_BUILD)/deps-src/yaml-$(LIBYAML_VERSION) && CFLAGS="-O2 -fPIC" ./configure --prefix=$(DEPS_PREFIX) --disable-shared --enable-static > configure.log 2>&1 || { tail -30 configure.log; exit 1; }
 	$(MAKE) -C $(NATIVE_BUILD)/deps-src/yaml-$(LIBYAML_VERSION) install > /dev/null
-	cd $(NATIVE_BUILD)/deps-src && $(call fetch,https://github.com/openssl/openssl/releases/download/openssl-$(OPENSSL_VERSION)/openssl-$(OPENSSL_VERSION).tar.gz,openssl.tar.gz,$(OPENSSL_SHA256)) && tar xzf openssl.tar.gz
-	cd $(NATIVE_BUILD)/deps-src/openssl-$(OPENSSL_VERSION) && ./config no-shared no-tests no-docs --prefix=$(DEPS_PREFIX) --libdir=lib > configure.log 2>&1 || { tail -30 configure.log; exit 1; }
-	$(MAKE) -C $(NATIVE_BUILD)/deps-src/openssl-$(OPENSSL_VERSION) -j4 > /dev/null
-	$(MAKE) -C $(NATIVE_BUILD)/deps-src/openssl-$(OPENSSL_VERSION) install_sw > /dev/null
 	@touch $@
 
 $(NATIVE_STAMP): $(if $(DEPS_FROM_SOURCE),$(DEPS_STAMP))
@@ -201,6 +200,14 @@ $(NATIVE_STAMP): $(if $(DEPS_FROM_SOURCE),$(DEPS_STAMP))
 	  $(CC) $(LYAML_CFLAGS) -c $(LYAML_SRC)/$$f -o $(LYAML_SRC)/$${f%.c}.o; \
 	done
 	@ar rcs $(NATIVE_BUILD)/liblyaml_ext.a $(foreach f,$(LYAML_SRCS),$(LYAML_SRC)/$(f:.c=.o))
+	@# build mbedTLS, verified against its published checksum
+	@echo "Building mbedTLS $(MBEDTLS_VERSION)..."
+	rm -rf $(NATIVE_BUILD)/mbedtls-src $(MBEDTLS_PREFIX) && mkdir -p $(NATIVE_BUILD)/mbedtls-src $(MBEDTLS_PREFIX)/lib
+	cd $(NATIVE_BUILD) && $(call fetch,https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$(MBEDTLS_VERSION)/mbedtls-$(MBEDTLS_VERSION).tar.bz2,mbedtls.tar.bz2,$(MBEDTLS_SHA256))
+	tar xjf $(NATIVE_BUILD)/mbedtls.tar.bz2 -C $(NATIVE_BUILD)/mbedtls-src --strip-components 1
+	$(MAKE) -C $(NATIVE_BUILD)/mbedtls-src lib CFLAGS="-O2 -fPIC" > /dev/null
+	cp -R $(NATIVE_BUILD)/mbedtls-src/include $(MBEDTLS_PREFIX)/
+	cp $(NATIVE_BUILD)/mbedtls-src/library/libmbedtls.a $(NATIVE_BUILD)/mbedtls-src/library/libmbedx509.a $(NATIVE_BUILD)/mbedtls-src/library/libmbedcrypto.a $(MBEDTLS_PREFIX)/lib/
 	@# build libcurl, verified against its published checksum
 	@echo "Building libcurl $(CURL_VERSION)..."
 	curl -fsSL -o $(NATIVE_BUILD)/curl.tar.gz https://curl.se/download/curl-$(CURL_VERSION).tar.gz
@@ -220,7 +227,7 @@ $(NATIVE_BUILD)/libatlas_curl.a: c/atlas_curl.c $(NATIVE_STAMP)
 
 binary: $(LUA_TARGETS) native-libs
 	LUA_PATH="./$(LUA_DIR)/?.lua;./$(LUA_DIR)/?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" \
-	CC_OPTS="$(CURL_PREFIX)/lib/libcurl.a $(OPENSSL_LDFLAGS) $(ZLIB_LDFLAGS) $(LIBYAML_LDFLAGS) $(SYSTEM_LDFLAGS) $(STATIC_LDFLAGS)" \
+	CC_OPTS="$(CURL_PREFIX)/lib/libcurl.a $(TLS_LDFLAGS) $(ZLIB_LDFLAGS) $(LIBYAML_LDFLAGS) $(SYSTEM_LDFLAGS) $(STATIC_LDFLAGS)" \
 	$(FENNEL) --compile-binary fnl/atlas-bin.fnl \
 	  bin/atlas-bin \
 	  $(LUA_LIB) \

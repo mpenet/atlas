@@ -247,7 +247,7 @@ make install
 make corpus
 ```
 
-`make build` and `make test` also compile the libcurl binding, which needs the libcurl headers (`curl-config` on `PATH`). `make binary` requires a C compiler, `fennel`, `lua`, `luarocks`, `openssl`, `libyaml`, `pkg-config`, `unzip` and `curl`; it downloads the libcurl sources (checked against a pinned checksum) and statically links Lua, luasocket, libcurl, lyaml, OpenSSL and libyaml — the resulting binary depends only on system libraries. `make binary STATIC_LDFLAGS=-static` links those too; the Linux release binaries are built that way against musl (see the `Dockerfile`), so they run on any distribution. `make binary DEPS_FROM_SOURCE=1` builds Lua, OpenSSL and libyaml from pinned sources for `MACOSX_DEPLOYMENT_TARGET` (default 12.0), which the macOS release binaries use.
+`make build` and `make test` also compile the libcurl binding, which needs the libcurl headers (`curl-config` on `PATH`). `make binary` requires a C compiler, `fennel`, `lua`, `luarocks`, `libyaml`, `pkg-config`, `unzip` and `curl`; it downloads the mbedTLS and libcurl sources (checked against pinned checksums) and statically links Lua, luasocket, libcurl, mbedTLS, lyaml and libyaml — the resulting binary depends only on system libraries. `make binary STATIC_LDFLAGS=-static` links those too; the Linux release binaries are built that way against musl (see the `Dockerfile`), so they run on any distribution. `make binary DEPS_FROM_SOURCE=1` also builds Lua and libyaml from pinned sources for `MACOSX_DEPLOYMENT_TARGET` (default 12.0), which the macOS release binaries use.
 
 ## Releasing
 
