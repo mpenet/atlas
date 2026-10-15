@@ -244,3 +244,21 @@
                         :query-styles {:filter {:json true}}
                         :headers {}})
                     (assert.are.equal 1 (length seen)))))))
+
+(describe "paginate.wrap over a custom http-fn"
+          (fn []
+            (it "follows pages whose responses have a body but no raw text"
+                (fn []
+                  (let [json (require :atlas.json)
+                        f (paginate.wrap (fn [req]
+                                           (if (req.url:find "page=2")
+                                               {:status 200
+                                                :headers {}
+                                                :body (json.array [3])}
+                                               {:status 200
+                                                :headers {:link "<https://h/x?page=2>; rel=\"next\""}
+                                                :body (json.array [1 2])}))
+                                         {})
+                        r (f {:method "GET" :url "https://h/x"})]
+                    (assert.are.same [1 2 3] r.body)
+                    (assert.are.equal 2 r.pages))))))

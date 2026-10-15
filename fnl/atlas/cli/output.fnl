@@ -126,8 +126,9 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
   "Runnable curl command reproducing the request."
   (let [(url payload headers) (http-mod.encode-request req)
         parts ["curl" "-X" req.method (util.shell-quote url)]]
-    (assert (not (and payload (payload:find "\0" 1 true)))
-            "--curl cannot inline a binary body; use --dry-run to inspect it")
+    ;; inside '...' only newlines and tabs stay as they are on a terminal
+    (assert (not (and payload (payload:find "[%z\1-\8\11-\31\127]")))
+            "--curl cannot inline a body with control characters (binary, CR line ends…); use --dry-run to inspect it")
     (each [_ [k v] (ipairs (sorted-headers headers))]
       (table.insert parts "-H")
       (table.insert parts (util.shell-quote (.. k ": " v))))

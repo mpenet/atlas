@@ -28,13 +28,17 @@ URLs are delimited by <>, so commas inside them are safe."
       (util.resolve-reference current ref)))
 
 (fn array-text [resp]
-  "Text between the outer brackets of a 2xx JSON array response, or nil."
-  (when (and (util.success? resp.status) (= (type resp.raw) :string))
-    (let [inner (resp.raw:match "^%s*%[(.*)%]%s*$")
-          ;; one JSON array, not text that merely starts and ends with brackets
-          (ok value) (when inner (pcall json.decode resp.raw))]
-      (when (and ok (json.array? value))
-        inner))))
+  "Text between the outer brackets of a 2xx JSON array response, or nil.
+The response text is :raw, or else its :body encoded (a custom http-fn may
+return only the decoded body)."
+  (let [raw (if (= (type resp.raw) :string) resp.raw
+                (json.array? resp.body) (json.encode resp.body))]
+    (when (and (util.success? resp.status) raw)
+      (let [inner (raw:match "^%s*%[(.*)%]%s*$")
+            ;; one JSON array, not text that merely starts and ends with brackets
+            (ok value) (when inner (pcall json.decode raw))]
+        (when (and ok (json.array? value))
+          inner)))))
 
 (fn wrap [http-fn opts]
   "Follow next links for GET requests whose responses are JSON arrays.

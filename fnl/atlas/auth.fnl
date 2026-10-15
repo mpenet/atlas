@@ -171,10 +171,29 @@ returns the stored token, raising on expiry, denial or timeout."
           body (when ok (json-body resp))]
       (if (and body (util.success? resp.status))
           (set token (store-token resp profile-name params))
+          ;; keep polling while the user hasn't answered (or the network
+          ;; failed); any other error is final
           (match (?. body :error)
-            "slow_down" (set interval (+ interval 5))
-            "expired_token" (error "device code expired")
-            "access_denied" (error "device authorization denied by user")))))
+            "slow_down"
+            (set interval (+ interval 5))
+            "authorization_pending"
+            nil
+            "expired_token"
+            (error "device code expired")
+            "access_denied"
+            (error "device authorization denied by user")
+            other
+            (error (util.printable (.. "device authorization failed: "
+                                       (tostring other)
+                                       (if body.error_description
+                                           (.. " — "
+                                               (tostring body.error_description))
+                                           ""))) 0)
+            ;; a server error may pass
+            _
+            (when (and ok (< (or resp.status 0) 500))
+              (error (.. "device authorization failed: HTTP "
+                         (tostring resp.status)) 0))))))
   (or token (error "device authorization timed out")))
 
 (fn device-authorization [profile-name params net]
@@ -420,11 +439,24 @@ any auth flow; signing tools and query api-keys supply none up front."
                         [])
     _ ["authorization"]))
 
+(local auth-failure-mt {:__tostring #$.message})
+
+(fn authenticating [f ...]
+  "f's result; an error it raises becomes an authentication failure, which
+retries leave alone (retry.fnl): it doesn't go away by trying again."
+  (let [(ok a b) (pcall f ...)]
+    (if ok
+        (values a b)
+        (error (setmetatable {:message (tostring a) :auth-failure true}
+                             auth-failure-mt)))))
+
 (fn wrap-api-key-query [auth-config base-fn]
   (fn [req]
     ;; read when a request is sent (env: values may be unset until then)
-    (let [name (required-param auth-config :name)
-          value (required-param auth-config :value)]
+    (let [(name value) (authenticating #(values (required-param auth-config
+                                                                :name)
+                                                (required-param auth-config
+                                                                :value)))]
       ;; next-page URLs from pagination may already carry the key
       (let [in-url? (let [url (or req.url "")
                           param (.. (util.url-encode name) "=")]
@@ -463,7 +495,7 @@ any auth flow; signing tools and query api-keys supply none up front."
             (tset req :raw-body payload)
             (tset req :headers headers)
             (tset req :body nil)))
-        (let [extra (external-signing-headers params req)]
+        (let [extra (authenticating external-signing-headers params req)]
           (when extra
             ;; what the tool adds is a credential, whatever its name
             (set req.sensitive-headers

@@ -230,6 +230,13 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
         schema (if (= (type schema) :string)
                    (load schema load-opts)
                    schema)
+        ;; a document atlas fetched (or was told the location of) must say it
+        ;; is a spec: an API answer or a config file is not one
+        _ (when (and source-url
+                     (not (or (?. schema :openapi) (?. schema :swagger))))
+            (error (.. "'" (util.redact-url source-url)
+                       "' is not an OpenAPI document (it has no \"openapi\" field)")
+                   0))
         deref (refs.resolver schema
                              {:base source-url
                               :load #(load $

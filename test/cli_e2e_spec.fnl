@@ -272,6 +272,33 @@
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "require --body to be a JSON object"
                                                   1 true)))))
+            (it "rejects a document that is not an OpenAPI spec"
+                (fn []
+                  (let [path (.. (os.tmpname) ".json")
+                        (transport) (routes-transport {"GET https://api.test/echo" {:status 200
+                                                                                    :headers {}
+                                                                                    :raw "{\"a\":1}"}})]
+                    (with-open [f (io.open path :w)]
+                      (f:write "{\"a\":1}"))
+                    (let [r (atlas-run ["op" path "--list"])
+                          real-stderr io.stderr
+                          err []]
+                      (os.remove path)
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find "is not an OpenAPI document"
+                                                    1 true)
+                                        r.err)
+                      (set io.stderr {:write (fn [_ s] (table.insert err s))})
+                      (let [code (cli.run ["op"
+                                           "https://api.test/echo"
+                                           "--list"]
+                                          {: transport
+                                           :config {}
+                                           :schema-cache false})]
+                        (set io.stderr real-stderr)
+                        (assert.are.equal 1 code)
+                        (assert.is_truthy (: (table.concat err) :find
+                                             "is not an OpenAPI document" 1 true)))))))
             (it "explains a profile without a schema"
                 (fn []
                   (let [r (with-config {:profiles {:noschema {:base-url "https://api.test"}}}
@@ -355,6 +382,23 @@
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find "get-pet takes no request body"
                                                     1 true))))))
+            (it "doesn't retry a request its signing tool failed to sign"
+                (fn []
+                  (let [count-file (os.tmpname)]
+                    (let [r (with-config {:profiles {:sig {:schema "test/fixtures/cli-api.json"
+                                                           :auth {:name "external-tool"
+                                                                  :params {:commandline (.. "echo x >> "
+                                                                                            count-file
+                                                                                            "; exit 3")}}}}}
+                              #(atlas-run ["op" "sig" "list-pets"]))
+                          runs (with-open [f (io.open count-file)]
+                                 (length (f:read :*a)))]
+                      (os.remove count-file)
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find "external auth command failed"
+                                                    1 true))
+                      ;; "x\n" once
+                      (assert.are.equal 2 runs)))))
             (it "does not run the signing tool for --dry-run"
                 (fn []
                   (let [marker (os.tmpname)]
@@ -809,6 +853,20 @@
                       (assert.is_truthy (r.err:find msg 1 true) r.err)
                       (assert.is_truthy (: (.. listed.out listed.err) :find msg
                                            1 true))))))
+            (it "names the auth parameters a profile is missing"
+                (fn []
+                  (each [_ [auth msg] (ipairs [[{:name "oauth-client-credentials"
+                                                 :params {:client_id "c"}}
+                                                "profile bad: oauth-client-credentials auth needs params.token_url"]
+                                               [{:name "oauth-client-credentials"}
+                                                "profile bad: oauth-client-credentials auth needs params.token_url"]
+                                               [{:name "external-tool"}
+                                                "profile bad: external-tool auth needs params.commandline"]])]
+                    (let [r (with-config {:profiles {:bad {:schema "test/fixtures/cli-api.json"
+                                                           : auth}}}
+                              #(atlas-run ["auth" "bad"]))]
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find msg 1 true) r.err)))))
             (it "rejects Arazzo contexts and extends of the wrong shape"
                 (fn []
                   (each [_ [cfg args msg] (ipairs [[{:arazzo {:pets "/x/wf.yaml"}}

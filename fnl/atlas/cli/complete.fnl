@@ -144,6 +144,11 @@ typed, and the positional words (values of `--name value` options skipped)."
           (not (w:match "^%-")) (table.insert positional w)))
     (values words current positional)))
 
+(fn home-path [path]
+  "path with a leading ~/ expanded, as the shell does for the command itself
+but not for the line completion sees."
+  (if (path:match "^~/") (.. (or (os.getenv :HOME) "~") (path:sub 2)) path))
+
 (fn completion-context [ctx words [cmd target name]]
   "What the line refers to: an op schema's operations, server and current
 operation, or an Arazzo document's workflow and inputs."
@@ -151,7 +156,7 @@ operation, or an Arazzo document's workflow and inputs."
         c {}]
     (when (and (= cmd :op) target)
       (let [(_ profile) (pcall find-profile config target)
-            source (or (?. profile :schema) target)
+            source (or (?. profile :schema) (home-path target))
             (ok schema) (pcall ctx.load-schema source profile)]
         (when (and ok (= (type schema) :table))
           (let [index-flag (accumulate [v nil i w (ipairs words)]
@@ -169,7 +174,8 @@ operation, or an Arazzo document's workflow and inputs."
             (set c.op (when name (. c.ops name)))))))
     (when (and (= cmd :az) target)
       (let [(ok doc) (pcall ctx.load-doc
-                            (or (?. config :arazzo target :file) target)
+                            (or (?. config :arazzo target :file)
+                                (home-path target))
                             {:timeout ctx.timeout})]
         (when (and ok (= (type doc) :table))
           (set c.doc doc)

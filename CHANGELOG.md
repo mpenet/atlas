@@ -145,6 +145,12 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - The CLI validates bodies and attaches multipart files whatever the case of the media type; completion follows `--server-index N` as well as `--server-index=N`.
 - A config, `profiles` or `arazzo` section, Arazzo context (`file`, `inputs`), profile, `extends` target or profile `schema` of the wrong type is reported clearly; a repeated JSON query parameter is an error.
 - A required query parameter that the profile's `query` or a query API key provides is not reported missing.
+- An authentication failure while sending (a signing tool or a query key's `env:` variable) is not retried; the OAuth device flow stops on a token error other than `authorization_pending`/`slow_down`, with the provider's description, instead of polling until it times out.
+- `--curl` refuses a body with control characters (CR line ends, binary) instead of printing a command that sends something else.
+- A profile missing a parameter its auth method needs (`token_url`, `commandline`…) is reported as such.
+- Completion expands `~/` in spec and workflow paths.
+- A document that isn't an OpenAPI spec (an API's JSON answer, a config file) is reported as such instead of giving an empty listing.
+- Pagination works over a custom `http-fn` that returns only the decoded `:body`.
 - A cached OAuth token is used only with the token endpoint and client that issued it: after changing a profile's auth, a new token is obtained instead of sending the old one (tokens cached by earlier versions are obtained again once).
 - A profile without `schema` is reported as such instead of being read as a file path; `--b.` fields on an array `-d` body are an error; colours go to stderr only when it is a terminal.
 - Profiles whose `auth`, `headers`, `query`, `ssl`, `tls`, `server` or `retry` is not an object, or whose `auth` has no `name`, are errors instead of being ignored (a string `auth` sent requests unauthenticated); so are unknown `--ssl.` options and a `--timeout` of 0 or less. Malformed Restish configs and workflows without a string `workflowId` give clear messages.

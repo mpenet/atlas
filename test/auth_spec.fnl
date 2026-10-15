@@ -335,6 +335,35 @@
                     (assert.are.equal 2 (length sleep-calls))
                     (assert.are.equal 5 (. sleep-calls 1))
                     (assert.are.equal 10 (. sleep-calls 2)))))
+            (it "stops on any other token error, with its description"
+                (fn []
+                  (let [sock (mock-socket)
+                        (http calls) (seq-mock (ok-resp (json-body {:device_code "dc"
+                                                                    :user_code "X"
+                                                                    :verification_uri "https://x.com"
+                                                                    :expires_in 300
+                                                                    :interval 5}))
+                                               (err-resp (json-body {:error "invalid_client"
+                                                                     :error_description "unknown client"})
+                                                         401)
+                                               (ok-resp (json-body {:access_token "tok"})))
+                        auth (reload-auth http sock)
+                        profile (tmp-profile)
+                        orig-stderr io.stderr]
+                    (set io.stderr {:write (fn [_ _] nil)})
+                    (let [(ok err) (pcall auth.authenticate profile
+                                          {:name "oauth-device-authorization"
+                                           :params {:device_authorization_url "https://a.com/d"
+                                                    :token_url "https://a.com/t"
+                                                    :client_id "c"}}
+                                          {})]
+                      (set io.stderr orig-stderr)
+                      (clean-token profile)
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "invalid_client — unknown client" 1
+                                           true))
+                      (assert.are.equal 2 (length calls))))))
             (it "errors on expired_token"
                 (fn []
                   (let [sock (mock-socket)

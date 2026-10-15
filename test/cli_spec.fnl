@@ -447,6 +447,16 @@
                   (fn []
                     (assert.are.equal "curl -X POST 'https://h/pets?dry=1' -H 'authorization: Bearer s3cret' -H 'content-type: application/json' --data-raw '{\"name\":\"it'\\''s\"}'"
                                       (cli.curl-command req))))
+              (it "refuses a body with control characters it can't quote"
+                  (fn []
+                    (let [(ok err) (pcall cli.curl-command
+                                          {:method "POST"
+                                           :url "https://h/x"
+                                           :headers {:content-type "application/json"}
+                                           :raw-body "{\r\n  \"a\": 1\r\n}"})]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find "--dry-run" 1
+                                           true)))))
               (it "carries the TLS options and the timeout"
                   (fn []
                     (assert.are.equal "curl -X GET 'https://h/x' -k --cert 'c.pem' --key 'k.pem' --max-time 5"
@@ -558,7 +568,8 @@
                                          :body "\137PNG\0"})]
                     (assert.is_false ok)
                     (assert.is_truthy (: (tostring err) :find
-                                         "cannot inline a binary body" 1 true)))))))
+                                         "cannot inline a body with control characters"
+                                         1 true)))))))
 
 (describe "cli pagination options"
           (fn []
@@ -868,6 +879,21 @@
                       (os.remove paths)
                       (os.remove base)
                       (assert.are.same ["list-items"] names)))))
+            (it "expands ~/ in spec and workflow paths as the shell does"
+                (fn []
+                  (let [seen []
+                        ctx {:config {}
+                             :load-schema (fn [src]
+                                            (table.insert seen src)
+                                            completion-schema)
+                             :load-doc (fn [src]
+                                         (table.insert seen src)
+                                         {:workflows []})}]
+                    (cli.complete-line "op ~/spec.json " ctx)
+                    (cli.complete-line "az ~/flow.yaml " ctx)
+                    (assert.are.same [(.. (os.getenv :HOME) "/spec.json")
+                                      (.. (os.getenv :HOME) "/flow.yaml")]
+                                     seen))))
             (it "loads a profile's schema with the profile's settings"
                 (fn []
                   (let [seen []
