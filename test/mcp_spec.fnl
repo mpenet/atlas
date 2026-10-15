@@ -62,6 +62,50 @@
                                         (. out "$defs" :s1 :properties :child
                                            "$ref"))))))))
 
+(describe "mcp.json-schema on the rest of JSON Schema"
+          (fn []
+            (it "converts contentSchema and dependencies, and survives cycles there"
+                (fn []
+                  (let [node {:type :object :properties {}}]
+                    (set node.properties.s {:type :string :contentSchema node})
+                    (set node.dependencies {:x node :y ["z"]})
+                    (set node.x-self node)
+                    (let [out (mcp.json-schema node false)]
+                      (assert.is_truthy (json.encode out))
+                      (assert.are.equal "#/$defs/s1"
+                                        (. out :properties :s :contentSchema
+                                           "$ref"))
+                      (assert.are.equal "#/$defs/s1"
+                                        (. out :dependencies :x "$ref"))
+                      (assert.are.same ["z"] (. out :dependencies :y))))))
+            (it "leaves out $id, $anchor and $schema, which would move $defs"
+                (fn []
+                  (let [node {"$id" "https://example.com/node"
+                              "$schema" "https://json-schema.org/draft/2020-12/schema"
+                              :type :object
+                              :properties {:a {"$anchor" "a" :type :string}}}]
+                    (assert.are.same {:type :object
+                                      :properties {:a {:type :string}}}
+                                     (mcp.json-schema node false)))))
+            (it "lets OpenAPI 3.0 nullable without a type allow null"
+                (fn []
+                  (assert.are.same {:anyOf [{:allOf [{:type :object}]}
+                                            {:type :null}]}
+                                   (mcp.json-schema {:nullable true
+                                                     :allOf [{:type :object}]}
+                                                    true))))
+            (it "leaves read-only properties out of request bodies"
+                (fn []
+                  (assert.are.same {:type :object
+                                    :required ["name"]
+                                    :properties {:name {:type :string}}}
+                                   (mcp.json-schema {:type :object
+                                                     :required ["id" "name"]
+                                                     :properties {:id {:type :string
+                                                                       :readOnly true}
+                                                                  :name {:type :string}}}
+                                                    false nil true))))))
+
 (local api
        {:openapi "3.0.3"
         :info {:title "Pets" :version "1"}
@@ -213,6 +257,8 @@
                                              :supportedVersions ["2026-07-28"]
                                              :capabilities {:tools {}}
                                              :instructions "Use it."
+                                             :ttlMs 0
+                                             :cacheScope :private
                                              :_meta {"io.modelcontextprotocol/serverInfo" {:name "atlas"
                                                                                            :version "1.2.3"}}}}
                                    ((make-handler) {:jsonrpc "2.0"
@@ -260,7 +306,11 @@
                 (fn []
                   (assert.are.same {:code -32022
                                     :message "Unsupported protocol version"
-                                    :data {:supported ["2026-07-28"]
+                                    :data {:supported ["2026-07-28"
+                                                       "2025-11-25"
+                                                       "2025-06-18"
+                                                       "2025-03-26"
+                                                       "2024-11-05"]
                                            :requested "1900-01-01"}}
                                    (. ((make-handler) {:jsonrpc "2.0"
                                                        :id 5
@@ -330,6 +380,59 @@
                                       (. (handle {:jsonrpc "2.0" :id 9}) :error
                                          :code)))))))
 
+(describe "mcp.handler conformance"
+          (fn []
+            (it "gives caching hints on discovery and tool lists"
+                (fn []
+                  (let [handle (make-handler)]
+                    (each [_ method (ipairs ["server/discover" "tools/list"])]
+                      (let [r (. (handle {:jsonrpc "2.0"
+                                          :id 1
+                                          : method
+                                          :params {:_meta modern}})
+                                 :result)]
+                        (assert.are.equal 0 r.ttlMs)
+                        (assert.are.equal :private r.cacheScope))))))
+            (it "takes only string and integer ids"
+                (fn []
+                  (let [handle (make-handler)]
+                    (each [_ id (ipairs [json.null true 1.5 {:a 1}])]
+                      (assert.are.equal -32600
+                                        (. (handle {:jsonrpc "2.0"
+                                                    : id
+                                                    :method "ping"
+                                                    :params {:_meta modern}})
+                                           :error :code))))))
+            (it "rejects params that aren't an object, and null capabilities"
+                (fn []
+                  (let [handle (make-handler)]
+                    (assert.are.equal -32602
+                                      (. (handle {:jsonrpc "2.0"
+                                                  :id 1
+                                                  :method "tools/list"
+                                                  :params 5})
+                                         :error :code))
+                    (assert.are.equal -32602
+                                      (. (handle {:jsonrpc "2.0"
+                                                  :id 1
+                                                  :method "tools/list"
+                                                  :params {:_meta {"io.modelcontextprotocol/protocolVersion" "2026-07-28"
+                                                                   "io.modelcontextprotocol/clientCapabilities" json.null}}})
+                                         :error :code)))))
+            (it "lists every version it speaks when one isn't"
+                (fn []
+                  (assert.are.same ["2026-07-28"
+                                    "2025-11-25"
+                                    "2025-06-18"
+                                    "2025-03-26"
+                                    "2024-11-05"]
+                                   (. ((make-handler) {:jsonrpc "2.0"
+                                                       :id 5
+                                                       :method "tools/list"
+                                                       :params {:_meta {"io.modelcontextprotocol/protocolVersion" "1900-01-01"
+                                                                        "io.modelcontextprotocol/clientCapabilities" {}}}})
+                                      :error :data :supported))))))
+
 (describe "mcp.serve"
           (fn []
             (it "answers one line per message until input ends"
@@ -353,7 +456,40 @@
                     (assert.are.equal "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"resultType\":\"complete\"}}"
                                       (. out 1))
                     (assert.are.equal "{\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}"
-                                      (. out 2)))))))
+                                      (. out 2)))))
+            (it "answers JSON-RPC batches, which 2025-03-26 has"
+                (fn []
+                  (let [lines ["[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a\"},{\"jsonrpc\":\"2.0\",\"method\":\"n\"},{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"b\"}]"
+                               "[{\"jsonrpc\":\"2.0\",\"method\":\"n\"}]"
+                               "[]"]
+                        out []]
+                    (var i 0)
+                    (mcp.serve (fn [msg]
+                                 (when msg.id
+                                   {:jsonrpc "2.0" :id msg.id :result {}}))
+                               (fn []
+                                 (set i (+ i 1))
+                                 (. lines i))
+                               #(table.insert out $))
+                    (assert.are.same ["[{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{}},{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{}}]"
+                                      "{\"error\":{\"code\":-32600,\"message\":\"Invalid request\"},\"id\":null,\"jsonrpc\":\"2.0\"}"]
+                                     out))))
+            (it "writes valid UTF-8 whatever the input"
+                (fn []
+                  (let [out []]
+                    (var done false)
+                    (mcp.serve (fn [_]
+                                 {:jsonrpc "2.0"
+                                  :id 1
+                                  :result {:text "a\255b"}})
+                               (fn []
+                                 (when (not done)
+                                   (set done true)
+                                   "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"x\"}"))
+                               #(table.insert out $))
+                    (assert.is_truthy (utf8.len (. out 1)))
+                    (assert.is_truthy (: (. out 1) :find "a\239\191\189b" 1
+                                         true)))))))
 
 (describe "mcp.workflow-tool"
           (fn []

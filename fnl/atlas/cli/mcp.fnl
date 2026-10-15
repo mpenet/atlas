@@ -10,6 +10,7 @@
                         :additionalItems true
                         :additionalProperties true
                         :contains true
+                        :contentSchema true
                         :else true
                         :if true
                         :not true
@@ -26,29 +27,56 @@
                     "$defs" true
                     :definitions true})
 
+;; keywords that would change what the #/$defs/… references point at, or
+;; restate the dialect: the tool's schema is one 2020-12 document
+(local dropped-keywords {"$id" true
+                         "$anchor" true
+                         "$dynamicAnchor" true
+                         "$schema" true})
+
+(fn copy-data [v seen]
+  "A copy of v, data inside a schema: a table inside itself, which JSON can't
+hold, becomes null."
+  (if (or (not= (type v) :table) (= v json.null)) v (. seen v) json.null
+      (let [out (setmetatable {} (getmetatable v))]
+        (tset seen v true)
+        (each [k x (pairs v)]
+          (tset out k (copy-data x seen)))
+        (tset seen v nil)
+        out)))
+
 (fn openapi-30-keywords [out]
   "out with OpenAPI 3.0's nullable and boolean exclusive bounds written as
 JSON Schema 2020-12 has them."
-  (when (= out.nullable true)
-    (when (= (type out.type) :string)
-      (set out.type [out.type :null]))
-    (when (json.array? out.enum)
-      (table.insert out.enum json.null)))
-  (set out.nullable nil)
-  (each [_ [bound exclusive] (ipairs [[:minimum :exclusiveMinimum]
-                                      [:maximum :exclusiveMaximum]])]
-    (when (= (type (. out exclusive)) :boolean)
-      (if (and (. out exclusive) (not= nil (. out bound)))
-          (do
-            (tset out exclusive (. out bound))
-            (tset out bound nil))
-          (tset out exclusive nil))))
-  out)
+  (let [nullable (= out.nullable true)]
+    (set out.nullable nil)
+    (each [_ [bound exclusive] (ipairs [[:minimum :exclusiveMinimum]
+                                        [:maximum :exclusiveMaximum]])]
+      (when (= (type (. out exclusive)) :boolean)
+        (if (and (. out exclusive) (not= nil (. out bound)))
+            (do
+              (tset out exclusive (. out bound))
+              (tset out bound nil))
+            (tset out exclusive nil))))
+    (if (not nullable) out (= (type out.type) :string)
+        (do
+          (set out.type [out.type :null])
+          (when (json.array? out.enum)
+            (table.insert out.enum json.null))
+          out)
+        ;; nullable next to allOf, oneOf…: what they allow, or null
+        (and (= nil out.type) (= nil out.enum) (next out))
+        {:anyOf [out {:type :null}]} out)))
 
 (fn new-context []
   "Conversion state shared by the schemas of one tool: the $defs written for
 recursive schemas, by schema."
   {:defs {} :ids {} :count 0})
+
+(fn read-only-names [schema]
+  (collect [name s (pairs (or (?. schema :properties) {}))]
+    (when (and (= (type s) :table) (= s.readOnly true))
+      (values name true))))
 
 (fn convert [schema openapi-30 ctx ancestors]
   (if (or (not= (type schema) :table) (= schema json.null)) schema
@@ -61,38 +89,52 @@ recursive schemas, by schema."
                      (. ctx.ids schema)))]
         {"$ref" (.. "#/$defs/" id)})
       (let [out (setmetatable {} (getmetatable schema))
-            sub #(convert $ openapi-30 ctx ancestors)]
+            sub #(convert $ openapi-30 ctx ancestors)
+            ;; what is sent leaves out what only the server sets
+            read-only (if ctx.request (read-only-names schema) {})]
         (tset ancestors schema true)
         (each [k v (pairs schema)]
-          (tset out k (if (and (. schema-keywords k) (json.array? v))
-                          (json.array (icollect [_ s (ipairs v)] (sub s)))
-                          (. schema-keywords k)
-                          (sub v)
-                          (and (. schema-lists k) (= (type v) :table))
-                          (json.array (icollect [_ s (ipairs v)] (sub s)))
-                          (and (. schema-maps k) (= (type v) :table))
-                          (collect [name s (pairs v)] name (sub s))
-                          ;; data: copied, so the result never shares tables with
-                          ;; the spec
-                          (and (= (type v) :table) (not= v json.null))
-                          (json.decode (json.encode v) true)
-                          v)))
+          (when (not (. dropped-keywords k))
+            (tset out k (if (and (. schema-keywords k) (json.array? v))
+                            (json.array (icollect [_ s (ipairs v)] (sub s)))
+                            (. schema-keywords k)
+                            (sub v)
+                            (and (. schema-lists k) (= (type v) :table))
+                            (json.array (icollect [_ s (ipairs v)] (sub s)))
+                            (and (. schema-maps k) (= (type v) :table))
+                            (collect [name s (pairs v)]
+                              (when (not (and (= k :properties)
+                                              (. read-only name)))
+                                (values name (sub s))))
+                            ;; draft 4-7: a schema, or the names a property needs
+                            (and (= k :dependencies) (= (type v) :table))
+                            (collect [name d (pairs v)]
+                              name
+                              (if (json.array? d) (copy-data d {}) (sub d)))
+                            (and (= k :required) (json.array? v)
+                                 (next read-only))
+                            (json.array (icollect [_ name (ipairs v)]
+                                          (when (not (. read-only name)) name)))
+                            ;; data: copied, so the result never shares tables with
+                            ;; the spec
+                            (copy-data v {})))))
         (tset ancestors schema nil)
-        (when openapi-30
-          (openapi-30-keywords out))
-        (let [id (. ctx.ids schema)]
+        (let [out (if openapi-30 (openapi-30-keywords out) out)
+              id (. ctx.ids schema)]
           (when (and id (= nil (. ctx.defs id)))
             ;; a copy: the entry must not hold the $defs it is in
-            (tset ctx.defs id (collect [k v (pairs out)] k v))))
-        out)))
+            (tset ctx.defs id (collect [k v (pairs out)] k v)))
+          out))))
 
-(fn json-schema [schema openapi-30 ?ctx]
+(fn json-schema [schema openapi-30 ?ctx ?request]
   "schema (an OpenAPI schema with its refs resolved) as JSON Schema 2020-12,
 the dialect of MCP tool schemas: OpenAPI 3.0's own keywords when openapi-30,
-and recursion as references to $defs. With ?ctx (see new-context), the $defs
-are left in it for the caller to place at the root of the document; without,
-they are added to the result."
+and recursion as references to $defs. ?request: schema describes what is
+sent (a request body), so its read-only properties are left out. With ?ctx
+(see new-context), the $defs are left in it for the caller to place at the
+root of the document; without, they are added to the result."
   (let [ctx (or ?ctx (new-context))
+        _ (set ctx.request ?request)
         out (convert schema openapi-30 ctx {})]
     (when (and (not ?ctx) (next ctx.defs) (= (type out) :table))
       (tset out "$defs" ctx.defs))
@@ -182,7 +224,7 @@ opts.supplied-query) are left out."
           (table.insert required p.arg))))
     (when op.has-body
       (tset properties :body
-            (json-schema (or op.body-schema {}) opts.openapi-30 ctx))
+            (json-schema (or op.body-schema {}) opts.openapi-30 ctx true))
       (when (?. op.spec :requestBody :required)
         (table.insert required :body)))
     (table.sort required)
@@ -244,6 +286,13 @@ refs resolved) are inputs-schema."
 ;; protocol versions that open with initialize, the latest first
 (local legacy-versions ["2025-11-25" "2025-06-18" "2025-03-26" "2024-11-05"])
 
+(local all-versions (let [all []]
+                      (each [_ versions (ipairs [modern-versions
+                                                 legacy-versions])]
+                        (each [_ v (ipairs versions)]
+                          (table.insert all v)))
+                      all))
+
 (local meta-version "io.modelcontextprotocol/protocolVersion")
 (local meta-capabilities "io.modelcontextprotocol/clientCapabilities")
 (local meta-server-info "io.modelcontextprotocol/serverInfo")
@@ -251,6 +300,17 @@ refs resolved) are inputs-schema."
 (fn member? [list x]
   (accumulate [found false _ v (ipairs list) &until found]
     (= v x)))
+
+(fn object? [v]
+  (and (= (type v) :table) (not= v json.null) (not (json.array? v))))
+
+(fn valid-id? [id]
+  "MCP request ids are strings or integers."
+  (or (= (type id) :string) (= (math.type id) :integer)))
+
+;; lists clients may cache, for as long as atlas runs with the profile they
+;; were made for; no telling how long that is
+(local cache-hints {:ttlMs 0 :cacheScope :private})
 
 (fn error-response [id code message ?data]
   {:jsonrpc "2.0"
@@ -270,8 +330,13 @@ the process. server: {:tools [tool] :call (fn [name arguments] result)
                                      (when modern
                                        {:supportedVersions (json.array modern-versions)
                                         :capabilities {:tools {}}
-                                        :instructions server.instructions}))
-                 "tools/list" #{:tools (json.array server.tools)}
+                                        :instructions server.instructions
+                                        :ttlMs cache-hints.ttlMs
+                                        :cacheScope cache-hints.cacheScope}))
+                 "tools/list" #(doto {:tools (json.array server.tools)}
+                                 (tset :ttlMs (when $1 cache-hints.ttlMs))
+                                 (tset :cacheScope
+                                       (when $1 cache-hints.cacheScope)))
                  "tools/call" (fn [_ params]
                                 (if (. by-name params.name)
                                     (server.call params.name
@@ -299,22 +364,26 @@ the process. server: {:tools [tool] :call (fn [name arguments] result)
                         (error-response msg.id -32601
                                         (.. "Method not found: " msg.method)))))]
     (fn [msg]
-      (if (or (not= (type msg) :table) (json.array? msg)
+      (if (or (not (object? msg))
+              (and (not= nil msg.id) (not (valid-id? msg.id)))
               (and (not= (type msg.method) :string) (not= nil msg.id)))
-          (error-response (when (= (type msg) :table) msg.id) -32600
+          (error-response (when (and (object? msg) (valid-id? msg.id))
+                            msg.id) -32600
                           "Invalid request")
           ;; notifications, and responses we never asked for
           (= nil msg.id)
           nil
+          (not (or (= nil msg.params) (object? msg.params)))
+          (error-response msg.id -32602 "params must be an object")
           (let [meta (?. msg :params :_meta)
-                version (when (= (type meta) :table) (. meta meta-version))]
+                version (when (object? meta) (. meta meta-version))]
             (if version
                 (if (not (member? modern-versions version))
                     (error-response msg.id -32022
                                     "Unsupported protocol version"
-                                    {:supported (json.array modern-versions)
+                                    {:supported (json.array all-versions)
                                      :requested version})
-                    (= nil (. meta meta-capabilities))
+                    (not (object? (. meta meta-capabilities)))
                     (error-response msg.id -32602
                                     (.. "missing _meta " meta-capabilities))
                     (respond msg true))
@@ -338,20 +407,42 @@ the process. server: {:tools [tool] :call (fn [name arguments] result)
                                     ", or initialize for "
                                     (table.concat legacy-versions ", ") ")"))))))))
 
+(fn valid-utf8 [s]
+  "s with each byte that isn't part of valid UTF-8 replaced by U+FFFD."
+  (var out s)
+  (var (ok bad) (utf8.len out))
+  (while (not ok)
+    (set out (.. (out:sub 1 (- bad 1)) "\239\191\189" (out:sub (+ bad 1))))
+    (set (ok bad) (utf8.len out bad)))
+  out)
+
+(fn answer [handle msg]
+  "handle's response to msg, an internal error when it fails."
+  (let [(ok response) (pcall handle msg)]
+    (if ok response
+        (error-response (when (and (object? msg) (valid-id? msg.id)) msg.id)
+                        -32603 (tostring response)))))
+
 (fn serve [handle read-line write-line]
   "Answer the newline-delimited JSON-RPC messages read-line returns, until it
-returns nil, writing each response with write-line (one line, no newline)."
+returns nil, writing each response with write-line (one line, no newline).
+A batch (an array of messages) gets an array of responses."
   (var line (read-line))
   (while line
     (when (line:match "%S")
       (let [(ok msg) (pcall json.decode line true)
-            (handled response) (if ok (pcall handle msg) (values true nil))
             response (if (not ok) (error-response nil -32700 "Parse error")
-                         handled response
-                         (error-response (when (= (type msg) :table) msg.id)
-                                         -32603 (tostring response)))]
+                         (and (json.array? msg) (not= nil (. msg 1)))
+                         (let [responses (icollect [_ m (ipairs msg)]
+                                           (answer handle m))]
+                           (when (next responses)
+                             (json.array responses)))
+                         (json.array? msg)
+                         (error-response nil -32600 "Invalid request")
+                         (answer handle msg))]
         (when response
-          (write-line (json.encode response)))))
+          ;; arguments and API responses may hold any bytes
+          (write-line (valid-utf8 (json.encode response))))))
     (set line (read-line))))
 
 {: json-schema : tool : workflow-tool : request : handler : serve}
