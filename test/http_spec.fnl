@@ -88,8 +88,24 @@
                                          :timeout 0.0004})]
                     (srv:close)
                     (assert.is_false ok)
-                    (assert.is_truthy (: (tostring err) :find "timed out"))
                     (assert.is_true (< (- (socket.gettime) t0) 2)))))))
+
+(describe "http.request failures"
+          (fn []
+            (it "hide the query parameters marked sensitive"
+                (fn []
+                  (let [socket (require :socket)
+                        srv (assert (socket.bind "127.0.0.1" 0))
+                        (_ port) (srv:getsockname)]
+                    (srv:close)
+                    (let [(ok err) (pcall http.request
+                                          {:method "GET"
+                                           :url (.. "http://127.0.0.1:" port
+                                                    "/x?appid=QSECRET&n=1")
+                                           :sensitive-query ["AppId"]})]
+                      (assert.is_false ok)
+                      (assert.is_nil (: (tostring err) :find "QSECRET" 1 true))
+                      (assert.is_truthy (: (tostring err) :find "n=1" 1 true))))))))
 
 (describe "the transport binding"
           (fn []

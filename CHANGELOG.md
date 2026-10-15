@@ -16,6 +16,14 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - The bash completion script treats the candidates it gets (operation names, enum values from the spec…) as data: `compgen -W` expanded `$(...)` in them, so a spec could run commands when completing.
 - On a redirect to another origin, the headers authentication added are dropped whatever their name, and logs and dry runs redact them and a query API key whatever their name; user info in URLs is redacted too.
 - The schema cache directory is private to the user (0700).
+- The config file written by `profile import-restish`, its `.bak` copy and OAuth tokens are created readable by the user only (0600), with no moment when they are readable by others.
+- A query API key no longer appears in the error printed when a request fails in transport.
+- The profile's `headers` and credentials are not sent to a spec hosted on another origin than the profile's `base-url`.
+- `--dry-run` doesn't run an external signing tool, and doesn't send placeholder credentials when fetching a spec.
+- Bash completion inserts values quoted: an enum value from a spec containing spaces or shell syntax (`$(...)`) stays one argument and never runs.
+- Text from a spec (summaries, descriptions, server descriptions, completion help) is printed with its control characters escaped, so a spec cannot send terminal escape sequences; so is an OAuth provider's error description.
+- The OAuth callback checks the `state` before anything else: a forged callback without it can no longer pose as the provider's error.
+- `-v` redacts credentials in response headers (`set-cookie`, `...token`) as it does in request headers.
 - Headers added by external-tool signing are marked as credentials: logs and dry runs redact them, and they are dropped on a redirect to another origin.
 - The libcurl binding rejects URLs, header names and values and options that contain a NUL byte, rather than cutting them short.
 - A URL whose host part holds a backslash or a control character (such as a NUL in a `$ref`) matches no origin, so credentials never follow it (libcurl reads `http://a\@b/` as host `b`); retried schema fetches and next-page requests keep the marking of credential headers, so a later cross-origin redirect drops them; `$ref` errors redact the document's URL.
@@ -98,6 +106,9 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - `$ref` inside example data (`example`, `examples.*.value`, `default`, `enum`, `const`) is kept as data instead of being resolved.
 - Arazzo `operationPath` fragments may be percent-encoded (`~1pets~1%7BpetId%7D`).
 - A timeout under a millisecond no longer means no timeout.
+- `az --profile` with an unknown profile is an error instead of running without it.
+- Completion lists the operations of specs whose `$ref`s point into other files.
+- `atlas auth` shows a query API key and the signing command, which it printed nothing for; `atlas completion` rejects options.
 - Many more; see the commit history.
 
 ## [1.0.0-alpha14] - 2026-07-06

@@ -220,6 +220,15 @@
                                                               nil 0.5))]
                     (assert.are.equal "{\n  \"x\": 1\n}" out)
                     (assert.are.equal "HTTP 200  0.500s\na: 1\nb: 2\n\n" err))))
+            (it "redacts credentials in the response headers it logs"
+                (fn []
+                  (let [(_ _ err) (capture #(cli.print-resp {:status 200
+                                                             :headers {:set-cookie "session=S"
+                                                                       :x-auth-token "T"}
+                                                             :body {}}
+                                                            :json true true))]
+                    (assert.are.equal "HTTP 200\nset-cookie: <redacted>\nx-auth-token: <redacted>\n\n"
+                                      err))))
             (it "sends error bodies to stderr with the exit code"
                 (fn []
                   (let [(code out err) (capture #(cli.print-resp {:status 503
@@ -817,6 +826,24 @@
                                    (complete "op exo list-pets --h."))
                   (assert.are.same ["--b.name=" "--b.tier="]
                                    (complete "op exo add-pet --b."))))
+            (it "follows refs into other documents"
+                (fn []
+                  (let [base (os.tmpname)
+                        spec (.. base "-api.json")
+                        paths (.. base "-paths.json")]
+                    (with-open [f (io.open spec :w)]
+                      (f:write (.. "{\"openapi\":\"3.0.0\",\"info\":{},\"paths\":{\"/items\":{\"$ref\":\""
+                                   (paths:match "([^/]+)$") "#/items\"}}}")))
+                    (with-open [f (io.open paths :w)]
+                      (f:write "{\"items\":{\"get\":{\"operationId\":\"listItems\",\"responses\":{}}}}"))
+                    (let [atlas (require :atlas)
+                          names (cli.complete-line (.. "op " spec " ")
+                                                   {:config {}
+                                                    :load-schema atlas.load-schema})]
+                      (os.remove spec)
+                      (os.remove paths)
+                      (os.remove base)
+                      (assert.are.same ["list-items"] names)))))
             (it "takes OpenAPI 3.1 boolean schemas"
                 (fn []
                   (let [ctx {:config {}
@@ -1234,7 +1261,7 @@
 
 (describe "bash completion script"
           (fn []
-            (it "treats candidates from the spec as data, never as commands or globs"
+            (it "treats candidates from the spec as data, and inserts them quoted"
                 (fn []
                   (let [(_ script) (capture cli.completion-bash)
                         marker (os.tmpname)
@@ -1244,7 +1271,7 @@
                       (f:write script "\n")
                       ;; candidates as a malicious spec could make them
                       (f:write (.. "atlas() { printf '%s\\n' '$(touch " marker
-                                   ")' '*' 'ok'; }\n"))
+                                   ")' '*' 'in progress' 'ok'; }\n"))
                       (f:write "COMP_LINE='atlas op x y --q.s='; COMP_POINT=${#COMP_LINE}\n")
                       (f:write "COMP_WORDS=(atlas op x y --q.s =); COMP_CWORD=5\n")
                       (f:write "_atlas_complete\nprintf '%s\\n' \"${COMPREPLY[@]}\"\n"))
@@ -1255,7 +1282,10 @@
                       (let [ran (io.open marker)]
                         (when ran (ran:close) (os.remove marker))
                         (assert.is_nil ran))
-                      (assert.are.equal (.. "$(touch " marker ")\n*\nok\n") out)))))))
+                      ;; quoted as the shell inserts them on the line
+                      (assert.are.equal (.. "\\$\\(touch\\ " marker
+                                            "\\)\n\\*\nin\\ progress\nok\n")
+                                        out)))))))
 
 (describe "import-restish discoverability"
           (fn []

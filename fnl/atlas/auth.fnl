@@ -53,11 +53,7 @@
         path (token-path profile-name)]
     (os.execute (.. "mkdir -p " (shell-quote dir) " && chmod 700 "
                     (shell-quote dir)))
-    (let [f (io.open path :w)]
-      (when f
-        (f:write (json.encode data))
-        (f:close)
-        (os.execute (.. "chmod 600 " (shell-quote path)))))))
+    (util.write-private path (json.encode data))))
 
 (fn clear-token [profile-name]
   (os.remove (token-path profile-name)))
@@ -234,14 +230,17 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
           (if (not= path callback-path)
               (reply client "404 Not Found" "Not found.")
               (let [params (parse-query qs)]
+                ;; only a callback carrying our state comes from the provider
                 (set result
-                     (if params.error
-                         {:failure (.. "authorization failed: " params.error
-                                       (if params.error_description
-                                           (.. " — " params.error_description)
-                                           ""))}
-                         (not= params.state expected-state)
+                     (if (not= params.state expected-state)
                          {:failure "OAuth state mismatch — possible CSRF"}
+                         params.error
+                         {:failure (util.printable (.. "authorization failed: "
+                                                       params.error
+                                                       (if params.error_description
+                                                           (.. " — "
+                                                               params.error_description)
+                                                           "")))}
                          (not params.code)
                          {:failure "no authorization code in callback"}
                          {:code params.code}))

@@ -548,6 +548,30 @@
                     (c:close)
                     (assert.is_false ok)
                     (assert.is_truthy (: (tostring err) :find "access_denied")))))
+            (it "checks the state before reporting a provider error"
+                (fn []
+                  (let [auth (reload-auth (pick-values 1 (seq-mock)))
+                        (srv port) (auth.start-local-server)
+                        c (send-to port
+                                   ["GET /callback?error=x&error_description=%1B%5B31mFAKE HTTP/1.1"])
+                        (ok err) (pcall auth.wait-for-callback srv "S1"
+                                        "/callback")]
+                    (c:close)
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "state mismatch"))
+                    (assert.is_nil (: (tostring err) :find "FAKE" 1 true)))))
+            (it "escapes control characters of a provider error"
+                (fn []
+                  (let [auth (reload-auth (pick-values 1 (seq-mock)))
+                        (srv port) (auth.start-local-server)
+                        c (send-to port
+                                   ["GET /callback?error=x&error_description=%1B%5B31mFAKE&state=S1 HTTP/1.1"])
+                        (ok err) (pcall auth.wait-for-callback srv "S1"
+                                        "/callback")]
+                    (c:close)
+                    (assert.is_false ok)
+                    (assert.is_nil (: (tostring err) :find "\27" 1 true))
+                    (assert.is_truthy (: (tostring err) :find "FAKE" 1 true)))))
             (it "rejects a state mismatch without reporting success to the browser"
                 (fn []
                   (let [auth (reload-auth (pick-values 1 (seq-mock)))

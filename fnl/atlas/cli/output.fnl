@@ -35,7 +35,7 @@ headers in the set ?names (lowercase)."
                          (util.redact-url (util.append-query (or req.url "?")
                                                              (or req.query {})
                                                              req.query-styles)
-                                          (sensitive-names req.sensitive-query))
+                                          req.sensitive-query)
                          "\n"))
     (when req.body
       (io.stderr:write (.. "> body: "
@@ -62,9 +62,10 @@ headers in the set ?names (lowercase)."
     (let [width (accumulate [w 0 _ op (ipairs ops)]
                   (math.max w (length op.k)))]
       (each [_ op (ipairs ops)]
-        (print (if op.summary
-                   (string.format (.. "%-" width "s  %s") op.k op.summary)
-                   op.k))))))
+        (print (util.printable (if op.summary
+                                   (string.format (.. "%-" width "s  %s") op.k
+                                                  op.summary)
+                                   op.k)))))))
 
 (fn container? [v]
   "Whether a path can go into v: an array or object, not null."
@@ -108,8 +109,7 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
 (fn request-text [req]
   "Human-readable request, credentials redacted."
   (let [(url payload headers) (http-mod.encode-request req)
-        lines [(.. req.method " "
-                   (util.redact-url url (sensitive-names req.sensitive-query)))]]
+        lines [(.. req.method " " (util.redact-url url req.sensitive-query))]]
     (each [_ [k v] (ipairs (sorted-headers headers))]
       (table.insert lines
                     (.. k ": "
@@ -147,9 +147,11 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
         (if (s:match "^\n") (s:sub 2) s))
       (pretty-mod.pretty v 0 use-color)))
 
-(fn header-lines [headers]
+(fn header-lines [headers ?redact]
+  "Headers as sorted \"name: value\" lines; ?redact masks credentials."
   (table.concat (icollect [_ [k v] (ipairs (sorted-headers headers))]
-                  (.. k ": " v)) "\n"))
+                  (.. k ": " (if ?redact (tostring (redact-header k v)) v)))
+                "\n"))
 
 (fn format-output [resp output use-color ?select]
   "Text to print for a successful response, or nil when there is nothing to show."
@@ -188,7 +190,7 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
     (when (or verbose error?)
       (io.stderr:write (.. "HTTP " resp.status timing "\n"))
       (when verbose
-        (io.stderr:write (.. (header-lines resp.headers) "\n\n"))))
+        (io.stderr:write (.. (header-lines resp.headers true) "\n\n"))))
     (if error?
         (do
           (when (not= nil resp.body)
@@ -303,10 +305,10 @@ variable shows the value in effect."
     (let [width (accumulate [w 0 _ wf (ipairs wfs)]
                   (math.max w (length wf.workflowId)))]
       (each [_ wf (ipairs wfs)]
-        (print (if wf.summary
-                   (string.format (.. "%-" width "s  %s") wf.workflowId
-                                  wf.summary)
-                   wf.workflowId))))))
+        (print (util.printable (if wf.summary
+                                   (string.format (.. "%-" width "s  %s")
+                                                  wf.workflowId wf.summary)
+                                   wf.workflowId)))))))
 
 {: redact-header
  : wrap-log-request

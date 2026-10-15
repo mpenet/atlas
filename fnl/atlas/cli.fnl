@@ -88,18 +88,17 @@
       (if ok value (die (.. "not valid JSON: " path))))))
 
 (fn write-config [path config]
-  "Write config as JSON to path, keeping the previous file as path.bak."
+  "Write config as JSON to path, keeping the previous file as path.bak; both
+are private to the user, as profiles hold credentials."
   (let [previous (io.open path :r)]
     (when previous
-      (let [text (previous:read :*a)
-            backup (io.open (.. path ".bak") :w)]
+      (let [text (previous:read :*a)]
         (previous:close)
-        (backup:write text)
-        (backup:close))))
-  (os.execute (.. "mkdir -p " (util.shell-quote (or (path:match "^(.*)/") "."))))
-  (let [f (or (io.open path :w) (die (.. "cannot write " path)))]
-    (f:write (.. (pretty-mod.pretty config 0 false) "\n"))
-    (f:close)))
+        (when (not (util.write-private (.. path ".bak") text))
+          (die (.. "cannot write " path ".bak"))))))
+  (when (not (util.write-private path
+                                 (.. (pretty-mod.pretty config 0 false) "\n")))
+    (die (.. "cannot write " path))))
 
 (fn import-restish [file p env]
   "Add the profiles of a Restish config to the atlas config; existing atlas
@@ -167,9 +166,18 @@ profiles are kept. --dry-run prints the converted profiles instead."
             (print (.. "Logged out: " profile-name)))
           (. {:external-tool true :bearer true :basic true :api-key true}
              auth-cfg.name)
-          (let [h (headers)]
+          (let [h (headers)
+                params (or auth-cfg.params {})]
             (each [_ k (ipairs (sorted-names h))]
-              (print (.. k ": " (. h k)))))
+              (print (.. k ": " (. h k))))
+            ;; what is added to each request rather than as a header
+            (if (and (= auth-cfg.name :api-key) (= params.in :query))
+                (print (.. "query: " (tostring params.name) "="
+                           (tostring params.value)))
+                (and (= auth-cfg.name :external-tool)
+                     (not= params.output :bearer-token))
+                (print (.. "signs each request with: "
+                           (tostring params.commandline)))))
           (do
             (auth.clear-token profile-name)
             (headers)
@@ -221,7 +229,7 @@ positional path params, --inputs, --body, then --i./-i/--b. fields."
     (when (and (next errors) (not p.no-validate))
       (die (.. (table.concat errors "\n") "\n(use --no-validate to run anyway)")))))
 
-(fn source-schema-loader [env auth-headers]
+(fn source-schema-loader [env auth-headers base-url]
   "Loader for source schemas: URLs through the transport, getting credentials
 only after answering 401/403, and never for a document whose loader options
 say :credentials false (a $ref to another origin); files directly."
@@ -231,6 +239,7 @@ say :credentials false (a $ref to another origin); files directly."
                       {:transport (or env.transport http-mod.request)
                        :headers opts.headers
                        :ssl opts.ssl
+                       : base-url
                        :auth-headers (when (not= false opts.credentials)
                                        auth-headers)})
         (atlas.load-schema location opts))))
@@ -246,7 +255,8 @@ say :credentials false (a $ref to another origin); files directly."
         paint #(pretty-mod.paint $1 $2 (not no-color))
         run-opts (client-options profile-name profile p env.config
                                  env.transport)]
-    (set run-opts.load-schema (source-schema-loader env run-opts.auth-headers))
+    (set run-opts.load-schema
+         (source-schema-loader env run-opts.auth-headers run-opts.base-url))
     (set run-opts.on-step
          (when show-progress (progress-reporter output (not no-color))))
     (set run-opts.max-gotos p.max-gotos)
@@ -278,11 +288,15 @@ say :credentials false (a $ref to another origin); files directly."
         profile-name (or p.profile (?. named :profile))
         profile (find-profile env.config profile-name)
         doc (arazzo.load-doc file)
+        _ (when (and profile-name (not profile))
+            (die (.. "Profile not found: " profile-name)))
         wf (when p.operation (arazzo.find-workflow doc p.operation))]
     (if (not p.operation) (list-arazzo-workflows doc) (not wf)
         (die (.. "Unknown workflow: " p.operation)) p.help
-        (print (cli-help.build-workflow wf (arazzo.workflow-inputs doc wf)
-                                        (arazzo.positional-inputs wf)))
+        (print (util.printable (cli-help.build-workflow wf
+                                                        (arazzo.workflow-inputs doc
+                                                                                wf)
+                                                        (arazzo.positional-inputs wf))))
         (let [inputs (workflow-inputs p named doc wf)]
           (check-inputs doc wf inputs p)
           (execute-workflow doc file wf inputs p profile-name profile env)))))
@@ -296,7 +310,10 @@ parsed by atlas.client."
       (load-schema-cached raw-schema
                           {:transport (or env.transport http-mod.request)
                            :headers opts.headers
-                           :auth-headers opts.auth-headers
+                           ;; a dry run's auth headers are placeholders
+                           :auth-headers (when (not (and p.dry-run (not p.curl)))
+                                           opts.auth-headers)
+                           :base-url opts.base-url
                            :ssl opts.ssl
                            :ttl (or p.cache-ttl (?. profile :cache-ttl) 3600)
                            :reload p.reload
@@ -366,14 +383,16 @@ invalid body unless --no-validate."
                              true)]
             (when (not ok)
               (die (tostring err)))
-            (print (format-servers servers index opts.server-vars)))
+            (print (util.printable (format-servers servers index
+                                                   opts.server-vars))))
           (let [(ok c) (pcall atlas.client schema opts)
                 c (if ok c (die (.. "failed to build client: " (tostring c))))
                 op (when p.operation
                      (or (. c p.operation)
                          (die (.. "Unknown operation: " p.operation))))]
             (if (or p.list (not op)) (list-ops c) p.help
-                (print (cli-help.build-cli op.path op.method op.spec))
+                (print (util.printable (cli-help.build-cli op.path op.method
+                                                           op.spec)))
                 (send-op op p opts profile config)))))))
 
 ;; ---- entry points ----

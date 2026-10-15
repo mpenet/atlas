@@ -251,7 +251,8 @@ returns (kind key value); kind is a value of field-prefixes."
                        :az :az
                        :arazzo :az
                        :auth :auth
-                       :profile :profile})
+                       :profile :profile
+                       :completion :completion})
 
 ;; the option entry of each --PREFIX.NAME=VALUE family, by field kind: its
 ;; :scope and :also say which commands take it

@@ -63,10 +63,13 @@ own scope, :any for the API commands op and az, or one of its :also."
           k)
     (table.sort)))
 
-(fn op-entries [schema]
-  "Operations of a schema keyed by CLI name, built like a real client."
+(fn op-entries [schema ?source-url]
+  "Operations of a schema keyed by CLI name, built like a real client;
+?source-url locates the documents its refs point to."
   (let [(ok c) (pcall atlas.client schema
-                      {:base-url "http://completion.invalid" :http-fn #nil})]
+                      {:base-url "http://completion.invalid"
+                       :http-fn #nil
+                       :source-url ?source-url})]
     (if ok c {})))
 
 (fn schema-field [schema key]
@@ -142,12 +145,13 @@ operation, or an Arazzo document's workflow and inputs."
         c {}]
     (when (and (= cmd :op) target)
       (let [(_ profile) (pcall find-profile config target)
-            (ok schema) (pcall ctx.load-schema (or (?. profile :schema) target))]
+            source (or (?. profile :schema) target)
+            (ok schema) (pcall ctx.load-schema source)]
         (when (and ok (= (type schema) :table))
           (let [index-flag (accumulate [v nil _ w (ipairs words)]
                              (or (w:match "^%-%-server%-index=(%d+)$") v))
                 index (or (tonumber index-flag) (?. profile :server-index) 1)]
-            (set c.ops (op-entries schema))
+            (set c.ops (op-entries schema source))
             (set c.server (. (atlas.servers schema) index))
             (set c.op (when name (. c.ops name)))))))
     (when (and (= cmd :az) target)
@@ -243,7 +247,13 @@ operation, or an Arazzo document's workflow and inputs."
   (print "    cands=(\"${stripped[@]}\")")
   (print "  fi")
   (print "  COMPREPLY=()")
-  (print "  for c in \"${cands[@]}\"; do [[ \"$c\" == \"$cur\"* ]] && COMPREPLY+=(\"$c\"); done")
+  ;; bash inserts replies as they are: quote them, so that spaces and shell
+  ;; syntax in spec values stay part of one argument
+  (print "  local q")
+  (print "  for c in \"${cands[@]}\"; do")
+  (print "    printf -v q '%q' \"$c\"")
+  (print "    [[ \"$c\" == \"$cur\"* || \"$q\" == \"$cur\"* ]] && COMPREPLY+=(\"$q\")")
+  (print "  done")
   (print "  if [[ ${#COMPREPLY[@]} -eq 1 && \"${COMPREPLY[0]}\" == *[=.] ]] && type compopt &>/dev/null; then compopt -o nospace; fi")
   (print "}")
   (print "complete -F _atlas_complete atlas"))
@@ -285,9 +295,10 @@ atlas __complete [--describe] LINE-UP-TO-CURSOR"
                                 (atlas.load-schema src)))
              :load-doc arazzo.load-doc}]
     (each [_ e (ipairs (if line (complete-entries line ctx) []))]
-      (print (if (and describe? e.help)
-                 (.. e.value "\t" (: (tostring e.help) :gsub "%s+" " "))
-                 e.value)))))
+      (print (util.printable (if (and describe? e.help)
+                                 (.. e.value "\t"
+                                     (: (tostring e.help) :gsub "%s+" " "))
+                                 e.value))))))
 
 {: options
  : scope-options

@@ -143,7 +143,8 @@ redirect-target allows."
   (var next-req (redirect-target current resp))
   (while next-req
     (when (>= hops 5)
-      (error (.. "too many redirects from " (util.redact-url req.url)) 0))
+      (error (.. "too many redirects from "
+                 (util.redact-url req.url req.sensitive-query)) 0))
     (set hops (+ hops 1))
     (set current next-req)
     (set resp (send current))
@@ -190,9 +191,9 @@ lines, plus the TLS settings."
   (let [(url payload headers) (encode-request req)
         (status head body) (curl.perform (transfer req url payload headers
                                                    (tls.options req.ssl)))]
-    (assert status
-            (string.format "%s %s failed: %s" req.method (util.redact-url url)
-                           (tostring head)))
+    (assert status (string.format "%s %s failed: %s" req.method
+                                  (util.redact-url url req.sensitive-query)
+                                  (tostring head)))
     (decode-response status (parse-headers head) body)))
 
 (fn request [req]

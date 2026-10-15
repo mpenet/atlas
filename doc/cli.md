@@ -79,7 +79,7 @@ atlas --version
 | `profile list` | Profiles with the schema each one uses, inherited ones included. |
 | `profile show` | A profile as atlas uses it, `extends` resolved. |
 | `profile import-restish` | Adds the APIs of a Restish configuration as profiles; see [Moving from Restish](guide.md#moving-from-restish). |
-| `auth` | Authenticates a profile now: for static credentials and external tools, prints the headers that would be sent; for OAuth, runs the flow again. `--logout` deletes the cached token. |
+| `auth` | Authenticates a profile now: for static credentials and external tools, prints the headers that would be sent (and a query API key, or the signing command); for OAuth, runs the flow again. `--logout` deletes the cached token. |
 | `completion` | Prints the completion script for a shell; see [Shell completion](#shell-completion). |
 | `--version` | Prints atlas's version and the libcurl/OpenSSL build it uses. |
 
@@ -328,7 +328,7 @@ A profile with `extends` takes every key of the profile it names and overrides t
 
 A profile's `auth` names a method and its parameters. Any parameter written `env:NAME` is read from the environment variable `NAME` when needed.
 
-Authentication runs only when a request is sent: never for `--help`, `--list`, `--servers`, `--dry-run` or completion, nor when the request's own headers already provide what it would add. A spec fetched from a URL is requested without credentials first, and with them only if the server answers 401 or 403. Credentials are computed once per command, reused by retries and pagination, and a header given explicitly (with `--h.` or in the profile's `headers`) wins over the one authentication adds.
+Authentication runs only when a request is sent: never for `--help`, `--list`, `--servers`, `--dry-run` or completion, nor when the request's own headers already provide what it would add. A spec fetched from a URL is requested without credentials first, and with them only if the server answers 401 or 403; when the profile's `base-url` is on another origin than the spec, the spec gets neither credentials nor the profile's `headers`. Credentials are computed once per command, reused by retries and pagination, and a header given explicitly (with `--h.` or in the profile's `headers`) wins over the one authentication adds.
 
 ### `bearer`
 

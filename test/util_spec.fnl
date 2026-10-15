@@ -48,7 +48,7 @@
                 (fn []
                   (assert.are.equal "https://h/x?appid=<redacted>&page=2"
                                     (util.redact-url "https://h/x?appid=s&page=2"
-                                                     {:appid true}))))))
+                                                     ["AppId"]))))))
 
 (describe "resolve-path"
           (fn []
@@ -362,3 +362,39 @@
                     (assert.is_false ok)
                     (assert.is_truthy (: (tostring err) :find
                                          "'filter' is an object" 1 true)))))))
+
+(fn mode-of [path]
+  (let [p (io.popen (.. "ls -ld " (util.shell-quote path)))
+        out (p:read :*a)]
+    (p:close)
+    (out:match "^(%S+)")))
+
+(describe "write-private"
+          (fn []
+            (it "writes a file only its owner can read, in a private directory"
+                (fn []
+                  (let [base (os.tmpname)
+                        dir (.. base "-d")
+                        path (.. dir "/f.json")]
+                    (assert.is_true (util.write-private path "secret"))
+                    (assert.are.equal "-rw-------" (mode-of path))
+                    (assert.are.equal "drwx------" (mode-of dir))
+                    (with-open [f (io.open path)]
+                      (assert.are.equal "secret" (f:read :*a)))
+                    (os.remove path)
+                    (os.remove dir)
+                    (os.remove base))))
+            (it "makes an existing file private"
+                (fn []
+                  (let [path (os.tmpname)]
+                    (os.execute (.. "chmod 644 " path))
+                    (assert.is_true (util.write-private path "x"))
+                    (assert.are.equal "-rw-------" (mode-of path))
+                    (os.remove path))))))
+
+(describe "printable"
+          (fn []
+            (it "escapes control characters but newlines and tabs"
+                (fn []
+                  (assert.are.equal "a\\x1B[31mb\\x1B]52;c;x\\x07\nc\td"
+                                    (util.printable "a\27[31mb\27]52;c;x\7\nc\td"))))))

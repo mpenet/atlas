@@ -161,6 +161,40 @@
                     (assert.is_truthy (r.out:find "GET https://api.test/pets?status=sold"
                                                   1 true))
                     (assert.are.equal 0 (length r.requests)))))
+            (it "escapes control characters of the spec's text"
+                (fn []
+                  (let [spec (.. (os.tmpname) ".json")]
+                    (with-open [f (io.open spec :w)]
+                      (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\",\"description\":\"s\\u001b[2J\"}],\"paths\":{\"/x\":{\"get\":{\"operationId\":\"getX\",\"summary\":\"list \\u001b]52;c;cHduZWQ=\\u0007\",\"description\":\"d\\u001b[31m\",\"responses\":{}}}}}"))
+                    (let [outs (icollect [_ args (ipairs [["op" spec "--list"]
+                                                          ["op"
+                                                           spec
+                                                           "get-x"
+                                                           "--help"]
+                                                          ["op"
+                                                           spec
+                                                           "--servers"]])]
+                                 (. (atlas-run args) :out))]
+                      (os.remove spec)
+                      (each [_ out (ipairs outs)]
+                        (assert.is_nil (out:find "\27" 1 true))
+                        (assert.is_truthy (out:find "\\x1B" 1 true)))))))
+            (it "does not run the signing tool for --dry-run"
+                (fn []
+                  (let [marker (os.tmpname)]
+                    (os.remove marker)
+                    (let [r (with-config {:profiles {:sign {:schema "test/fixtures/cli-api.json"
+                                                            :auth {:name "external-tool"
+                                                                   :params {:commandline (.. "touch "
+                                                                                             marker
+                                                                                             "; echo '{}'")}}}}}
+                              #(atlas-run ["op" "sign" "list-pets" "--dry-run"]))
+                          ran (io.open marker)]
+                      (when ran
+                        (ran:close)
+                        (os.remove marker))
+                      (assert.are.equal 0 r.code)
+                      (assert.is_nil ran)))))
             (it "uses the profile's output format"
                 (fn []
                   (let [r (atlas-run ["op" "yaml" "get-pet" "3"]
@@ -200,6 +234,36 @@
                                                                                                      {})))})]
                     (assert.are.equal 0 code)
                     (assert.are.equal 2 (length requests))
+                    (assert.is_nil (. requests 1 :headers :authorization)))))
+            (it "never sends placeholder credentials for a dry run's spec"
+                (fn []
+                  (let [(transport requests) (routes-transport {"GET https://api.test/openapi.json" (respond 401
+                                                                                                             {})})
+                        real-stderr io.stderr]
+                    (set io.stderr {:write (fn [])})
+                    (cli.run ["op" "remote" "list-pets" "--dry-run"]
+                             {: transport
+                              :config {:profiles {:remote {:schema "https://api.test/openapi.json"
+                                                           :auth {:name "bearer"
+                                                                  :params {:token "t"}}}}}
+                              :schema-cache false})
+                    (set io.stderr real-stderr)
+                    (each [_ req (ipairs requests)]
+                      (assert.is_nil (. req.headers :authorization))))))
+            (it "keeps profile headers and credentials from a spec on another origin"
+                (fn []
+                  (let [(transport requests) (routes-transport {"GET https://specs.test/openapi.json" (respond 401
+                                                                                                               {})})
+                        code (cli.run ["op" "remote" "--list"]
+                                      {: transport
+                                       :config {:profiles {:remote {:schema "https://specs.test/openapi.json"
+                                                                    :base-url "https://api.test"
+                                                                    :headers {:authorization "Bearer P"}
+                                                                    :auth {:name "bearer"
+                                                                           :params {:token "t"}}}}}
+                                       :schema-cache false})]
+                    (assert.are.equal 1 code)
+                    (assert.are.equal 1 (length requests))
                     (assert.is_nil (. requests 1 :headers :authorization)))))))
 
 (describe "atlas az"
@@ -280,6 +344,19 @@
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.out:find "fetchPet" 1 true))
                     (assert.are.equal 0 (length r.requests)))))
+            (it "rejects an unknown profile"
+                (fn []
+                  (let [r (atlas-run ["az"
+                                      "flows"
+                                      "fetchPet"
+                                      "-i"
+                                      "id=7"
+                                      "--profile"
+                                      "typo"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "Profile not found: typo" 1
+                                                  true))
+                    (assert.are.equal 0 (length r.requests)))))
             (it "rejects unknown workflows and --dry-run"
                 (fn []
                   (let [r (atlas-run ["az" "flows" "nope"])]
@@ -331,6 +408,25 @@
                 (fn []
                   (assert.are.equal "authorization: Bearer t0k"
                                     (. (atlas-run ["auth" "p"]) :out))))
+            (it "rejects options given to completion"
+                (fn []
+                  (let [r (atlas-run ["completion" "bash" "--dry-run"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "--dry-run doesn't apply to completion"
+                                                  1 true)))))
+            (it "tells what atlas auth adds besides headers"
+                (fn []
+                  (with-config {:profiles {:qkey {:auth {:name "api-key"
+                                                         :params {:in "query"
+                                                                  :name "appid"
+                                                                  :value "K"}}}
+                                           :sign {:auth {:name "external-tool"
+                                                         :params {:commandline "sign-it"}}}}}
+                    #(do
+                       (assert.are.equal "query: appid=K"
+                                         (. (atlas-run ["auth" "qkey"]) :out))
+                       (assert.are.equal "signs each request with: sign-it"
+                                         (. (atlas-run ["auth" "sign"]) :out))))))
             (it "rejects unknown commands with exit 1"
                 (fn []
                   (assert.are.equal 1 (. (atlas-run ["frobnicate"]) :code))))
@@ -690,7 +786,13 @@
                                                     1 true))
                       (assert.is_truthy (r.out:find "imported 3 profiles" 1
                                                     true))
-                      (assert.is_not_nil (io.open (.. target ".bak"))))))
+                      (assert.is_not_nil (io.open (.. target ".bak")))
+                      ;; profiles hold credentials
+                      (each [_ path (ipairs [target (.. target ".bak")])]
+                        (let [p (io.popen (.. "ls -l " path))
+                              mode (: (p:read :*a) :match "^(%S+)")]
+                          (p:close)
+                          (assert.are.equal "-rw-------" mode))))))
               (it "keeps the config's null values when rewriting it"
                   (fn []
                     (let [f (io.open target :w)]

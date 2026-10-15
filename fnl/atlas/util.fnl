@@ -72,6 +72,31 @@ dashes (getPetById → get-pet-by-id, projects/list_cards → projects-list-card
   "Quote s as a single POSIX shell word."
   (.. "'" (pick-values 1 (: (tostring s) :gsub "'" "'\\''")) "'"))
 
+(fn printable [s]
+  "s with control characters other than newline and tab written as \\xHH, so
+that text from a spec can't drive the terminal (escape sequences)."
+  (pick-values 1
+               (s:gsub "%c"
+                       (fn [c]
+                         (when (and (not= c "\n") (not= c "\t"))
+                           (string.format "\\x%02X" (string.byte c)))))))
+
+(fn write-private [path text]
+  "Write text to path, readable by its owner only (0600); missing parent
+directories are created 0700. Returns true, or nil and an error."
+  (let [dir (or (path:match "^(.*)/[^/]*$") ".")]
+    ;; created private from the start: there is no moment when others can
+    ;; read it
+    (os.execute (.. "umask 077 && mkdir -p " (shell-quote dir) " && : >> "
+                    (shell-quote path) " && chmod 600 " (shell-quote path)))
+    (let [(f err) (io.open path :w)]
+      (if f
+          (do
+            (f:write text)
+            (f:close)
+            true)
+          (values nil err)))))
+
 (local default-ports {:http "80" :https "443"})
 
 (fn origin [url]
@@ -120,13 +145,17 @@ URL parsers read differently: such a URL matches no origin."
 
 (fn redact-url [url ?names]
   "url with its user info masked, and the values of query parameters that look
-like credentials or are in the set ?names (lowercase)."
-  (let [(without-userinfo) (url:gsub "^(%a[%w+.-]*://)[^/?#]*@" "%1<redacted>@")]
+like credentials or are in the list ?names (any case), such as a request's
+:sensitive-query."
+  (let [(without-userinfo) (url:gsub "^(%a[%w+.-]*://)[^/?#]*@" "%1<redacted>@")
+        names (collect [_ n (ipairs (or ?names []))]
+                (n:lower)
+                true)]
     (pick-values 1 (without-userinfo:gsub "([?&])([^=&#]+)=([^&#]*)"
                      (fn [sep name value]
                        (let [n (url-decode name)]
                          (.. sep name "="
-                             (if (or (secret-name? n) (?. ?names (n:lower)))
+                             (if (or (secret-name? n) (. names (n:lower)))
                                  "<redacted>"
                                  value))))))))
 
@@ -292,6 +321,8 @@ a,b and objects as k1,v1,k2,v2 (keys sorted), each part url-encoded."
  : merge-parameters
  : replace-all
  : shell-quote
+ : write-private
+ : printable
  : secret-name?
  : redact-url
  : origin

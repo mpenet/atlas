@@ -166,8 +166,9 @@ request signing, logging, and the transport (or dry-run printing)."
         auth-cfg (let [a (?. profile :auth)]
                    (when (and a a.name (not= a.name "")) a))
         auth-names (if auth-cfg (auth.header-names auth-cfg) [])
+        dry-run (and p.dry-run (not p.curl))
         auth-headers (when auth-cfg
-                       (if (and p.dry-run (not p.curl))
+                       (if dry-run
                            ;; --dry-run redacts credentials anyway: don't authenticate
                            #(collect [_ n (ipairs auth-names)] n "<auth>")
                            (lazy-auth-headers profile-name auth-cfg ssl)))
@@ -175,7 +176,12 @@ request signing, logging, and the transport (or dry-run printing)."
                       (printing-transport request-text)
                       (or ?transport http-mod.request))
         logged (if verbose (wrap-log-request transport) transport)
-        signed (or (when auth-cfg (auth.wrap-http-fn auth-cfg logged)) logged)
+        ;; nor run a signing tool
+        signed (or (when (and auth-cfg
+                              (not (and dry-run
+                                        (= auth-cfg.name "external-tool"))))
+                     (auth.wrap-http-fn auth-cfg logged))
+                   logged)
         retrying (retry.wrap signed (retry-options profile p config))
         pagination (paginate-options profile p config)
         paginated (if pagination (paginate.wrap retrying pagination) retrying)
@@ -207,8 +213,14 @@ request signing, logging, and the transport (or dry-run printing)."
 (fn fetch-schema [url opts]
   "Fetch and parse a schema URL through opts.transport. Credentials are only
 sent after the server answers 401/403, so help and listings don't trigger
-authentication. opts: {:transport :headers :ssl :auth-headers}"
-  (let [send #(opts.transport {:method "GET"
+authentication; headers and credentials are not sent at all when the schema
+is on another origin than the API's :base-url.
+opts: {:transport :headers :ssl :auth-headers :base-url}"
+  (let [opts (if (and opts.base-url
+                      (not= (util.origin url) (util.origin opts.base-url)))
+                 {:transport opts.transport :ssl opts.ssl}
+                 opts)
+        send #(opts.transport {:method "GET"
                                : url
                                :headers $1
                                :ssl opts.ssl
