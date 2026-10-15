@@ -116,7 +116,9 @@ stays text."
                    (json-lines-type? content-type)
                    decode-json-lines
                    (yaml-type? content-type)
-                   #(yaml.parse $ true))
+                   ;; an empty or null document is null, as JSON's
+                   #(let [v (yaml.parse $ true)]
+                      (if (= nil v) json.null v)))
         body (when (> (length raw) 0)
                (if decode
                    (let [(ok val) (pcall decode raw)]

@@ -297,19 +297,22 @@ arrays."
         :table #(util.printable (tsv-field $))})
 
 (fn tabulate [value fmt ?columns]
-  "value as table, csv or tsv text: an array of objects (or one object) is a
-row each, under a header of ?columns or of every key, sorted; an array of
-other values is one per line."
+  "value as table, csv or tsv text, or nil for nothing: the objects of an
+array (or one object) are a row each, under a header of ?columns or of every
+key, sorted; an array of other values is one per line."
   (let [field (. table-fields fmt)
         rows (if (or (json.array? value)
                      (and (container? value) (= nil (next value))))
                  value
                  [value])
         objects (icollect [_ row (ipairs rows)]
-                  (when (container? row) row))]
-    (if (= nil (next objects))
+                  (when (and (container? row) (not (json.array? row)))
+                    row))]
+    (if (and (= nil (next objects)) (next rows))
         (table.concat (icollect [_ row (ipairs rows)]
                         (field (cell-text row))) "\n")
+        (and (= nil (next objects)) (not ?columns))
+        nil
         (let [columns (or ?columns
                           (let [seen {}]
                             (each [_ obj (ipairs objects)]
@@ -341,6 +344,8 @@ other values is one per line."
   "A selection as raw text: strings as they are, a list of values one per
 line, objects as JSON."
   (if (not= (type v) :table) (tostring v)
+      ;; nothing to print, rather than an empty line
+      (and (json.array? v) (= nil (. v 1))) nil
       (and (json.array? v) (accumulate [all true _ x (ipairs v) &until (not all)]
                              (not (container? x))))
       (table.concat (icollect [_ x (ipairs v)]

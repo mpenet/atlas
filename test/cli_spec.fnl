@@ -1725,6 +1725,34 @@ answers candidates; one reply per line, each followed by |."
                                                           :body [{:a "\27[2J"}]}
                                                          :table false)
                                       :find "\27" 1 true))))
+              (it "writes arrays inside arrays one per line, as JSON"
+                  (fn []
+                    (assert.are.equal "[1,2]\n[3]"
+                                      (cli.format-output {:status 200
+                                                          :headers {}
+                                                          :body [[1 2] [3]]}
+                                                         :table false))
+                    (assert.are.equal "a\n1"
+                                      (cli.format-output {:status 200
+                                                          :headers {}
+                                                          :body [{:a 1} [5]]}
+                                                         :csv false))))
+              (it "prints nothing for an empty array, or the selected header"
+                  (fn []
+                    (let [json (require :atlas.json)
+                          empty {:status 200
+                                 :headers {}
+                                 :body (json.array [])
+                                 :raw "[]"}]
+                      (assert.is_nil (cli.format-output empty :table false))
+                      (assert.are.equal "a,b"
+                                        (cli.format-output empty :csv false
+                                                           "[].{a,b}"))
+                      (assert.is_nil (cli.format-output {:status 200
+                                                         :headers {}
+                                                         :body {:x (json.array [])}
+                                                         :raw "{}"}
+                                                        :raw false ".x")))))
               (it "raw prints a list of values one per line"
                   (fn []
                     (assert.are.equal "a\n1\ntrue"

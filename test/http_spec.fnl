@@ -596,3 +596,21 @@
                                                              {:content-type "application/x-ndjson"}
                                                              "{\"a\":1}\nnope\n")
                                        :body))))))
+
+(describe "http.decode-response on hostile YAML"
+          (fn []
+            (it "keeps a recursive YAML body as text"
+                (fn []
+                  (assert.are.equal "a: &a {self: *a}\n"
+                                    (. (http.decode-response 200
+                                                             {:content-type "application/yaml"}
+                                                             "a: &a {self: *a}\n")
+                                       :body))))
+            (it "keeps a null YAML body as null"
+                (fn []
+                  (let [json (require :atlas.json)]
+                    (assert.are.equal json.null
+                                      (. (http.decode-response 200
+                                                               {:content-type "application/yaml"}
+                                                               "~\n")
+                                         :body)))))))

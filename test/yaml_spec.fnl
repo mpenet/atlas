@@ -195,3 +195,34 @@
                                                      (.. "parse " i)))))]
                     (debug.sethook)
                     (assert.is_true ok err))))))
+
+(describe "yaml.parse on hostile aliases"
+          (fn []
+            (it "rejects an alias inside its own anchor"
+                (fn []
+                  (let [(ok err) (pcall yaml.parse "a: &a {self: *a}\n")]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "recursive alias *a" 1 true)))
+                  (let [(ok err) (pcall yaml.parse "- &l [1, *l]\n")]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "recursive alias"
+                                         1 true)))))
+            (it "rejects documents whose aliases expand past a million nodes"
+                (fn []
+                  (let [lines ["a0: &a0 [x, x, x, x, x, x, x, x, x, x]"]]
+                    (for [i 1 8]
+                      (table.insert lines
+                                    (string.format "a%d: &a%d [%s]" i i
+                                                   (table.concat (fcollect [_ 1 10]
+                                                                   (.. "*a"
+                                                                       (- i 1)))
+                                                                 ", "))))
+                    (let [(ok err) (pcall yaml.parse (table.concat lines "\n"))]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "expands to more than" 1 true))))))
+            (it "keeps aliases used within the budget"
+                (fn []
+                  (let [doc (yaml.parse "base: &b {x: 1}\nlist: [*b, *b, *b]\n")]
+                    (assert.are.same [{:x 1} {:x 1} {:x 1}] doc.list))))))

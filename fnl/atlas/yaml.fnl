@@ -42,8 +42,19 @@ the core schema; quoted scalars are strings. Nulls are nil."
           (if (not= nil n) n s)))))
 
 ;; The loader works on a parser table:
-;; {:next-event libyaml-iterator :event current-event :anchors {name {:value v}}
-;;  :text source}
+;; {:next-event libyaml-iterator :event current-event
+;;  :anchors {name {:value v :size nodes}} :building {anchor-being-loaded true}
+;;  :nodes nodes-so-far :text source}
+
+;; aliases share their anchor's value, so a small document can stand for a
+;; huge one (billion laughs): the nodes it expands to are counted
+(local max-nodes 1000000)
+
+(fn count-nodes [parser n]
+  (set parser.nodes (+ parser.nodes n))
+  (when (> parser.nodes max-nodes)
+    (error (.. "YAML parse error: the document expands to more than " max-nodes
+               " nodes through its aliases") 0)))
 
 (fn advance [parser]
   (let [(ok e) (pcall parser.next-event)]
@@ -59,8 +70,23 @@ the core schema; quoted scalars are strings. Nulls are nil."
 (fn remember [parser value]
   ;; boxed, so anchored false and null can be told apart from "unknown"
   (when parser.event.anchor
-    (tset parser.anchors parser.event.anchor {: value}))
+    (tset parser.anchors parser.event.anchor {: value :size 1}))
   value)
+
+(fn load-collection [parser value load-items]
+  "value, an anchored collection, filled by load-items; its anchor can't be
+used inside it."
+  (let [anchor parser.event.anchor
+        start parser.nodes]
+    (remember parser value)
+    (count-nodes parser 1)
+    (when anchor
+      (tset parser.building anchor true))
+    (load-items value)
+    (when anchor
+      (tset parser.building anchor nil)
+      (tset (. parser.anchors anchor) :size (- parser.nodes start)))
+    value))
 
 (var load-node nil)
 
@@ -84,37 +110,47 @@ stays \"010\"."
       (when (= nil (. m k)) (tset m k v)))))
 
 (fn load-mapping [parser]
-  (let [m (remember parser {})]
-    (while (not= (. (advance parser) :type) :MAPPING_END)
-      (let [merge? (and (= parser.event.style :PLAIN)
-                        (= parser.event.value "<<"))
-            key (mapping-key parser)
-            value (do
-                    (advance parser)
-                    (load-node parser))]
-        (if (and merge? (= (type value) :table)) (merge-into m value)
-            (not= nil value) (tset m key value)
-            parser.keep-null (tset m key json.null))))
-    m))
+  (load-collection parser {}
+                   (fn [m]
+                     (while (not= (. (advance parser) :type) :MAPPING_END)
+                       (let [merge? (and (= parser.event.style :PLAIN)
+                                         (= parser.event.value "<<"))
+                             key (mapping-key parser)
+                             value (do
+                                     (advance parser)
+                                     (load-node parser))]
+                         (if (and merge? (= (type value) :table))
+                             (merge-into m value)
+                             (not= nil value)
+                             (tset m key value)
+                             parser.keep-null
+                             (tset m key json.null)))))))
 
 (fn load-sequence [parser]
-  (let [s (remember parser (json.array []))]
-    (var n 0)
-    (while (not= (. (advance parser) :type) :SEQUENCE_END)
-      (set n (+ n 1))
-      ;; null keeps its place in a sequence
-      (tset s n (match (load-node parser) nil json.null v v)))
-    s))
+  (load-collection parser (json.array [])
+                   (fn [s]
+                     (var n 0)
+                     (while (not= (. (advance parser) :type) :SEQUENCE_END)
+                       (set n (+ n 1))
+                       ;; null keeps its place in a sequence
+                       (tset s n (match (load-node parser) nil json.null v v))))))
 
 (set load-node
      (fn [parser]
        (let [event parser.event]
          (match event.type
-           :SCALAR (remember parser (scalar-value event))
-           :ALIAS (. (or (. parser.anchors event.anchor)
-                         (error (.. "YAML parse error: unknown alias *"
-                                    event.anchor)
-                                0)) :value)
+           :SCALAR (do
+                     (count-nodes parser 1)
+                     (remember parser (scalar-value event)))
+           :ALIAS (let [box (or (. parser.anchors event.anchor)
+                                (error (.. "YAML parse error: unknown alias *"
+                                           event.anchor)
+                                       0))]
+                    (when (. parser.building event.anchor)
+                      (error (.. "YAML parse error: recursive alias *"
+                                 event.anchor) 0))
+                    (count-nodes parser box.size)
+                    box.value)
            :MAPPING_START (load-mapping parser)
            :SEQUENCE_START (load-sequence parser)
            other (error (.. "YAML parse error: unexpected " other) 0)))))
@@ -126,6 +162,8 @@ stays \"010\"."
   ;; could free it mid-parse
   (let [parser {:next-event (libyaml.parser text)
                 :anchors {}
+                :building {}
+                :nodes 0
                 : text
                 :keep-null ?keep-null}]
     (advance parser)
