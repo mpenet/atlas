@@ -51,6 +51,8 @@ multipart operations take JSON or YAML; any other type is sent as-is."
   (let [body (or ?base {})]
     (each [_ [path v] (ipairs fields)]
       (let [keys (icollect [k (path:gmatch "[^.]+")] k)]
+        (when (= nil (. keys 1))
+          (error (.. "field path '" path "' has no field name") 0))
         (set-nested body keys
                     (coerce.from-string v (coerce.schema-at ?schema keys)))))
     body))

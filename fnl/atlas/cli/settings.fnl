@@ -215,15 +215,18 @@ request signing, logging, and the transport (or dry-run printing)."
 sent after the server answers 401/403, so help and listings don't trigger
 authentication; headers and credentials are not sent at all when the schema
 is on another origin than the API's :base-url.
-opts: {:transport :headers :ssl :auth-headers :base-url}"
+opts: {:transport :headers :ssl :timeout :auth-headers :base-url}"
   (let [opts (if (and opts.base-url
                       (not= (util.origin url) (util.origin opts.base-url)))
-                 {:transport opts.transport :ssl opts.ssl}
+                 {:transport opts.transport
+                  :ssl opts.ssl
+                  :timeout opts.timeout}
                  opts)
         send #(opts.transport {:method "GET"
                                : url
                                :headers $1
                                :ssl opts.ssl
+                               :timeout opts.timeout
                                :sensitive-headers $2})
         first (send (or opts.headers {}))
         resp (if (and opts.auth-headers

@@ -46,7 +46,8 @@ declares; records the variables it used in used."
       (atlas.client url opts)
       (let [schema ((or opts.load-schema atlas.load-schema) url
                                                             {:ssl opts.ssl
-                                                             :headers opts.headers})
+                                                             :headers opts.headers
+                                                             :timeout opts.timeout})
             declared (or (?. schema :servers (or opts.server-index 1)
                              :variables) {})
             own (collect [name value (pairs server-vars)]

@@ -646,7 +646,22 @@
                     (assert.are.same {:headers {:x-api-key "k"}}
                                      (. seen "https://api.test/common.json"))
                     (assert.are.same {:credentials false}
-                                     (. seen "https://other.test/common.json")))))))
+                                     (. seen "https://other.test/common.json")))))
+            (it "get the client's timeout"
+                (fn []
+                  (let [seen {}
+                        docs {"https://api.test/openapi.json" (schema {"/a" {:get {:operationId "a"
+                                                                                   :responses {"200" {:$ref "https://api.test/common.json#/ok"}
+                                                                                               "404" {:$ref "https://other.test/common.json#/nf"}}}}})
+                              "https://api.test/common.json" {:ok {:description "ok"}}
+                              "https://other.test/common.json" {:nf {:description "nf"}}}]
+                    (atlas.client "https://api.test/openapi.json"
+                                  {:timeout 5
+                                   :load-schema (fn [location opts]
+                                                  (tset seen location opts)
+                                                  (. docs location))})
+                    (each [_ opts (pairs seen)]
+                      (assert.are.equal 5 opts.timeout)))))))
 
 (describe "schema documents"
           (fn []

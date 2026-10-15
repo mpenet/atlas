@@ -76,6 +76,8 @@
                        (_ err) (.. "(broken: " (tostring err) ")"))))))))
 
 (fn profile-show [config name]
+  (when (not name)
+    (die "Usage: atlas profile show <name>"))
   (let [p (find-profile config name)]
     (if p
         (print (pretty-mod.pretty p 0 (colors-wanted?)))
@@ -122,7 +124,7 @@ profiles are kept. --dry-run prints the converted profiles instead."
         names (sorted-names profiles)]
     (io.stderr:write (.. "reading " path "\n"))
     (each [_ w (ipairs warnings)]
-      (io.stderr:write (.. "warning: " w "\n")))
+      (io.stderr:write (.. "warning: " (util.printable w) "\n")))
     (if p.dry-run
         (print (pretty-mod.pretty profiles 0 false))
         (let [merged (collect [k v (pairs existing)] k v)
@@ -146,8 +148,8 @@ profiles are kept. --dry-run prints the converted profiles instead."
     :list (profile-list env.config)
     :show (profile-show env.config name)
     :import-restish (import-restish name p env)
-    _ (die (.. "Unknown profile subcommand: " (tostring subcmd)
-               "\nUsage: atlas profile <list|show|import-restish> [name-or-file]"))))
+    _ (die (.. (if subcmd (.. "Unknown profile subcommand: " subcmd "\n") "")
+               "Usage: atlas profile <list|show|import-restish> [name-or-file]"))))
 
 (fn run-auth [profile-name p config]
   (when (not profile-name)
@@ -186,6 +188,14 @@ profiles are kept. --dry-run prints the converted profiles instead."
 
 ;; ---- az ----
 
+(fn object-option [name value]
+  "value, which must be a JSON object to give workflow inputs (or nil)."
+  (when (and (not= nil value)
+             (or (not= (type value) :table) (= value json.null)
+                 (json.array? value)))
+    (die (.. name " must be an object of workflow inputs")))
+  (or value {}))
+
 (fn workflow-inputs [p named doc wf]
   "Inputs for a run, lowest priority first: the context's configured inputs,
 positional path params, --inputs, --body, then --i./-i/--b. fields."
@@ -195,10 +205,10 @@ positional path params, --inputs, --body, then --i./-i/--b. fields."
     (each [j name (ipairs (arazzo.positional-inputs wf))]
       (let [v (. p.path-params j)]
         (when v (tset base name v))))
-    (each [k v (pairs (or p.arazzo-inputs-blob {}))]
+    (each [k v (pairs (object-option "--inputs" p.arazzo-inputs-blob))]
       (tset base k v))
     (when p.body
-      (each [k v (pairs (decode-structured p.body))]
+      (each [k v (pairs (object-option "--body" (decode-structured p.body)))]
         (tset base k v)))
     (let [fields (icollect [_ f (ipairs p.input-fields)] f)]
       (each [_ f (ipairs p.body-fields)]
@@ -210,9 +220,11 @@ positional path params, --inputs, --body, then --i./-i/--b. fields."
   (let [paint #(pretty-mod.paint $1 $2 use-color)]
     (fn [info]
       (match info.status
-        :running (io.stderr:write (.. (paint :dim "→") " " info.step "\n"))
+        :running (io.stderr:write (.. (paint :dim "→") " "
+                                      (util.printable info.step) "\n"))
         :done (do
-                (io.stderr:write (.. (paint :ok "✓") " " info.step
+                (io.stderr:write (.. (paint :ok "✓") " "
+                                     (util.printable info.step)
                                      (if info.elapsed
                                          (string.format "  %.3fs" info.elapsed)
                                          "")
@@ -240,6 +252,7 @@ say :credentials false (a $ref to another origin); files directly."
                       {:transport (or env.transport http-mod.request)
                        :headers opts.headers
                        :ssl opts.ssl
+                       :timeout opts.timeout
                        : base-url
                        :auth-headers (when (not= false opts.credentials)
                                        auth-headers)})
@@ -269,10 +282,11 @@ say :credentials false (a $ref to another origin); files directly."
           timing (string.format "  %.3fs" (- (socket.gettime) t0))]
       (when show-progress
         (io.stderr:write (if ok
-                             (.. (paint :ok "✓") " workflow " wf.workflowId
-                                 timing "\n")
-                             (.. (paint :fail "✗") " workflow " wf.workflowId
-                                 " failed" timing "\n"))))
+                             (.. (paint :ok "✓") " workflow "
+                                 (util.printable wf.workflowId) timing "\n")
+                             (.. (paint :fail "✗") " workflow "
+                                 (util.printable wf.workflowId) " failed" timing
+                                 "\n"))))
       (if ok
           (print-arazzo-result result mode output no-color)
           (die (tostring result))))))
@@ -317,6 +331,7 @@ parsed by atlas.client."
                                            opts.auth-headers)
                            :base-url opts.base-url
                            :ssl opts.ssl
+                           :timeout opts.timeout
                            :ttl (or p.cache-ttl (?. profile :cache-ttl) 3600)
                            :reload p.reload
                            :cache env.schema-cache})
@@ -335,7 +350,7 @@ invalid body unless --no-validate."
       (each [_ e (ipairs (check-body op request.body))]
         (table.insert errors e))
       (each [_ w (ipairs warnings)]
-        (io.stderr:write (.. "warning: " w "\n")))
+        (io.stderr:write (.. "warning: " (util.printable w) "\n")))
       (when (and (next errors) (not p.no-validate))
         (die (.. (table.concat errors "\n")
                  "\n(use --no-validate to send anyway)"))))))
@@ -442,7 +457,9 @@ the schema cache."
               (if (= (type result) :number) result 0)
               (let [(code message) (exit-status result)]
                 (when (not= message "")
-                  (io.stderr:write (.. message "\n")))
+                  ;; messages quote specs and servers: keep their control
+                  ;; characters from the terminal
+                  (io.stderr:write (.. (util.printable message) "\n")))
                 code))))))
 
 (fn main [args]

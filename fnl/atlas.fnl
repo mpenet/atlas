@@ -27,10 +27,12 @@ names it in errors."
 
 (fn load-schema [path ?opts]
   "Load an OpenAPI schema (JSON or YAML) from a local file path or http(s):// URL.
-?opts — {:ssl tls-options :headers {}} for fetching a URL"
+?opts — {:ssl tls-options :headers {} :timeout seconds} for fetching a URL"
   (parse-schema (http.fetch-text path
                                  {:headers (?. ?opts :headers)
-                                  :ssl (?. ?opts :ssl)}) path))
+                                  :ssl (?. ?opts :ssl)
+                                  :timeout (?. ?opts :timeout)})
+                path))
 
 (fn merge-headers [...]
   "Merge header tables left to right; names are lowercased so later
@@ -170,7 +172,7 @@ credentials only go to the spec's own origin."
   (let [origin (when source-url (util.origin source-url))]
     (if (and origin (= origin (util.origin location)))
         load-opts
-        {:ssl load-opts.ssl :credentials false})))
+        {:ssl load-opts.ssl :timeout load-opts.timeout :credentials false})))
 
 (fn sorted [items]
   (doto (icollect [_ x (ipairs items)] x)
@@ -217,7 +219,9 @@ schema — parsed schema table, local file path, or http(s):// URL
 base-url defaults to schema.servers[1].url with :server-vars applied"
   (let [source-url (or (when (= (type schema) :string)
                          schema) (?. ?opts :source-url))
-        load-opts {:ssl (?. ?opts :ssl) :headers (?. ?opts :headers)}
+        load-opts {:ssl (?. ?opts :ssl)
+                   :headers (?. ?opts :headers)
+                   :timeout (?. ?opts :timeout)}
         load (or (?. ?opts :load-schema) load-schema)
         schema (if (= (type schema) :string)
                    (load schema load-opts)

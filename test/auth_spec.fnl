@@ -67,6 +67,22 @@
                       (assert.is_truthy (body:find "client_id=my-client" 1 true))
                       (assert.is_truthy (body:find "client_secret=my-secret" 1
                                                    true))))))
+            (it "requires an access_token in the response"
+                (fn []
+                  (let [(http) (seq-mock (ok-resp (json-body {:token_type "bearer"})))
+                        auth (reload-auth http)
+                        profile (tmp-profile)
+                        (ok err) (pcall auth.authenticate profile
+                                        {:name "oauth-client-credentials"
+                                         :params {:token_url "https://auth.example.com/token"
+                                                  :client_id "c"
+                                                  :client_secret "s"}}
+                                        {})]
+                    (clean-token profile)
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "token response has no access_token" 1
+                                         true)))))
             (it "includes scope when provided"
                 (fn []
                   (let [(http calls) (seq-mock (ok-resp (json-body {:access_token "tok"
@@ -222,7 +238,7 @@
                   (let [sleep-calls []
                         sock (mock-socket (fn [n] (table.insert sleep-calls n)))
                         (http calls) (seq-mock (ok-resp (json-body {:device_code "dcode"
-                                                                    :user_code "ABCD-1234"
+                                                                    :user_code "ABCD-1234\27]0;x\7"
                                                                     :verification_uri "https://example.com/activate"
                                                                     :expires_in 300
                                                                     :interval 5}))
@@ -249,7 +265,9 @@
                     (assert.are.equal 2 (length sleep-calls))
                     (assert.are.equal 5 (. sleep-calls 1))
                     (let [stderr (table.concat stderr-buf)]
-                      (assert.is_truthy (stderr:find "ABCD-1234" 1 true))))))
+                      (assert.is_truthy (stderr:find "ABCD-1234" 1 true))
+                      ;; the server's text can't drive the terminal
+                      (assert.is_nil (stderr:find "\27" 1 true))))))
             (it "applies slow_down backoff"
                 (fn []
                   (let [sleep-calls []

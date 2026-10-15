@@ -201,12 +201,13 @@ lines, plus the TLS settings."
 
 (fn fetch-text [location ?opts]
   "Return the text at location: an http(s):// URL or a local file path.
-?opts: {:ssl {} :headers {}}"
+?opts: {:ssl {} :headers {} :timeout seconds}"
   (if (location:match "^https?://")
       (let [resp (request {:method "GET"
                            :url location
                            :headers (?. ?opts :headers)
-                           :ssl (?. ?opts :ssl)})]
+                           :ssl (?. ?opts :ssl)
+                           :timeout (?. ?opts :timeout)})]
         (assert (util.success? resp.status)
                 (string.format "HTTP %s fetching %s" resp.status
                                (util.redact-url location)))

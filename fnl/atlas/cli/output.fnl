@@ -268,11 +268,13 @@ variable shows the value in effect."
                                     ")"))))))
     (table.concat lines "\n")))
 
-(fn print-step [step-id step render full]
+(fn print-step [raw-step-id step render full]
+  (local step-id (util.printable raw-step-id))
   (if full
       (do
         (print (.. "--- " step-id " request ---"))
-        (when step.op-ref (print (.. "operation: " step.op-ref)))
+        (when step.op-ref
+          (print (.. "operation: " (util.printable (tostring step.op-ref)))))
         (when (and step.request step.request.body)
           (print (render step.request.body)))
         (print (.. "--- " step-id " response"

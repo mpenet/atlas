@@ -24,6 +24,7 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - Text from a spec (summaries, descriptions, server descriptions, completion help) is printed with its control characters escaped, so a spec cannot send terminal escape sequences; so is an OAuth provider's error description.
 - The OAuth callback checks the `state` before anything else: a forged callback without it can no longer pose as the provider's error.
 - `-v` redacts credentials in response headers (`set-cookie`, `...token`) as it does in request headers.
+- Error messages, warnings, Arazzo step ids and the OAuth device prompt escape control characters too: they quote specs and servers.
 - Headers added by external-tool signing are marked as credentials: logs and dry runs redact them, and they are dropped on a redirect to another origin.
 - The libcurl binding rejects URLs, header names and values and options that contain a NUL byte, rather than cutting them short.
 - A URL whose host part holds a backslash or a control character (such as a NUL in a `$ref`) matches no origin, so credentials never follow it (libcurl reads `http://a\@b/` as host `b`); retried schema fetches and next-page requests keep the marking of credential headers, so a later cross-origin redirect drops them; `$ref` errors redact the document's URL.
@@ -113,6 +114,10 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - `atlas.parse-schema` rejects `null` and arrays; an empty item in a `parameters` list is ignored.
 - Completion lists the operations of specs whose `$ref`s point into other files.
 - `atlas auth` shows a query API key and the signing command, which it printed nothing for; `atlas completion` rejects options.
+- `--timeout` (and a profile's `timeout`) applies to fetching specs and the documents their `$ref`s name: a server that never answers no longer hangs atlas.
+- Completion works in bash 3.2 (macOS), after variable assignments (`FOO=1 atlas …`) and, in zsh, after other commands on the line (`true && atlas …`); it uses the profile's `cache-ttl` and TLS settings and gives up on a spec fetch after 5 seconds.
+- An OAuth token response without `access_token` is reported as such.
+- `--b..=1`, `-i .=1`, non-object `--inputs`/`-d` for workflows, `atlas profile` and `atlas profile show` without a name give clear errors.
 - Many more; see the commit history.
 
 ## [1.0.0-alpha14] - 2026-07-06

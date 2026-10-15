@@ -179,6 +179,25 @@
                       (each [_ out (ipairs outs)]
                         (assert.is_nil (out:find "\27" 1 true))
                         (assert.is_truthy (out:find "\\x1B" 1 true)))))))
+            (it "escapes control characters in errors and warnings"
+                (fn []
+                  (let [spec (.. (os.tmpname) ".json")]
+                    (with-open [f (io.open spec :w)]
+                      (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{\"/x\":{\"get\":{\"operationId\":\"getX\",\"parameters\":[{\"name\":\"q\\u001b]0;P\\u0007\",\"in\":\"query\"}],\"responses\":{\"200\":{\"$ref\":\"#/nope\\u001b[31m\"}}}}}}"))
+                    (let [r (atlas-run ["op" spec "--list"])]
+                      (assert.are.equal 1 r.code)
+                      (assert.is_nil (r.err:find "\27" 1 true))
+                      (assert.is_truthy (r.err:find "\\x1B" 1 true)))
+                    (with-open [f (io.open spec :w)]
+                      (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{\"/x\":{\"get\":{\"operationId\":\"getX\",\"parameters\":[{\"name\":\"q\\u001b]0;P\\u0007\",\"in\":\"query\"}],\"responses\":{}}}}}"))
+                    (let [r (atlas-run ["op"
+                                        spec
+                                        "get-x"
+                                        "--q.zz=1"
+                                        "--dry-run"])]
+                      (os.remove spec)
+                      (assert.is_truthy (r.err:find "warning" 1 true))
+                      (assert.is_nil (r.err:find "\27" 1 true))))))
             (it "does not run the signing tool for --dry-run"
                 (fn []
                   (let [marker (os.tmpname)]
@@ -235,6 +254,18 @@
                     (assert.are.equal 0 code)
                     (assert.are.equal 2 (length requests))
                     (assert.is_nil (. requests 1 :headers :authorization)))))
+            (it "fetches the spec within --timeout"
+                (fn []
+                  (let [(transport requests) (routes-transport {"GET https://api.test/openapi.json" (respond 500
+                                                                                                             {})})
+                        real-stderr io.stderr]
+                    (set io.stderr {:write (fn [])})
+                    (cli.run ["op" "remote" "--list" "--timeout" "2"]
+                             {: transport
+                              :config {:profiles {:remote {:schema "https://api.test/openapi.json"}}}
+                              :schema-cache false})
+                    (set io.stderr real-stderr)
+                    (assert.are.equal 2 (. requests 1 :timeout)))))
             (it "never sends placeholder credentials for a dry run's spec"
                 (fn []
                   (let [(transport requests) (routes-transport {"GET https://api.test/openapi.json" (respond 401
@@ -344,6 +375,27 @@
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.out:find "fetchPet" 1 true))
                     (assert.are.equal 0 (length r.requests)))))
+            (it "escapes control characters of step ids"
+                (fn []
+                  (let [file (.. (os.tmpname) ".json")]
+                    (with-open [f (io.open file :w)]
+                      (f:write "{\"arazzo\":\"1.0.0\",\"info\":{},\"sourceDescriptions\":[{\"name\":\"api\",\"type\":\"openapi\",\"url\":\""
+                               (os.getenv :PWD)
+                               "/test/fixtures/cli-api.json\"}],\"workflows\":[{\"workflowId\":\"w\",\"steps\":[{\"stepId\":\"s\\u001b]0;P\\u0007\",\"operationId\":\"getPet\",\"parameters\":[{\"name\":\"id\",\"in\":\"path\",\"value\":7}]}]}]}"))
+                    (let [routes {"GET https://api.test/pets/7" (respond 200
+                                                                         {:name "Rex"})}
+                          verbose (atlas-run ["az" file "w" "-v"] routes)
+                          steps (atlas-run ["az"
+                                            file
+                                            "w"
+                                            "--arazzo-output"
+                                            "full"]
+                                           routes)]
+                      (os.remove file)
+                      (assert.are.equal 0 verbose.code)
+                      (assert.is_nil (verbose.err:find "\27" 1 true))
+                      (assert.is_nil (steps.out:find "\27" 1 true))
+                      (assert.is_truthy (steps.out:find "\\x1B" 1 true))))))
             (it "rejects an unknown profile"
                 (fn []
                   (let [r (atlas-run ["az"
@@ -414,6 +466,41 @@
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "--dry-run doesn't apply to completion"
                                                   1 true)))))
+            (it "explains missing profile arguments"
+                (fn []
+                  (let [r (atlas-run ["profile"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "Usage: atlas profile" 1 true))
+                    (assert.is_nil (r.err:find "nil" 1 true)))
+                  (let [r (atlas-run ["profile" "show"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "Usage: atlas profile show <name>"
+                                                  1 true)))))
+            (it "explains field paths without a name and inputs that are not objects"
+                (fn []
+                  (each [_ [args msg] (ipairs [[["op" "p" "add-pet" "--b..=1"]
+                                                "has no field name"]
+                                               [["az"
+                                                 "flows"
+                                                 "fetchPet"
+                                                 "-i"
+                                                 ".=1"]
+                                                "has no field name"]
+                                               [["az"
+                                                 "flows"
+                                                 "fetchPet"
+                                                 "--inputs"
+                                                 "5"]
+                                                "--inputs must be an object"]
+                                               [["az"
+                                                 "flows"
+                                                 "fetchPet"
+                                                 "-d"
+                                                 "\"s\""]
+                                                "--body must be an object"]])]
+                    (let [r (atlas-run args)]
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find msg 1 true) r.err)))))
             (it "tells what atlas auth adds besides headers"
                 (fn []
                   (with-config {:profiles {:qkey {:auth {:name "api-key"

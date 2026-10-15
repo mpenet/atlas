@@ -94,6 +94,9 @@ means none): decoded from the raw text when there is one."
                 (if (and detail (> (length detail) 0)) (.. " — " detail) ""))))
   (let [body (assert (json-body resp)
                      (.. "token response is not JSON: " (tostring resp.body)))
+        _ (assert (and (= (type body.access_token) :string)
+                       (not= body.access_token ""))
+                  "token response has no access_token")
         data {:access_token body.access_token
               :token_type (or body.token_type "Bearer")}]
     (when body.expires_in
@@ -168,11 +171,12 @@ returns the stored token, raising on expiry, denial or timeout."
 
 (fn device-authorization [profile-name params ssl]
   (let [device (request-device-code params ssl)]
-    (io.stderr:write (.. "Open this URL to authenticate:\n  "
-                         (or device.verification_uri_complete
-                             device.verification_uri)
-                         "\nUser code: " device.user_code
-                         "\nWaiting for authorization...\n"))
+    (io.stderr:write (util.printable (.. "Open this URL to authenticate:\n  "
+                                         (tostring (or device.verification_uri_complete
+                                                       device.verification_uri))
+                                         "\nUser code: "
+                                         (tostring device.user_code)
+                                         "\nWaiting for authorization...\n")))
     (poll-device-token profile-name params ssl device)))
 
 ;; ---- authorization code (browser) ----

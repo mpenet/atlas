@@ -844,6 +844,17 @@
                       (os.remove paths)
                       (os.remove base)
                       (assert.are.same ["list-items"] names)))))
+            (it "loads a profile's schema with the profile's settings"
+                (fn []
+                  (let [seen []
+                        ctx {:config {:profiles {:exo {:schema "S"
+                                                       :cache-ttl 86400}}}
+                             :load-schema (fn [src profile]
+                                            (table.insert seen [src profile])
+                                            completion-schema)}]
+                    (cli.complete-line "op exo " ctx)
+                    (assert.are.equal "S" (. seen 1 1))
+                    (assert.are.equal 86400 (. seen 1 2 :cache-ttl)))))
             (it "takes OpenAPI 3.1 boolean schemas"
                 (fn []
                   (let [ctx {:config {}
@@ -1265,27 +1276,82 @@
                 (fn []
                   (let [(_ script) (capture cli.completion-bash)
                         marker (os.tmpname)
-                        script-file (os.tmpname)]
+                        script-file (os.tmpname)
+                        ;; bash 4 and later split words at =, bash 3.2 doesn't
+                        word-splits ["COMP_WORDS=(atlas op x y --q.s =); COMP_CWORD=5"
+                                     "COMP_WORDS=(atlas op x y --q.s=); COMP_CWORD=4"]]
                     (os.remove marker)
+                    (each [_ shell (ipairs ["bash" "/bin/bash"])]
+                      (each [_ words (ipairs word-splits)]
+                        (with-open [f (io.open script-file :w)]
+                          (f:write script "\n")
+                          ;; candidates as a malicious spec could make them
+                          (f:write (.. "atlas() { printf '%s\\n' '$(touch "
+                                       marker ")' '*' 'in progress' 'ok'; }\n"))
+                          (f:write "COMP_LINE='atlas op x y --q.s='; COMP_POINT=${#COMP_LINE}\n")
+                          (f:write (.. words "\n"))
+                          (f:write "_atlas_complete\nprintf '%s|\\n' \"${COMPREPLY[@]}\"\n"))
+                        (let [p (io.popen (.. "cd /tmp && " shell " "
+                                              script-file))
+                              out (p:read :*a)]
+                          (p:close)
+                          (let [ran (io.open marker)]
+                            (when ran (ran:close) (os.remove marker))
+                            (assert.is_nil ran))
+                          ;; quoted as the shell inserts them on the line, a
+                          ;; space after each complete word
+                          (assert.are.equal (.. "\\$\\(touch\\ " marker
+                                                "\\) |\n\\* |\nin\\ progress |\nok |\n")
+                                            out))))
+                    (os.remove script-file))))
+            (it "adds no space after a name waiting for its value"
+                (fn []
+                  (let [(_ script) (capture cli.completion-bash)
+                        script-file (os.tmpname)]
                     (with-open [f (io.open script-file :w)]
                       (f:write script "\n")
-                      ;; candidates as a malicious spec could make them
-                      (f:write (.. "atlas() { printf '%s\\n' '$(touch " marker
-                                   ")' '*' 'in progress' 'ok'; }\n"))
-                      (f:write "COMP_LINE='atlas op x y --q.s='; COMP_POINT=${#COMP_LINE}\n")
-                      (f:write "COMP_WORDS=(atlas op x y --q.s =); COMP_CWORD=5\n")
-                      (f:write "_atlas_complete\nprintf '%s\\n' \"${COMPREPLY[@]}\"\n"))
+                      (f:write "atlas() { printf '%s\\n' '--q.status=' '--q.sort='; }\n")
+                      (f:write "COMP_LINE='atlas op x y --q.st'; COMP_POINT=${#COMP_LINE}\n")
+                      (f:write "COMP_WORDS=(atlas op x y --q.st); COMP_CWORD=4\n")
+                      (f:write "_atlas_complete\nprintf '%s|\\n' \"${COMPREPLY[@]}\"\n"))
                     (let [p (io.popen (.. "cd /tmp && bash " script-file))
                           out (p:read :*a)]
                       (p:close)
                       (os.remove script-file)
-                      (let [ran (io.open marker)]
-                        (when ran (ran:close) (os.remove marker))
-                        (assert.is_nil ran))
-                      ;; quoted as the shell inserts them on the line
-                      (assert.are.equal (.. "\\$\\(touch\\ " marker
-                                            "\\)\n\\*\nin\\ progress\nok\n")
-                                        out)))))))
+                      (assert.are.equal "--q.status=|\n" out)))))))
+
+(describe "zsh completion script"
+          (fn []
+            (it "passes the words of the command being completed"
+                (fn []
+                  (when (os.execute "command -v zsh >/dev/null 2>&1")
+                    (let [(_ script) (capture cli.completion-zsh)
+                          script-file (os.tmpname)]
+                      (with-open [f (io.open script-file :w)]
+                        (f:write "compdef() { :; }\n")
+                        (f:write script "\n")
+                        ;; what zsh gives a completion function for
+                        ;; `true && atlas op be<TAB>`
+                        (f:write "compadd() { :; }\n")
+                        (f:write "BUFFER='true && atlas op be'; CURSOR=${#BUFFER}\n")
+                        (f:write "words=(atlas op be); CURRENT=3; PREFIX=be\n")
+                        (f:write (.. "atlas() { print -r -- \"line=$2\" > "
+                                     script-file ".out; }\n"))
+                        (f:write "_atlas\n"))
+                      (os.execute (.. "zsh " script-file))
+                      (let [out (with-open [f (io.open (.. script-file ".out"))]
+                                  (f:read :*a))]
+                        (os.remove script-file)
+                        (os.remove (.. script-file ".out"))
+                        (assert.are.equal "line=atlas op be\n" out))))))))
+
+(describe "completion backend"
+          (fn []
+            (it "skips variable assignments before the program name"
+                (fn []
+                  (let [(_ out) (capture #(cli.run-complete ["__complete"
+                                                             "FOO=1 BAR=x atlas pro"]))]
+                    (assert.are.equal "profile" out))))))
 
 (describe "import-restish discoverability"
           (fn []

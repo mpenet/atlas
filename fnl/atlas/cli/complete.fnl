@@ -5,7 +5,7 @@
 (local util (require :atlas.util))
 (local http-mod (require :atlas.http))
 (local {: field-prefixes : options : option-by-name} (require :atlas.cli.args))
-(local {: load-config : load-schema-cached : find-profile}
+(local {: load-config : load-schema-cached : find-profile : merge-ssl}
        (require :atlas.cli.settings))
 
 ;; ---- options and completion ----
@@ -146,7 +146,7 @@ operation, or an Arazzo document's workflow and inputs."
     (when (and (= cmd :op) target)
       (let [(_ profile) (pcall find-profile config target)
             source (or (?. profile :schema) target)
-            (ok schema) (pcall ctx.load-schema source)]
+            (ok schema) (pcall ctx.load-schema source profile)]
         (when (and ok (= (type schema) :table))
           (let [index-flag (accumulate [v nil _ w (ipairs words)]
                              (or (w:match "^%-%-server%-index=(%d+)$") v))
@@ -233,14 +233,16 @@ operation, or an Arazzo document's workflow and inputs."
   (print "# atlas bash completion — add to ~/.bashrc: eval \"$(atlas completion bash)\"")
   (print "_atlas_complete() {")
   (print "  local line=\"${COMP_LINE:0:COMP_POINT}\"")
-  (print "  local cur=\"${COMP_WORDS[COMP_CWORD]}\"")
+  ;; the word being completed, from the line: bash 3.2 and later versions
+  ;; split COMP_WORDS differently
+  (print "  local cur=\"${line##* }\"")
   ;; candidates come from the spec: read them as data, one per line, and
   ;; never pass them to compgen -W, which would expand $(...) in them
   (print "  local c cands=()")
   (print "  while IFS= read -r c; do cands+=(\"$c\"); done < <(atlas __complete \"$line\" 2>/dev/null)")
-  (print "  # bash splits words at '=': complete only the part after it")
-  (print "  if [[ \"$cur\" == \"=\" ]]; then cur=\"\"; fi")
-  (print "  if [[ \"${line##* }\" == *=* ]]; then")
+  (print "  # readline replaces only what follows '=': complete that part")
+  (print "  if [[ \"$cur\" == *=* ]]; then")
+  (print "    cur=\"${cur#*=}\"")
   (print "    local stripped")
   (print "    stripped=()")
   (print "    for c in \"${cands[@]}\"; do stripped+=(\"${c#*=}\"); done")
@@ -252,18 +254,23 @@ operation, or an Arazzo document's workflow and inputs."
   (print "  local q")
   (print "  for c in \"${cands[@]}\"; do")
   (print "    printf -v q '%q' \"$c\"")
+  ;; nospace for all (bash 3.2 has no compopt): a complete word gets its
+  ;; space here, a name waiting for =VALUE or .FIELD doesn't
+  (print "    [[ \"$q\" != *[=.] ]] && q=\"$q \"")
   (print "    [[ \"$c\" == \"$cur\"* || \"$q\" == \"$cur\"* ]] && COMPREPLY+=(\"$q\")")
   (print "  done")
-  (print "  if [[ ${#COMPREPLY[@]} -eq 1 && \"${COMPREPLY[0]}\" == *[=.] ]] && type compopt &>/dev/null; then compopt -o nospace; fi")
   (print "}")
-  (print "complete -F _atlas_complete atlas"))
+  (print "complete -o nospace -F _atlas_complete atlas"))
 
 (fn completion-zsh []
   (print "#compdef atlas")
   (print "# atlas zsh completion — add to fpath or source directly")
   (print "_atlas() {")
   (print "  local -a cands")
-  (print "  cands=(${(f)\"$(atlas __complete \"${BUFFER[1,CURSOR]}\" 2>/dev/null)\"})")
+  ;; the words of this command only (the line may hold several), up to the
+  ;; cursor
+  (print "  local line=\"${(j: :)${(@)words[1,CURRENT-1]}} $PREFIX\"")
+  (print "  cands=(${(f)\"$(atlas __complete \"$line\" 2>/dev/null)\"})")
   (print "  local -a open closed")
   (print "  local c")
   (print "  # no trailing space after NAME= and prefix. so the value can follow")
@@ -281,17 +288,33 @@ operation, or an Arazzo document's workflow and inputs."
   (print "  compdef _atlas atlas")
   (print "fi"))
 
+(fn command-args [line]
+  "What follows the program name in a shell line, which may start with
+variable assignments (FOO=1 atlas op ...)."
+  (var rest line)
+  (var assignment (rest:match "^%s*[%a_][%w_]*=%S*%s+()"))
+  (while assignment
+    (set rest (rest:sub assignment))
+    (set assignment (rest:match "^%s*[%a_][%w_]*=%S*%s+()")))
+  (rest:match "^%s*%S+%s+(.*)$"))
+
 (fn run-complete [args]
   "Hidden backend for the shell completion scripts:
 atlas __complete [--describe] LINE-UP-TO-CURSOR"
   (let [describe? (= (. args 2) "--describe")
-        ;; shells pass the whole line, program name included
-        line (: (or (. args (if describe? 3 2)) "") :match "^%s*%S+%s+(.*)$")
+        line (command-args (or (. args (if describe? 3 2)) ""))
         ctx {:config (let [(ok cfg) (pcall load-config)] (if ok cfg {}))
-             :load-schema (fn [src]
+             ;; the cache as op uses it; a fetch must not keep Tab waiting long
+             :load-schema (fn [src ?profile]
                             (if (src:match "^https?://")
                                 (load-schema-cached src
-                                                    {:transport http-mod.request})
+                                                    {:transport http-mod.request
+                                                     :ttl (or (?. ?profile
+                                                                  :cache-ttl)
+                                                              3600)
+                                                     :ssl (merge-ssl ?profile
+                                                                     nil)
+                                                     :timeout 5})
                                 (atlas.load-schema src)))
              :load-doc arazzo.load-doc}]
     (each [_ e (ipairs (if line (complete-entries line ctx) []))]
