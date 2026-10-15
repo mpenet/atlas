@@ -2,7 +2,7 @@
 
 All notable changes to atlas. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
-## [1.0.0-beta1] - unreleased
+## [1.0.0-beta1] - 2026-10-15
 
 ### Security
 
