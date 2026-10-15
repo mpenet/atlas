@@ -163,7 +163,7 @@ req.sensitive-headers and any whose name looks like a credential."
 
 (fn follow-redirects [send req]
   "Call send, following redirects (at most 5, then an error) as
-redirect-target allows."
+redirect-target allows. The response's :url is where it came from."
   (var current req)
   (var resp (send req))
   (var hops 0)
@@ -176,6 +176,9 @@ redirect-target allows."
     (set current next-req)
     (set resp (send current))
     (set next-req (redirect-target current resp)))
+  (when (= nil resp.url)
+    (set resp.url (util.append-query current.url (or current.query {})
+                                     current.query-styles)))
   resp)
 
 (fn parse-headers [text]

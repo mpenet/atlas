@@ -50,7 +50,14 @@ from specs and servers."
       (log (.. "> " k ": "
                (tostring (redact-header k v
                                         (sensitive-names req.sensitive-headers))))))
-    (http-fn req)))
+    (let [resp (http-fn req)
+          asked (util.append-query (or req.url "") (or req.query {})
+                                   req.query-styles)]
+      ;; redirects are followed below: say where the answer came from
+      (when (and resp resp.url (not= resp.url asked))
+        (log (.. "< redirected to "
+                 (util.redact-url resp.url req.sensitive-query))))
+      resp)))
 
 (fn op? [v]
   (and (= (type v) :table) (not= nil (. v :has-body))))

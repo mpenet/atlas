@@ -8,6 +8,10 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 
 - Homebrew: `brew install mpenet/tap/atlas` (macOS and Linux, with shell completion); releases update the tap.
 
+### Fixed
+
+- A spec behind an auth proxy is fetched again with credentials when the first request is redirected to a sign-in page on another origin, as after a 401; `-v` shows where a redirected request ended.
+
 ## [1.0.0-beta2] - 2026-10-15
 
 The first beta with release binaries: 1.0.0-beta1 was published without them, and its release can no longer take files. The code is that of 1.0.0-beta1: see its section of [CHANGELOG.md](https://github.com/mpenet/atlas/blob/main/CHANGELOG.md) for the changes since 1.0.0-alpha14.

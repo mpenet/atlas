@@ -381,6 +381,16 @@
                                                          :sensitive-query [name]
                                                          :headers {}})]
                         (assert.are.equal 200 resp.status name)))))
+              (it "say in :url where the response came from"
+                  (fn []
+                    (let [(send) (site {"https://a.test/x" (moved "https://b.test/login")
+                                        "https://b.test/login" {:status 200
+                                                                :headers {}}})
+                          resp (http.follow-redirects send
+                                                      {:method "GET"
+                                                       :url "https://a.test/x"
+                                                       :headers {}})]
+                      (assert.are.equal "https://b.test/login" resp.url))))
               (it "keeps a query API key on the same origin only"
                   (fn []
                     (let [(send seen) (site {"https://a.test/x?k=K&n=1" (moved "/y")

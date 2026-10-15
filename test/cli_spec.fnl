@@ -220,6 +220,17 @@
                                                               nil 0.5))]
                     (assert.are.equal "{\n  \"x\": 1\n}" out)
                     (assert.are.equal "HTTP 200  0.500s\na: 1\nb: 2\n\n" err))))
+            (it "logs where a redirected request ended"
+                (fn []
+                  (let [(_ _ err) (capture #((cli.wrap-log-request (fn [_]
+                                                                     {:status 200
+                                                                      :headers {}
+                                                                      :url "https://login.test/auth?x=1"})) {:method "GET"
+                                                                                                             :url "https://api.test/spec.json"
+                                                                                                             :headers {}}))]
+                    (assert.is_truthy (err:find "< redirected to https://login.test/auth?x=1"
+                                                1 true)
+                                      err))))
             (it "redacts credentials in the response headers it logs"
                 (fn []
                   (let [(_ _ err) (capture #(cli.print-resp {:status 200

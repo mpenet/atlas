@@ -524,6 +524,31 @@
                                                    1 true))
                       (assert.is_truthy (text:find "> GET https://specs.test/part.json"
                                                    1 true))))))
+            (it "fetches a spec with credentials when it was sent to a login page"
+                (fn []
+                  (let [schema-text (with-open [f (io.open "test/fixtures/cli-api.json")]
+                                      (f:read :*a))
+                        (transport requests) (routes-transport {"GET https://api.test/openapi.json" (fn [req]
+                                                                                                      (if (. req.headers
+                                                                                                             :authorization)
+                                                                                                          {:status 200
+                                                                                                           :headers {}
+                                                                                                           :url "https://api.test/openapi.json"
+                                                                                                           :raw schema-text}
+                                                                                                          ;; an auth proxy: off to its login page
+                                                                                                          {:status 200
+                                                                                                           :headers {:content-type "text/html"}
+                                                                                                           :url "https://login.test/auth?state=x"
+                                                                                                           :raw "<html>sign in</html>"}))})
+                        code (cli.run ["op" "remote" "--list"]
+                                      {: transport
+                                       :config {:profiles {:remote {:schema "https://api.test/openapi.json"
+                                                                    :auth {:name "bearer"
+                                                                           :params {:token "t"}}}}}
+                                       :schema-cache false})]
+                    (assert.are.equal 0 code)
+                    (assert.are.equal 2 (length requests))
+                    (assert.is_nil (. requests 1 :headers :authorization)))))
             (it "fetches a spec protected by a query API key after a 401"
                 (fn []
                   (let [schema-text (with-open [f (io.open "test/fixtures/cli-api.json")]

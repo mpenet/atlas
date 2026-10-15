@@ -338,8 +338,12 @@ opts: {:transport :headers :ssl :timeout :auth-headers :authorize :base-url}"
                    :timeout opts.timeout
                    :sensitive-headers $3})
         first (send opts.transport (or opts.headers {}))
+        ;; asked to authenticate: 401/403, or sent to a sign-in page on
+        ;; another origin (an auth proxy's redirect)
         resp (if (and (or opts.auth-headers opts.authorize)
-                      (or (= first.status 401) (= first.status 403)))
+                      (or (= first.status 401) (= first.status 403)
+                          (and first.url
+                               (not= (util.origin first.url) (util.origin url)))))
                  (let [headers (collect [k v (pairs (or opts.headers {}))]
                                  k
                                  v)
