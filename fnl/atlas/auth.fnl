@@ -434,7 +434,7 @@ any auth flow; signing tools and query api-keys supply none up front."
                              v))
         ;; sign the URL that goes on the wire, query string included
         (when req.query
-          (tset req :url (util.append-query req.url req.query))
+          (tset req :url (util.append-query req.url req.query req.query-styles))
           (tset req :query nil))
         ;; pre-encode body so signing and wire use identical bytes
         (when (and req.body (not req.raw-body))

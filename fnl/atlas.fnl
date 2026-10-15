@@ -72,11 +72,13 @@ then the body when the operation has one, then an opts table."
   (.. (pick-values 1 (base-url:gsub "/+$" ""))
       (util.resolve-path path (or req.path {}))))
 
-(fn make-operation [client-opts deref name path path-item method op-spec]
-  (let [op-spec (doto (deref op-spec)
+(fn make-operation [client-opts name path path-item method op-spec]
+  (let [op-spec (doto (collect [k v (pairs op-spec)]
+                        k
+                        v)
                   (tset :parameters
-                        (util.merge-parameters (deref path-item.parameters)
-                                               (deref op-spec.parameters))))
+                        (util.merge-parameters path-item.parameters
+                                               op-spec.parameters)))
         content-type (negotiate.pick-content-type op-spec)
         negotiated {:accept (negotiate.pick-accept op-spec)
                     :content-type content-type}
@@ -137,15 +139,16 @@ then the body when the operation has one, then an opts table."
                      :trace true})
 
 (fn schema-operations [schema deref]
-  "The schema's operations as [{:path :path-item :method :op-spec}], in path
-then method order, so that naming them is deterministic."
-  (let [paths (doto (icollect [path (pairs (or schema.paths {}))]
-                      path)
+  "The schema's operations as [{:path :path-item :method :op-spec}], with
+their refs resolved, in path then method order, so that naming them is
+deterministic."
+  (let [paths (doto (icollect [path item (pairs (or schema.paths {}))]
+                      ;; extensions (x-...) may hold any value
+                      (when (= (type item) :table) path))
                 (table.sort))
         entries []]
     (each [_ path (ipairs paths)]
-      (let [item (. schema.paths path)
-            path-item (if (. item "$ref") (deref item) item)
+      (let [path-item (deref (. schema.paths path))
             methods (doto (icollect [method op-spec (pairs path-item)]
                             (when (and (. http-methods method)
                                        (= (type op-spec) :table))
@@ -236,7 +239,8 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
                        server-url)
                      (when (and source-url server-url (server-url:match "^/"))
                        (let [(origin) (source-url:match "^(https?://[^/]+)")]
-                         (.. origin server-url)))
+                         (when origin
+                           (.. origin server-url))))
                      (error "no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts"))
         client-opts {:base-url base-url
                      :headers (or (?. ?opts :headers) {})
@@ -247,8 +251,8 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
         entries (schema-operations schema deref)
         add (fn [name {: path : path-item : method : op-spec}]
               (tset client name
-                    (make-operation client-opts deref name path path-item
-                                    method op-spec)))
+                    (make-operation client-opts name path path-item method
+                                    op-spec)))
         unnamed (icollect [_ entry (ipairs entries)]
                   (let [name (when entry.op-spec.operationId
                                (util.operation-name entry.method entry.path

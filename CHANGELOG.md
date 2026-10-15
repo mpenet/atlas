@@ -88,6 +88,16 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - Null members of query and form objects are left out instead of being sent as `null`.
 - Completion offers only the options a command takes (`--dry-run` is not offered for `az`); the zsh script also works when autoloaded from `fpath`.
 - `--servers` checks `--server.NAME=VAL` against the server's variables and their allowed values, as requests do.
+- Path items written as `$ref`s (`paths: {/x: {$ref: paths/x.yaml}}`) share the schemas they refer to like inline ones do, so building such a client is linear again.
+- Specification extensions (`x-...`) holding a non-object value in `paths` or `responses` no longer crash building the client, and help leaves them out.
+- Help, completion and workflow input defaults handle OpenAPI 3.1 boolean schemas (`schema: true`).
+- External-tool signing serializes the query in its declared style (`deepObject`…), as unsigned requests do.
+- Arazzo checks `--server.NAME=VAL` against the variables of the server chosen with `--server-index`, not always the first one.
+- A path parameter of `.` or `..` is percent-encoded, so it can no longer change the request's path.
+- A local spec whose server URL is root-relative (`/v1`) gives the documented "no base-url" error.
+- `$ref` inside example data (`example`, `examples.*.value`, `default`, `enum`, `const`) is kept as data instead of being resolved.
+- Arazzo `operationPath` fragments may be percent-encoded (`~1pets~1%7BpetId%7D`).
+- A timeout under a millisecond no longer means no timeout.
 - Many more; see the commit history.
 
 ## [1.0.0-alpha14] - 2026-07-06

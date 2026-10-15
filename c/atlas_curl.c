@@ -1,5 +1,6 @@
 /* ABOUTME: Lua binding to libcurl's easy API: performs one HTTP exchange and
  * ABOUTME: returns the status, the final response's header block and the body. */
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <curl/curl.h>
@@ -154,7 +155,10 @@ static int perform(lua_State *L) {
   }
 
   if (timeout > 0) {
-    curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, (long)(timeout * 1000));
+    /* 0 ms would mean no limit: at least 1, and huge values kept in range */
+    double ms = timeout * 1000;
+    long limit = ms >= (double)LONG_MAX ? LONG_MAX : (long)ms;
+    curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, limit < 1 ? 1L : limit);
   } else {
     /* no overall limit, but give up on a peer that stops answering */
     curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 60L);

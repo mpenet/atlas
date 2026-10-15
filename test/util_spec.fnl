@@ -58,7 +58,15 @@
                                     (util.resolve-path "/p/{ids}" {:ids [1 2]}))
                   (assert.are.equal "/p/a,1,b,x%20y"
                                     (util.resolve-path "/p/{o}"
-                                                       {:o {:a 1 :b "x y"}}))))))
+                                                       {:o {:a 1 :b "x y"}}))))
+            (it "encodes values that would be dot segments"
+                (fn []
+                  (assert.are.equal "/p/%2E%2E/x"
+                                    (util.resolve-path "/p/{id}/x" {:id ".."}))
+                  (assert.are.equal "/p/%2E"
+                                    (util.resolve-path "/p/{id}" {:id "."}))
+                  (assert.are.equal "/p/a.b"
+                                    (util.resolve-path "/p/{id}" {:id "a.b"}))))))
 
 (describe "query-string"
           (fn []

@@ -8,6 +8,45 @@
   (let [(doc fragment) (ref:match "^([^#]*)#?(.*)$")]
     (values doc (util.percent-decode fragment))))
 
+;; members whose values are example or schema data, where $ref is plain data
+(local data-keys {:example true :default true :enum true :const true})
+
+;; maps whose keys are names chosen by the author (a property, a response or
+;; a component may be called default or example)
+(local name-maps {:properties true
+                  :patternProperties true
+                  :dependentSchemas true
+                  :$defs true
+                  :definitions true
+                  :responses true
+                  :schemas true
+                  :parameters true
+                  :examples true
+                  :requestBodies true
+                  :headers true
+                  :securitySchemes true
+                  :links true
+                  :callbacks true
+                  :pathItems true
+                  :variables true
+                  :mapping true
+                  :content true
+                  :encoding true
+                  :webhooks true
+                  :paths true})
+
+(fn data? [k key parent-key]
+  "Whether member k of the value at key (itself under parent-key) is data:
+an example, a default, an enum, a const or an Example's value."
+  (or (and (. data-keys k) (not (. name-maps key)))
+      (and (= k :value) (= parent-key :examples))))
+
+(fn pointer-keys [pointer]
+  "(last second-to-last) segments of a JSON pointer, unescaped."
+  (let [segs (icollect [seg (pointer:gmatch "/([^/]*)")]
+               (util.unescape-pointer seg))]
+    (values (. segs (length segs)) (. segs (- (length segs) 1)))))
+
 (fn resolver [root ?opts]
   "Returns (fn [value]) giving value with every $ref replaced by its target.
 ?opts: {:base location-of-root :load (fn [location] parsed-document)}.
@@ -48,7 +87,7 @@ nowhere, or only at each other, raise."
                        (if target.base
                            (.. " in " (util.redact-url target.base))
                            "")) 0))
-          (values target value (.. (or target.base "") "#" pointer)))))
+          (values target value (.. (or target.base "") "#" pointer) pointer))))
 
     (fn ref-of [value]
       (when (= (type value) :table)
@@ -62,11 +101,11 @@ nowhere, or only at each other, raise."
 
     (fn resolve-ref [from ref]
       ;; follow refs to refs to the value they finally name
-      (var (target value key) (ref-target from ref))
+      (var (target value key pointer) (ref-target from ref))
       (let [chain [key]]
         (while (and (= nil (. cache key)) (ref-of value))
           (let [next-ref (ref-of value)]
-            (set (target value key) (ref-target target next-ref))
+            (set (target value key pointer) (ref-target target next-ref))
             (when (accumulate [found false _ k (ipairs chain) &until found]
                     (= k key))
               (error (.. "circular $ref: " (table.concat chain " -> ") " -> "
@@ -76,16 +115,19 @@ nowhere, or only at each other, raise."
               expanded (if (not= nil cached) cached (not= (type value) :table)
                            value ;; registered before it is filled, so recursion
                            ;; comes back to this same table
-                           (let [out (setmetatable {} (getmetatable value))]
+                           (let [out (setmetatable {} (getmetatable value))
+                                 (name parent) (pointer-keys pointer)]
                              (tset cache key out)
                              (each [k v (pairs value)]
-                               (tset out k (deref target v)))
+                               (tset out k
+                                     (if (data? k name parent) v
+                                         (deref target v k name))))
                              out))]
           (each [_ k (ipairs chain)]
             (tset cache k expanded))
           expanded)))
 
-    (set deref (fn [from value]
+    (set deref (fn [from value ?key ?parent-key]
                  (match (ref-of value)
                    ref (resolve-ref from ref)
                    _ (if (or (not= (type value) :table) (= value json.null))
@@ -96,7 +138,9 @@ nowhere, or only at each other, raise."
                          (let [out (setmetatable {} (getmetatable value))]
                            (tset copies value out)
                            (each [k v (pairs value)]
-                             (tset out k (deref from v)))
+                             (tset out k
+                                   (if (data? k ?key ?parent-key) v
+                                       (deref from v k ?key))))
                            out)))))
     (fn [value]
       (set copies {})

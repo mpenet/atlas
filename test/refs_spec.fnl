@@ -177,3 +177,35 @@
                     (assert.are.same {:properties {:id {:type "string"}}}
                                      (resolve root.x))
                     (assert.are.same ["other.yaml"] loaded))))))
+
+(describe "refs in example data"
+          (fn []
+            (it "are data, not references"
+                (fn []
+                  (let [data {:$ref "#/nowhere"}
+                        root {:components {:examples {:Ex {:value data}}}}
+                        out (deref root
+                                   {:content {:application/json {:example data
+                                                                 :examples {:a {:$ref "#/components/examples/Ex"}}
+                                                                 :schema {:default data
+                                                                          :enum [data]
+                                                                          :const data}}}})
+                        media (. out.content :application/json)]
+                    (assert.are.same data media.example)
+                    (assert.are.same data media.examples.a.value)
+                    (assert.are.same data media.schema.default)
+                    (assert.are.same [data] media.schema.enum)
+                    (assert.are.same data media.schema.const))))
+            (it "unless the key names a property or a response"
+                (fn []
+                  (let [root {:components {:schemas {:S {:type "string"}}
+                                           :responses {:E {:description "e"}}}}
+                        out (deref root
+                                   {:responses {:default {:$ref "#/components/responses/E"}}
+                                    :schema {:properties {:example {:$ref "#/components/schemas/S"}
+                                                          :default {:$ref "#/components/schemas/S"}}}})]
+                    (assert.are.same {:description "e"} out.responses.default)
+                    (assert.are.same {:type "string"}
+                                     out.schema.properties.example)
+                    (assert.are.same {:type "string"}
+                                     out.schema.properties.default))))))

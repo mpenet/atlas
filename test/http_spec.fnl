@@ -75,6 +75,20 @@
                     (srv:close)
                     (assert.is_false ok)
                     (assert.is_truthy (: (tostring err) :find "timed out"))
+                    (assert.is_true (< (- (socket.gettime) t0) 2)))))
+            (it "keeps a timeout under a millisecond"
+                (fn []
+                  (let [socket (require :socket)
+                        srv (assert (socket.bind "127.0.0.1" 0))
+                        (_ port) (srv:getsockname)
+                        t0 (socket.gettime)
+                        (ok err) (pcall http.request
+                                        {:method "GET"
+                                         :url (.. "http://127.0.0.1:" port "/")
+                                         :timeout 0.0004})]
+                    (srv:close)
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "timed out"))
                     (assert.is_true (< (- (socket.gettime) t0) 2)))))))
 
 (describe "the transport binding"

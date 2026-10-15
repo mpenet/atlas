@@ -26,19 +26,20 @@ arrays), or \"any\"."
   (type-name p.schema))
 
 (fn param-extras [p required?]
-  (let [parts []]
+  (let [parts [] ;; OpenAPI 3.1 schemas may be booleans
+        schema (if (= (type p.schema) :table) p.schema {})]
     (when required? (table.insert parts "[required]"))
-    (when (?. p :schema :enum)
+    (when schema.enum
       (table.insert parts (.. "["
-                              (table.concat (icollect [_ v (ipairs p.schema.enum)]
+                              (table.concat (icollect [_ v (ipairs schema.enum)]
                                               (tostring v))
                                             "|")
                               "]")))
-    (when (not= nil (?. p :schema :default))
+    (when (not= nil schema.default)
       (table.insert parts (.. "(default: "
-                              (if (= (type p.schema.default) :table)
-                                  (json.encode p.schema.default)
-                                  (tostring p.schema.default))
+                              (if (= (type schema.default) :table)
+                                  (json.encode schema.default)
+                                  (tostring schema.default))
                               ")")))
     (when p.description
       (table.insert parts (.. "— " p.description)))
@@ -52,7 +53,7 @@ arrays), or \"any\"."
   (let [content request-body.content
         media-type (negotiate.pick-media-type content)
         schema (when media-type (?. content media-type :schema))]
-    (when (and schema schema.properties)
+    (when (and (= (type schema) :table) schema.properties)
       (let [required-set {}]
         (each [_ r (ipairs (or schema.required []))]
           (tset required-set r true))
@@ -104,8 +105,9 @@ params heading and an optional body hint, which differ between CLI and library."
     (add "\nResponses:")
     (let [responses (or op-spec.responses {})]
       (each [_ code (ipairs (sorted-keys responses))]
-        (add (string.format "  %-6s %s" code
-                            (or (. responses code :description) "")))))
+        (when (negotiate.response-code? code)
+          (add (string.format "  %-6s %s" code
+                              (or (. responses code :description) ""))))))
     (table.concat lines "\n")))
 
 (fn invoke-usage [name op-spec path-params query-params]

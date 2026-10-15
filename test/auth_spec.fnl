@@ -446,6 +446,21 @@
                       (assert.are.equal "https://api.example.com/items?a=x%20y&b=2"
                                         (. calls 1 :url))
                       (assert.is_nil (. calls 1 :query))))))
+            (it "signs the query in its declared style"
+                (fn []
+                  (let [(http calls) (seq-mock (ok-resp {}))
+                        auth (reload-auth http)
+                        wrapped (auth.wrap-http-fn {:name "external-tool"
+                                                    :params {:commandline "echo '{}'"}}
+                                                   http.request)]
+                    (wrapped {:method "GET"
+                              :url "https://api.example.com/items"
+                              :query {:filter {:a "1"}}
+                              :query-styles {:filter {:style "deepObject"
+                                                      :explode true}}
+                              :headers {}})
+                    (assert.are.equal "https://api.example.com/items?filter[a]=1"
+                                      (. calls 1 :url)))))
             (it "marks the headers the tool adds as sensitive"
                 (fn []
                   (let [(http calls) (seq-mock (ok-resp {}))

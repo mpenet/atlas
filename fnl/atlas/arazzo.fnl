@@ -46,7 +46,8 @@ declares; records the variables it used in used."
       (let [schema ((or opts.load-schema atlas.load-schema) url
                                                             {:ssl opts.ssl
                                                              :headers opts.headers})
-            declared (or (?. schema :servers 1 :variables) {})
+            declared (or (?. schema :servers (or opts.server-index 1)
+                             :variables) {})
             own (collect [name value (pairs server-vars)]
                   (when (. declared name)
                     (tset used name true)
@@ -125,7 +126,9 @@ Expression format: '{$sourceDescriptions.NAME.url}#/paths/~1foo/method'"
     (assert (. clients src-name) (.. "operationPath: unknown source '" src-name
                                      "'"))
     ;; pointer is /paths/~1foo~1{id}/method — split into segments
-    (let [segs (icollect [seg (ptr:gmatch "[^/]+")] seg)]
+    ;; a URI fragment: percent-escapes are decoded before pointer escapes
+    (let [segs (icollect [seg (ptr:gmatch "[^/]+")]
+                 (util.percent-decode seg))]
       ;; segs[1]="paths", segs[2]=encoded-path, segs[3]=method
       (assert (and (= (. segs 1) "paths") (. segs 2) (. segs 3))
               (.. "operationPath: expected /paths/<path>/<method>, got: " ptr))
@@ -410,8 +413,12 @@ nil when a failure is left unhandled."
                 k
                 v)
         schema (when wf.inputs ((doc-resolver doc) wf.inputs))]
-    (each [name prop (pairs (or (?. schema :properties) {}))]
-      (when (and (= nil (. given name)) (not= nil (?. prop :default)))
+    (each [name prop (pairs (or (when (= (type schema) :table)
+                                  schema.properties)
+                                {}))]
+      ;; OpenAPI 3.1 schemas may be booleans, which have no default
+      (when (and (= nil (. given name)) (= (type prop) :table)
+                 (not= nil prop.default))
         (tset given name prop.default)))
     given))
 

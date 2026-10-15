@@ -91,6 +91,20 @@
                                         (clients.a.ax.url-for))
                       (assert.are.equal "https://b.test/y"
                                         (clients.b.by.url-for))))))
+            (it "takes the variables of the chosen server"
+                (fn []
+                  (let [path (os.tmpname)]
+                    (with-open [f (io.open path :w)]
+                      (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://a.test\"},{\"url\":\"https://{region}.a.test\",\"variables\":{\"region\":{\"default\":\"us\"}}}],\"paths\":{\"/x\":{\"get\":{\"operationId\":\"ax\",\"responses\":{}}}}}"))
+                    (let [clients (arazzo.build-clients {:sourceDescriptions [{:name "a"
+                                                                               :type "openapi"
+                                                                               :url path}]
+                                                         :workflows []}
+                                                        {:server-index 2
+                                                         :server-vars {:region "eu"}})]
+                      (os.remove path)
+                      (assert.are.equal "https://eu.a.test/x"
+                                        (clients.a.ax.url-for))))))
             (it "rejects server variables no source declares"
                 (fn []
                   (let [doc {:sourceDescriptions [{:name "a"
@@ -340,6 +354,22 @@
                                                    :operationPath "{$sourceDescriptions.api.url}#/paths/~1users/get"
                                                    :successCriteria [{:condition "$statusCode == 200"}]}]
                                           :outputs {}}]}]
+                    (arazzo.run-workflow doc "wf" {} clients {})
+                    (assert.are.equal 1 (c.val)))))
+            (it "decodes percent-escapes in operationPath"
+                (fn []
+                  (let [c (counter)
+                        clients {:api {:get-user {:path "/users/{id}"
+                                                  :method "get"
+                                                  :url-for #"u"
+                                                  :invoke (fn []
+                                                            (c.inc)
+                                                            (ok-resp {}))}}}
+                        doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "wf"
+                                          :steps [{:stepId "s1"
+                                                   :operationPath "{$sourceDescriptions.api.url}#/paths/~1users~1%7Bid%7D/get"}]}]}]
                     (arazzo.run-workflow doc "wf" {} clients {})
                     (assert.are.equal 1 (c.val)))))
             (it "raises on operationPath with missing source"
@@ -891,9 +921,17 @@
                                      :properties {:status {:type "string"
                                                            :default "available"}
                                                   :limit {:type "integer"
-                                                          :default 10}}}))]
+                                                          :default 10}
+                                                  :anything true}}))]
                     (arazzo.run-workflow doc "wf" {:limit 3} clients {})
-                    (assert.are.same [{:status "available" :limit 3}] seen))))))
+                    (assert.are.same [{:status "available" :limit 3}] seen))))
+            (it "take boolean input schemas"
+                (fn []
+                  (let [clients {:api (make-client {:op #(ok-resp {})})}
+                        doc (doto (one-step-doc {:operationId "op"})
+                              (tset :workflows 1 :inputs true))]
+                    (assert.has_no.errors #(arazzo.run-workflow doc "wf" {}
+                                                                clients {})))))))
 
 (describe "run-workflow parameters"
           (fn []

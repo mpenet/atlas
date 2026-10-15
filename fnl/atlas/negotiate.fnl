@@ -22,11 +22,16 @@ by name, so the choice is the same on every run."
   (when op-spec.requestBody
     (pick-media-type op-spec.requestBody.content)))
 
+(fn response-code? [key]
+  "Whether a key of an operation's responses is a status code or default,
+rather than an extension (x-...)."
+  (not (: (tostring key) :match "^x%-")))
+
 (fn pick-accept [op-spec]
   (let [seen {}
         types []]
-    (each [_ resp (pairs (or op-spec.responses {}))]
-      (each [mt _ (pairs (or resp.content {}))]
+    (each [code resp (pairs (or op-spec.responses {}))]
+      (each [mt _ (pairs (if (response-code? code) (or resp.content {}) {}))]
         (when (not (. seen mt))
           (tset seen mt true)
           (table.insert types mt))))
@@ -34,4 +39,4 @@ by name, so the choice is the same on every run."
       (table.sort types)
       (table.concat types ", "))))
 
-{: pick-content-type : pick-accept : pick-media-type}
+{: pick-content-type : pick-accept : pick-media-type : response-code?}

@@ -126,7 +126,16 @@
                                                    :schema {:type ["string"
                                                                    "null"]}}]})]
                     (assert.is_truthy (text:find "q                string | null"
-                                                 1 true)))))))
+                                                 1 true)))))
+            (it "shows OpenAPI 3.1 boolean schemas"
+                (fn []
+                  (let [text (build "/x" "post"
+                                    {:parameters [{:name "q"
+                                                   :in "query"
+                                                   :schema true}]
+                                     :requestBody {:content {"application/json" {:schema true}}}})]
+                    (assert.is_truthy (text:find "q                any" 1 true))
+                    (assert.is_truthy (text:find "Body: optional" 1 true)))))))
 
 (describe "doc.build ordering"
           (fn []

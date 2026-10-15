@@ -817,6 +817,30 @@
                                    (complete "op exo list-pets --h."))
                   (assert.are.same ["--b.name=" "--b.tier="]
                                    (complete "op exo add-pet --b."))))
+            (it "takes OpenAPI 3.1 boolean schemas"
+                (fn []
+                  (let [ctx {:config {}
+                             :load-schema (fn [_]
+                                            {:openapi "3.1.0"
+                                             :servers [{:url "https://h"}]
+                                             :paths {"/x" {:post {:operationId "postX"
+                                                                  :parameters [{:name "q"
+                                                                                :in "query"
+                                                                                :schema true}]
+                                                                  :requestBody {:content {:application/json {:schema {:properties {:a true}}}}}
+                                                                  :responses {}}}
+                                                     "/y" {:post {:operationId "postY"
+                                                                  :requestBody {:content {:application/json {:schema true}}}
+                                                                  :responses {}}}}})}]
+                    (assert.are.same ["--q.q="]
+                                     (cli.complete-line "op S post-x --q." ctx))
+                    (assert.are.same []
+                                     (cli.complete-line "op S post-x --q.q="
+                                                        ctx))
+                    (assert.are.same ["--b.a="]
+                                     (cli.complete-line "op S post-x --b." ctx))
+                    (assert.are.same []
+                                     (cli.complete-line "op S post-y --b." ctx)))))
             (it "completes server variables and their values"
                 (fn []
                   (assert.are.same ["--server.zone="]

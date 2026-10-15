@@ -69,8 +69,14 @@ own scope, :any for the API commands op and az, or one of its :also."
                       {:base-url "http://completion.invalid" :http-fn #nil})]
     (if ok c {})))
 
+(fn schema-field [schema key]
+  "schema[key]; OpenAPI 3.1 schemas may be booleans, which have no fields."
+  (when (= (type schema) :table)
+    (. schema key)))
+
 (fn enum-of [schema]
-  (or (?. schema :enum) (?. schema :items :enum)))
+  (or (schema-field schema :enum)
+      (schema-field (schema-field schema :items) :enum)))
 
 (fn field-entries [prefix kind context]
   "Completion entries for --PREFIX.NAME=VALUE fields: names, or enum values
@@ -88,17 +94,21 @@ once a name and = are typed."
                              (values p.name
                                      {:enum (enum-of p.schema)
                                       :help p.description})))
-                 :body (collect [name prop (pairs (or (?. context :op
-                                                          :body-schema
-                                                          :properties)
+                 :body (collect [name prop (pairs (or (schema-field (?. context
+                                                                        :op
+                                                                        :body-schema)
+                                                                    :properties)
                                                       {}))]
                          (values name
-                                 {:enum (enum-of prop) :help prop.description}))
-                 :input (collect [name prop (pairs (or (?. context :inputs
-                                                           :properties)
+                                 {:enum (enum-of prop)
+                                  :help (schema-field prop :description)}))
+                 :input (collect [name prop (pairs (or (schema-field (?. context
+                                                                         :inputs)
+                                                                     :properties)
                                                        {}))]
                           (values name
-                                  {:enum (enum-of prop) :help prop.description}))
+                                  {:enum (enum-of prop)
+                                   :help (schema-field prop :description)}))
                  :server (collect [name v (pairs (or (?. context :server
                                                          :variables)
                                                      {}))]

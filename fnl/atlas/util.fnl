@@ -269,7 +269,12 @@ a,b and objects as k1,v1,k2,v2 (keys sorted), each part url-encoded."
                                                  (not= v json.null))
                                             (.. "missing required path parameter: "
                                                 param))
-                                    (simple-style v))))))
+                                    (let [s (simple-style v)]
+                                      ;; . and .. would be dot segments,
+                                      ;; which change the path
+                                      (if (or (= s ".") (= s ".."))
+                                          (s:gsub "%." "%%2E")
+                                          s)))))))
 
 {: camel->kebab
  : query-string

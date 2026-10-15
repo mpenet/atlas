@@ -571,7 +571,60 @@
                           :schemas {:Node {:type "object"
                                            :properties {:next {:$ref "#/components/schemas/Node"}}}}})
                     (let [c (atlas.client doc {:http-fn (mock-http)})]
-                      (assert.are.equal "/a" c.get-a.path)))))))
+                      (assert.are.equal "/a" c.get-a.path)))))
+            (it "share the tables of the schemas they refer to"
+                (fn []
+                  (let [body {:content {"application/json" {:schema {:$ref "#/components/schemas/Node"}}}}
+                        doc (schema {"/a" {:$ref "#/components/pathItems/A"}
+                                     "/b" {:post {:operationId "postB"
+                                                  :requestBody body
+                                                  :responses {}}}})]
+                    (set doc.components
+                         {:pathItems {:A {:post {:operationId "postA"
+                                                 :requestBody body
+                                                 :responses {}}}}
+                          :schemas {:Node {:type "object"
+                                           :properties {:next {:$ref "#/components/schemas/Node"}}}}})
+                    (let [c (atlas.client doc {:http-fn (mock-http)})]
+                      (assert.are.equal c.post-b.body-schema
+                                        c.post-a.body-schema)
+                      (assert.are.equal c.post-a.body-schema
+                                        c.post-a.body-schema.properties.next)))))))
+
+(describe "root-relative server URLs"
+          (fn []
+            (it "need the spec's origin"
+                (fn []
+                  (let [(ok err) (pcall atlas.client
+                                        (schema {"/a" {:get {:operationId "getA"
+                                                             :responses {}}}}
+                                                "/v1")
+                                        {:source-url "/tmp/spec.yaml"
+                                         :http-fn (mock-http)})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "no base-url" 1
+                                         true)))))))
+
+(describe "specification extensions"
+          (fn []
+            (it "may hold any value in paths and responses"
+                (fn []
+                  (let [doc (schema {"/a" {:get {:operationId "getA"
+                                                 :responses {"200" {:description "ok"
+                                                                    :content {"application/json" {:schema {:type "object"}}}}
+                                                             :x-count 5}}}})]
+                    (set doc.paths.x-internal true)
+                    (let [(http calls) (mock-http)
+                          c (atlas.client doc {:http-fn http})]
+                      (assert.are.equal "/a" c.get-a.path)
+                      (assert.are.equal "application/json"
+                                        (do
+                                          (c.get-a.invoke)
+                                          (. calls 1 :headers :accept)))
+                      (assert.is_truthy (: (. c.get-a :fnl/docstring) :find
+                                           "200" 1 true))
+                      (assert.is_nil (: (. c.get-a :fnl/docstring) :find
+                                        "x-count" 1 true))))))))
 
 (describe "credentials for referenced documents"
           (fn []
