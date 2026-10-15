@@ -2,11 +2,11 @@
 
 All notable changes to atlas. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-beta4] - 2026-10-15
 
 ### Changed
 
-- The binaries use mbedTLS (3.6 LTS) for TLS instead of OpenSSL: about 2 MB instead of 5.5 MB. Certificate verification, client certificates (`certificate`/`key`, RSA or EC) and the CA file and directory work as before; TLS 1.0 and 1.1 are refused. The binaries no longer contain OpenSSL 3.3, which is out of support. The Linux binaries are built on Alpine 3.24 and are static position-independent executables.
+- The binaries use mbedTLS (3.6 LTS) for TLS instead of OpenSSL: about 2 MB instead of 5.5 MB. Certificate verification, client certificates (`certificate`/`key`, RSA or EC) and the CA file and directory work as before; TLS 1.0 and 1.1 are refused. The Linux binaries no longer contain OpenSSL 3.3, which is out of support; they are built on Alpine 3.24, as static position-independent executables.
 
 ## [1.0.0-beta3] - 2026-10-15
 
@@ -200,6 +200,7 @@ The first beta with release binaries: 1.0.0-beta1 was published without them, an
 
 Earlier releases are described on the [releases page](https://github.com/mpenet/atlas/releases).
 
+[1.0.0-beta4]: https://github.com/mpenet/atlas/compare/v1.0.0-beta3...v1.0.0-beta4
 [1.0.0-beta3]: https://github.com/mpenet/atlas/compare/v1.0.0-beta2...v1.0.0-beta3
 [1.0.0-beta2]: https://github.com/mpenet/atlas/compare/v1.0.0-beta1...v1.0.0-beta2
 [1.0.0-beta1]: https://github.com/mpenet/atlas/compare/v1.0.0-alpha14...v1.0.0-beta1
