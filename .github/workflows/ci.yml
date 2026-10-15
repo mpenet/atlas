@@ -70,11 +70,14 @@ jobs:
         run: brew install lua pkg-config luarocks libyaml
 
       - name: Install Lua dependencies
+        # into the user tree: the Intel runners' Homebrew prefix (/usr/local)
+        # isn't writable
         run: |
-          luarocks install fennel
-          luarocks install lunajson
-          luarocks install luasocket
-          luarocks install lyaml
+          luarocks --local install fennel
+          luarocks --local install lunajson
+          luarocks --local install luasocket
+          luarocks --local install lyaml
+          echo "$HOME/.luarocks/bin" >> "$GITHUB_PATH"
 
       - name: Build binary
         run: make binary FENNEL=fennel DEPS_FROM_SOURCE=1
