@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Tag matches atlas.version and a dated changelog entry
         run: |
@@ -30,7 +30,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install system dependencies
         run: brew install lua pkg-config luarocks libyaml
@@ -58,7 +58,7 @@ jobs:
       - name: Stage artifact
         run: cp bin/atlas-bin atlas-macos-${{ matrix.arch }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: atlas-macos-${{ matrix.arch }}
           path: atlas-macos-${{ matrix.arch }}
@@ -75,9 +75,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # the Docker build also runs the tests and check-binary
       - name: Build Linux binary via Docker
@@ -88,7 +88,7 @@ jobs:
       - name: Check TLS verification
         run: mkdir -p bin && cp atlas-linux-${{ matrix.arch }} bin/atlas-bin && make check-binary-tls
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: atlas-linux-${{ matrix.arch }}
           path: atlas-linux-${{ matrix.arch }}
@@ -102,9 +102,9 @@ jobs:
       attestations: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -112,7 +112,7 @@ jobs:
       - name: Checksums
         run: cd dist && sha256sum atlas-* > SHA256SUMS && cat SHA256SUMS
 
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: 'dist/atlas-*'
 
@@ -124,7 +124,7 @@ jobs:
 
       # releases are immutable once published: create a draft, upload every
       # file, then publish
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           body_path: notes.md

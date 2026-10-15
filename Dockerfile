@@ -1,6 +1,6 @@
 # Linux release build: musl on Alpine, linked fully statically, so the binary
 # runs on any Linux distribution, whatever its C library version.
-FROM alpine:3.20 AS builder
+FROM alpine:3.24 AS builder
 
 RUN apk add --no-cache \
     lua5.4 lua5.4-dev build-base pkgconf unzip wget curl ca-certificates bash \
@@ -9,14 +9,14 @@ RUN apk add --no-cache \
   && ln -s /usr/bin/lua5.4 /usr/local/bin/lua
 
 # Alpine's luarocks targets other Lua versions: build it for 5.4
-RUN wget -q https://luarocks.org/releases/luarocks-3.11.1.tar.gz \
-  && tar xzf luarocks-3.11.1.tar.gz \
-  && cd luarocks-3.11.1 \
+RUN wget -q https://luarocks.org/releases/luarocks-3.13.0.tar.gz \
+  && tar xzf luarocks-3.13.0.tar.gz \
+  && cd luarocks-3.13.0 \
   && ./configure --with-lua-version=5.4 --with-lua-bin=/usr/bin --lua-suffix=5.4 \
        --with-lua-include=/usr/include/lua5.4 \
   && make -j$(nproc) \
   && make install \
-  && cd .. && rm -rf luarocks-3.11.1 luarocks-3.11.1.tar.gz
+  && cd .. && rm -rf luarocks-3.13.0 luarocks-3.13.0.tar.gz
 
 RUN luarocks install fennel \
   && luarocks install lunajson \

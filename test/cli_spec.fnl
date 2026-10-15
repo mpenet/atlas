@@ -1195,7 +1195,7 @@
                                                    {:status 200 :headers {}}))]
                     (opts.http-fn {:method "GET" :url "https://h/x"})
                     (assert.are.same [:x-appid] (. sent 1 :sensitive-headers)))))
-            (it "maps tls ca_cert to luasec's cafile"
+            (it "maps tls ca_cert to the cafile ssl option"
                 (fn []
                   (assert.are.equal "ca.pem"
                                     (. (cli.merge-ssl {:tls {:ca_cert "ca.pem"}}

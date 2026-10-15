@@ -1,5 +1,5 @@
 ;; ABOUTME: Specs for TLS settings: CA bundle discovery and the mapping of
-;; ABOUTME: luasec-style ssl options to the transport's verification settings.
+;; ABOUTME: ssl options (cafile, capath, certificate, key, verify) to the transport's verification settings.
 (local tls (require :atlas.tls))
 
 (fn only [path]
@@ -33,7 +33,7 @@
                   (fn []
                     (assert.are.same {:verify true :cafile "/etc/ssl/cert.pem"}
                                      (tls.options nil env exists))))
-              (it "maps luasec option names"
+              (it "maps the ssl option names"
                   (fn []
                     (assert.are.same {:verify true
                                       :cafile "/x.pem"

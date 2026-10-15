@@ -2,6 +2,12 @@
 
 All notable changes to atlas. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+
+- The Linux binaries are built on Alpine 3.24 and so link OpenSSL 3.5 (LTS); the previous ones linked OpenSSL 3.3, which is no longer supported. They are static position-independent executables.
+
 ## [1.0.0-beta3] - 2026-10-15
 
 ### Added

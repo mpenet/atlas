@@ -266,7 +266,9 @@ ifneq ($(DEPS_FROM_SOURCE),)
 	@otool -l bin/atlas-bin | grep -A4 LC_BUILD_VERSION | grep -q "minos $(MACOSX_DEPLOYMENT_TARGET)" || (otool -l bin/atlas-bin | grep -A4 LC_BUILD_VERSION; echo "expected minos $(MACOSX_DEPLOYMENT_TARGET)" && false)
 endif
 else ifneq ($(STATIC_LDFLAGS),)
-	@ldd bin/atlas-bin 2>&1 | grep -qiE 'not a (valid )?dynamic' || (ldd bin/atlas-bin; echo "expected a fully static binary" && false)
+	@# no loader and no shared library: static, or static PIE (newer toolchains)
+	@! readelf -lW bin/atlas-bin | grep -q INTERP || (echo "expected a fully static binary: it names a loader" && false)
+	@! readelf -dW bin/atlas-bin | grep -q NEEDED || (readelf -dW bin/atlas-bin | grep NEEDED; echo "expected a fully static binary" && false)
 else
 	@! ldd bin/atlas-bin | grep -vE 'linux-vdso|ld-linux|/lib(c|m|dl|pthread|rt)\.so' || (echo "non-system libraries linked above" && false)
 endif
