@@ -137,6 +137,10 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - `--curl` includes the TLS options (`-k`, `--cacert`, `--cert`, `--key`) and `--max-time`.
 - A body (`-d`, `--b.`) for an operation that takes none is an error instead of being dropped.
 - Bash completion inserts values containing `:` or `=` correctly (`de:fra-1`, URLs).
+- An external signing tool that fails (non-zero exit, output that isn't a JSON object) stops the request instead of letting it go out unsigned; so does a bearer-token tool that fails.
+- `atlas auth` reads a query API key's `env:` value, and takes `--timeout`.
+- The CLI validates bodies and attaches multipart files whatever the case of the media type; completion follows `--server-index N` as well as `--server-index=N`.
+- A config, `profiles` or `arazzo` section, or profile `schema` of the wrong type is reported clearly; a repeated JSON query parameter is an error.
 - A profile without `schema` is reported as such instead of being read as a file path; `--b.` fields on an array `-d` body are an error; colours go to stderr only when it is a terminal.
 - Profiles whose `auth`, `headers`, `query`, `ssl`, `tls`, `server` or `retry` is not an object, or whose `auth` has no `name`, are errors instead of being ignored (a string `auth` sent requests unauthenticated); so are unknown `--ssl.` options and a `--timeout` of 0 or less. Malformed Restish configs and workflows without a string `workflowId` give clear messages.
 - Completion lists the operations of specs whose `$ref`s point into other files.

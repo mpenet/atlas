@@ -89,7 +89,7 @@ that text from a spec can't drive the terminal (escape sequences)."
   "Whether a parameter is declared with JSON content rather than a schema."
   (accumulate [found false media-type (pairs (or (?. param :content) {}))
                &until found]
-    (not= nil (media-type:find "json" 1 true))))
+    (not= nil (: (media-type:lower) :find "json" 1 true))))
 
 (fn required-names [schema]
   "The property names a schema requires; required: true (a Swagger 2

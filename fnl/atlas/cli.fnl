@@ -31,6 +31,7 @@
 
 (local {: config-path
         : load-config
+        : check-config
         : resolve-profile
         : merge-ssl
         : client-options
@@ -178,8 +179,10 @@ profiles are kept. --dry-run prints the converted profiles instead."
               (print (.. k ": " (. h k))))
             ;; what is added to each request rather than as a header
             (if (and (= auth-cfg.name :api-key) (= params.in :query))
-                (print (.. "query: " (tostring params.name) "="
-                           (tostring params.value)))
+                (let [(ok kv) (pcall #(.. (auth.required-param auth-cfg :name)
+                                          "="
+                                          (auth.required-param auth-cfg :value)))]
+                  (if ok (print (.. "query: " kv)) (die (tostring kv))))
                 (and (= auth-cfg.name :external-tool)
                      (not= params.output :bearer-token))
                 (print (.. "signs each request with: "
@@ -474,8 +477,8 @@ invalid body unless --no-validate."
 replaces the network, the config contents, where the config is written, and
 the schema cache."
   (let [env (or ?env {})
-        (config-ok config) (if env.config (values true env.config)
-                               (pcall load-config))]
+        (config-ok config) (pcall #(check-config (if env.config env.config
+                                                     (load-config))))]
     (if (not config-ok)
         (do
           (io.stderr:write (.. (tostring config) "\n"))

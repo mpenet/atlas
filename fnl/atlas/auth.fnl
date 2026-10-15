@@ -305,9 +305,10 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
                 (.. "/bin/sh -c " (shell-quote params.commandline)))
         h (io.popen cmd)]
     (assert h "failed to start external auth command")
-    (let [out (h:read "*a")]
-      (h:close)
+    (let [out (h:read "*a")
+          (ok _ code) (h:close)]
       (when tmp-path (os.remove tmp-path))
+      (assert ok (.. "external auth command failed (exit " (tostring code) ")"))
       out)))
 
 (fn external-bearer [params]
@@ -326,11 +327,14 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
                               :uri req.url
                               :headers (or req.headers {})
                               :body (or body "")})
-        raw (run-external params payload)]
-    (when (and raw (> (length raw) 0))
-      (let [(ok result) (pcall json.decode raw)]
-        (when (and ok result result.headers)
-          result.headers)))))
+        raw (run-external params payload)
+        (ok result) (pcall json.decode raw)]
+    ;; anything but a JSON object means the request wasn't signed: it must
+    ;; not go out as if it were
+    (assert (and ok (= (type result) :table) (not (json.array? result))
+                 (or (= nil result.headers) (= (type result.headers) :table)))
+            "external auth command output is not a JSON object with headers")
+    result.headers))
 
 ;; ---- public API ----
 
@@ -469,6 +473,7 @@ any auth flow; signing tools and query api-keys supply none up front."
  : header-names
  : wrap-http-fn
  : api-key-in-query?
+ : required-param
  : authenticate
  : clear-token
  : save-token

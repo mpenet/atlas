@@ -280,6 +280,46 @@
                     (assert.is_truthy (r.err:find "profile noschema has no schema"
                                                   1 true)
                                       r.err))))
+            (it "validates bodies and uploads files whatever the media type's case"
+                (fn []
+                  (let [spec (.. (os.tmpname) ".json")
+                        file (.. (os.tmpname) ".txt")]
+                    (with-open [f (io.open file :w)]
+                      (f:write "hello"))
+                    (with-open [f (io.open spec :w)]
+                      (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{\"/j\":{\"post\":{\"operationId\":\"create\",\"requestBody\":{\"content\":{\"Application/JSON\":{\"schema\":{\"type\":\"object\",\"required\":[\"name\"]}}}},\"responses\":{}}},\"/m\":{\"post\":{\"operationId\":\"upload\",\"requestBody\":{\"content\":{\"Multipart/Form-Data\":{\"schema\":{\"type\":\"object\"}}}},\"responses\":{}}}}}"))
+                    (let [v (atlas-run ["op"
+                                        spec
+                                        "create"
+                                        "--b.x=1"
+                                        "--dry-run"])
+                          m (atlas-run ["op"
+                                        spec
+                                        "upload"
+                                        (.. "--b.file=@" file)
+                                        "--dry-run"])]
+                      (os.remove spec)
+                      (os.remove file)
+                      (assert.are.equal 1 v.code)
+                      (assert.is_truthy (v.err:find "body.name: required" 1
+                                                    true))
+                      (assert.is_truthy (m.out:find "filename=" 1 true) m.out)))))
+            (it "rejects a repeated JSON query parameter"
+                (fn []
+                  (let [spec (.. (os.tmpname) ".json")]
+                    (with-open [f (io.open spec :w)]
+                      (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{\"/s\":{\"get\":{\"operationId\":\"search\",\"parameters\":[{\"name\":\"filter\",\"in\":\"query\",\"content\":{\"application/json\":{\"schema\":{}}}}],\"responses\":{}}}}}"))
+                    (let [r (atlas-run ["op"
+                                        spec
+                                        "search"
+                                        "--q.filter={\"a\":1}"
+                                        "--q.filter={\"b\":2}"
+                                        "--dry-run"])]
+                      (os.remove spec)
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find "filter takes one JSON value"
+                                                    1 true)
+                                        r.err)))))
             (it "rejects a body for an operation that takes none"
                 (fn []
                   (each [_ extra (ipairs ["-d={}" "--b.z=2"])]
@@ -686,6 +726,27 @@
                       (auth.clear-token "oc-keep")
                       (assert.are.equal 1 r.code)
                       (assert.are.equal "old" (?. kept :access_token))))))
+            (it "takes --timeout for the token endpoint"
+                (fn []
+                  (let [r (atlas-run ["auth" "p" "--timeout" "5"])]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "authorization: Bearer t0k" r.out))))
+            (it "shows a query API key read from the environment"
+                (fn []
+                  (let [r (with-config {:profiles {:qkenv {:auth {:name "api-key"
+                                                                  :params {:in "query"
+                                                                           :name "key"
+                                                                           :value "env:ATLAS_TEST_UNSET_KEY"}}}}}
+                            #(atlas-run ["auth" "qkenv"]))]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "ATLAS_TEST_UNSET_KEY" 1 true)))
+                  (let [r (with-config {:profiles {:qkenv {:auth {:name "api-key"
+                                                                  :params {:in "query"
+                                                                           :name "key"
+                                                                           :value "env:HOME"}}}}}
+                            #(atlas-run ["auth" "qkenv"]))]
+                    (assert.are.equal (.. "query: key=" (os.getenv :HOME))
+                                      r.out))))
             (it "rejects unknown TLS options and non-positive timeouts"
                 (fn []
                   (each [_ [args msg] (ipairs [[["op"
@@ -706,6 +767,25 @@
                     (let [r (atlas-run args)]
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find msg 1 true) r.err)))))
+            (it "rejects a config with the wrong shape"
+                (fn []
+                  (each [_ [cfg msg] (ipairs [[{:profiles "x"}
+                                               "config: profiles must be an object"]
+                                              [{:profiles [1]}
+                                               "config: profiles must be an object"]
+                                              [3
+                                               "config must be a JSON object"]
+                                              [{:profiles {:a {:schema 5}}}
+                                               "profile a: schema must be a string"]])]
+                    ;; profile list marks a broken profile and goes on
+                    (let [r (with-config cfg
+                              #(atlas-run ["op" "a" "--list"]))
+                          listed (with-config cfg
+                                   #(atlas-run ["profile" "list"]))]
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find msg 1 true) r.err)
+                      (assert.is_truthy (: (.. listed.out listed.err) :find msg
+                                           1 true))))))
             (it "rejects profiles whose settings have the wrong shape"
                 (fn []
                   (each [_ [profile msg] (ipairs [[{:schema "test/fixtures/cli-api.json"
@@ -853,8 +933,8 @@
                   (assert.is_truthy (: (. (atlas-run ["auth" "broken-auth"])
                                           :err)
                                        :find
-                                       "external auth command produced no output"
-                                       1 true))))
+                                       "external auth command failed (exit 1)" 1
+                                       true))))
             (it "logs out of a profile"
                 (fn []
                   (let [r (atlas-run ["auth" "p" "--logout"])]

@@ -54,6 +54,7 @@
          :value :number
          :positive true
          :scope :any
+         :also [:auth]
          :help "Timeout in seconds"}
         {:names ["--max-pages"]
          :key :max-pages

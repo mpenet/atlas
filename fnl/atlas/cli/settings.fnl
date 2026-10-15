@@ -58,6 +58,15 @@ winning."
 ;; profile settings that hold JSON objects
 (local object-settings [:auth :headers :query :ssl :tls :server :retry])
 
+(fn check-config [config]
+  "config, raising when it or its sections have the wrong shape."
+  (when (not (object? config))
+    (error "config must be a JSON object" 0))
+  (each [_ k (ipairs [:profiles :arazzo :retry])]
+    (when (not (or (= nil (. config k)) (object? (. config k))))
+      (error (.. "config: " k " must be an object") 0)))
+  config)
+
 (fn check-profile [name profile]
   "profile, raising when a setting has the wrong shape: a mistyped setting
 would otherwise be ignored, auth included."
@@ -66,6 +75,8 @@ would otherwise be ignored, auth included."
   (each [_ k (ipairs object-settings)]
     (when (not (or (= nil (. profile k)) (object? (. profile k))))
       (error (.. "profile " name ": " k " must be an object") 0)))
+  (when (not (or (= nil profile.schema) (= (type profile.schema) :string)))
+    (error (.. "profile " name ": schema must be a string (a URL or a path)") 0))
   (when (and profile.auth (not= (type profile.auth.name) :string))
     (error (.. "profile " name
                ": auth needs a name (bearer, basic, api-key, external-tool, oauth-...)")
@@ -313,6 +324,7 @@ opts: fetch-schema options plus {:ttl seconds :reload bool :cache bool}"
  : retry-options
  : paginate-options
  : client-options
+ : check-config
  : request-timeout
  : display-options
  : fetch-schema

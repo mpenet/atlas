@@ -922,6 +922,22 @@
                                      (cli.complete-line "op S post-x --b." ctx))
                     (assert.are.same []
                                      (cli.complete-line "op S post-y --b." ctx)))))
+            (it "completes the variables of the server --server-index picks"
+                (fn []
+                  (let [ctx {:config {}
+                             :load-schema (fn [_]
+                                            {:openapi "3.0.0"
+                                             :servers [{:url "https://{one}.x"
+                                                        :variables {:one {:default "a"}}}
+                                                       {:url "https://{two}.x"
+                                                        :variables {:two {:default "b"}}}]
+                                             :paths {}})}]
+                    (assert.are.same ["--server.two="]
+                                     (cli.complete-line "op S --server-index=2 --server."
+                                                        ctx))
+                    (assert.are.same ["--server.two="]
+                                     (cli.complete-line "op S --server-index 2 --server."
+                                                        ctx)))))
             (it "completes server variables and their values"
                 (fn []
                   (assert.are.same ["--server.zone="]
@@ -958,7 +974,7 @@
                 (fn []
                   (assert.are.same ["--dry-run" "--help"]
                                    (complete "profile import-restish x --"))
-                  (assert.are.same ["--help" "--logout" "--ssl."]
+                  (assert.are.same ["--help" "--logout" "--ssl." "--timeout="]
                                    (complete "auth p --"))
                   (assert.are.same ["--help"] (complete "profile list --"))
                   (assert.is_nil (: (table.concat (complete "az f --") " ")

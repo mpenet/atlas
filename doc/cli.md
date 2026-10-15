@@ -140,6 +140,7 @@ Options go anywhere after the command. `--name=value` and `--name value` are equ
 | Option | Commands | Description |
 |--------|----------|-------------|
 | `--logout` | `auth` | Delete the profile's cached token |
+| `--timeout`, `--ssl.KEY=VAL` | `auth` | Also apply to `auth`'s requests to the token endpoint |
 | `--dry-run` | `profile import-restish` | Show the profiles that would be added |
 
 ## Requests

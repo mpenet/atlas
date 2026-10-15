@@ -5,8 +5,11 @@
 (local util (require :atlas.util))
 (local http-mod (require :atlas.http))
 (local {: field-prefixes : options : option-by-name} (require :atlas.cli.args))
-(local {: load-config : load-schema-cached : find-profile : merge-ssl}
-       (require :atlas.cli.settings))
+(local {: load-config
+        : check-config
+        : load-schema-cached
+        : find-profile
+        : merge-ssl} (require :atlas.cli.settings))
 
 ;; ---- options and completion ----
 (fn shown [o]
@@ -151,8 +154,12 @@ operation, or an Arazzo document's workflow and inputs."
             source (or (?. profile :schema) target)
             (ok schema) (pcall ctx.load-schema source profile)]
         (when (and ok (= (type schema) :table))
-          (let [index-flag (accumulate [v nil _ w (ipairs words)]
-                             (or (w:match "^%-%-server%-index=(%d+)$") v))
+          (let [index-flag (accumulate [v nil i w (ipairs words)]
+                             ;; --server-index=N or --server-index N
+                             (or (w:match "^%-%-server%-index=(%d+)$")
+                                 (when (= w "--server-index")
+                                   (?. words (+ i 1)))
+                                 v))
                 index (or (tonumber index-flag) (?. profile :server-index) 1)]
             (set c.ops
                  (op-entries schema source
@@ -313,7 +320,8 @@ atlas __complete [--describe] LINE-UP-TO-CURSOR"
         timeout 5
         describe? (= (. args 2) "--describe")
         line (command-args (or (. args (if describe? 3 2)) ""))
-        ctx {:config (let [(ok cfg) (pcall load-config)] (if ok cfg {}))
+        ctx {:config (let [(ok cfg) (pcall #(check-config (load-config)))]
+                       (if ok cfg {}))
              ;; the cache as op uses it
              :load-schema (fn [src ?profile]
                             (if (src:match "^https?://")

@@ -25,13 +25,17 @@
             (.. "invalid body (expected JSON or YAML): " (tostring parsed)))
     parsed))
 
+(fn media-type [op]
+  "op's request media type in lower case (media types ignore case), or nil."
+  (when op.content-type
+    (op.content-type:lower)))
+
 (fn decode-body [raw content-type]
   "Decode a raw body for an operation's content type: JSON, form and
 multipart operations take JSON or YAML; any other type is sent as-is."
-  (if (or (= nil content-type) (: (content-type:lower) :match "json")
-          (: (content-type:lower) :match
-             "^application/x%-www%-form%-urlencoded")
-          (: (content-type:lower) :match "^multipart/form%-data"))
+  (if (or (= nil content-type) (: content-type :match "json")
+          (: content-type :match "^application/x%-www%-form%-urlencoded")
+          (: content-type :match "^multipart/form%-data"))
       (decode-structured raw)
       raw))
 
@@ -76,6 +80,10 @@ from the JSON text given on the command line, so it isn't encoded twice."
                              &until found]
                   (and (= param.in :query) (= param.name name)
                        (util.json-content? param)))
+          _ (when (and json? (= (type v) :table))
+              (error (.. "--q." name
+                         " takes one JSON value (give a JSON array once for a list)")
+                     0))
           (ok decoded) (if (and json? (= (type v) :string))
                            (pcall json.decode v)
                            false)]
@@ -85,18 +93,18 @@ from the JSON text given on the command line, so it isn't encoded twice."
   "Build an op.invoke request from parsed CLI args."
   (when (and (not op.has-body) (or (not= nil p.body) (next p.body-fields)))
     (error (.. op.name " takes no request body") 0))
-  (let [json-op? (and op.content-type (: (op.content-type:lower) :match "json"))
+  (let [json-op? (and op.content-type (: (media-type op) :match "json"))
         valid-json? #(pcall json.decode $)
         given (if (not= (type p.body) :string) p.body
                   ;; valid JSON goes out byte-for-byte: scalars, null and
                   ;; number formatting survive
                   (and json-op? (not (next p.body-fields)) (valid-json? p.body))
-                  p.body (let [v (decode-body p.body op.content-type)]
+                  p.body (let [v (decode-body p.body (media-type op))]
                           (if (and json-op? (not= (type v) :table))
                               (json.encode v)
                               v)))
         multipart? (and op.content-type
-                        (op.content-type:match "^multipart/form%-data"))
+                        (: (media-type op) :match "^multipart/form%-data"))
         body (if (next p.body-fields)
                  (let [b (build-body p.body-fields op.body-schema given)]
                    (if multipart?
@@ -146,7 +154,7 @@ query names are warnings. Header names match case-insensitively."
 (fn check-body [op body]
   "Schema errors for a JSON operation's body (decoded table or JSON text)."
   (if (or (= nil body) (not op.body-schema) (not op.content-type)
-          (not (op.content-type:match "json")))
+          (not (: (media-type op) :match "json")))
       []
       (let [(ok value) (if (= (type body) :string)
                            (pcall json.decode body true)

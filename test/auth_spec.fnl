@@ -493,6 +493,25 @@
                               :headers {}})
                     (assert.are.equal "https://api.example.com/items?filter[a]=1"
                                       (. calls 1 :url)))))
+            (it "refuses to send a request the tool failed to sign"
+                (fn []
+                  (each [_ commandline (ipairs ["exit 3"
+                                                "echo not-json"
+                                                "true"
+                                                "echo '{\"headers\":{\"x\":\"y\"}}'; exit 1"])]
+                    (let [(http calls) (seq-mock (ok-resp {}))
+                          auth (reload-auth http)
+                          wrapped (auth.wrap-http-fn {:name "external-tool"
+                                                      :params {: commandline}}
+                                                     http.request)
+                          (ok err) (pcall wrapped
+                                          {:method "GET"
+                                           :url "https://api.example.com/items"
+                                           :headers {}})]
+                      (assert.is_false ok commandline)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "external auth command" 1 true))
+                      (assert.are.equal 0 (length calls))))))
             (it "marks the headers the tool adds as sensitive"
                 (fn []
                   (let [(http calls) (seq-mock (ok-resp {}))
