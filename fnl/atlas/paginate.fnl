@@ -44,7 +44,8 @@ survive. opts: {:max-pages n} (default 25)"
     (fn [req]
       (let [first (http-fn req)
             first-items (array-text first)
-            first-url (util.append-query req.url (or req.query {}))]
+            first-url (util.append-query req.url (or req.query {})
+                                         req.query-styles)]
         (if (or (not= (: (or req.method "GET") :upper) "GET")
                 (= nil first-items) (= nil (next-link first.headers)))
             first

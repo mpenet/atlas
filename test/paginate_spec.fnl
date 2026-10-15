@@ -228,3 +228,19 @@
                 (fn []
                   (assert.are.equal "https://h/n"
                                     (paginate.next-link {:link "<https://h/p>; rel=\"prev\"; title=\"a, b\", <https://h/n>; rel=\"next\""}))))))
+
+(describe "paginate.wrap with styled queries"
+          (fn []
+            (it "builds the first URL in the query's declared styles"
+                (fn []
+                  (let [seen []
+                        f (paginate.wrap (fn [req]
+                                           (table.insert seen req)
+                                           {:status 200 :headers {} :raw "[]"})
+                                         {})]
+                    (f {:method "GET"
+                        :url "https://h/items"
+                        :query {:filter {:status {:in ["a"]}}}
+                        :query-styles {:filter {:json true}}
+                        :headers {}})
+                    (assert.are.equal 1 (length seen)))))))

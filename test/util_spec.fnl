@@ -401,6 +401,20 @@
 
 (describe "resolve-reference"
           (fn []
+            (it "keeps trailing slashes and empty segments"
+                (fn []
+                  (assert.are.equal "https://api.example.com/api/items/?page=2"
+                                    (util.resolve-reference "https://api.example.com/v1/spec.json"
+                                                            "/api/items/?page=2"))
+                  (assert.are.equal "https://h/v1//x"
+                                    (util.resolve-reference "https://h/v1/spec.json"
+                                                            "/v1//x"))
+                  (assert.are.equal "https://h/a/"
+                                    (util.resolve-reference "https://h/a/b/c"
+                                                            ".."))
+                  (assert.are.equal "https://h/x"
+                                    (util.resolve-reference "https://h/a"
+                                                            "/../x"))))
             (it "leaves the query and fragment as they are"
                 (fn []
                   (assert.are.equal "https://api.example.com/v1/items?cursor=ab//cd=="

@@ -48,6 +48,23 @@ location (no credentials are sent for them)."
 
 ;; ---- client building ----
 
+(fn declared-server-variables [schema index]
+  "Names of the variables of the schema's server at index and of the servers
+path items and operations declare."
+  (let [names {}
+        add #(each [k (pairs (or (?. $ :variables) {}))]
+               (tset names k true))]
+    (add (?. schema :servers index))
+    (each [_ item (pairs (or schema.paths {}))]
+      (when (= (type item) :table)
+        (each [_ server (ipairs (or item.servers []))]
+          (add server))
+        (each [_ op (pairs item)]
+          (when (= (type op) :table)
+            (each [_ server (ipairs (or op.servers []))]
+              (add server))))))
+    names))
+
 (fn source-client [url opts server-vars used]
   "Client for one source, given only the server variables its schema
 declares; records the variables it used in used."
@@ -57,8 +74,7 @@ declares; records the variables it used in used."
                                                             {:ssl opts.ssl
                                                              :headers opts.headers
                                                              :timeout opts.timeout})
-            declared (or (?. schema :servers (or opts.server-index 1)
-                             :variables) {})
+            declared (declared-server-variables schema (or opts.server-index 1))
             own (collect [name value (pairs server-vars)]
                   (when (. declared name)
                     (tset used name true)

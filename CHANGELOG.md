@@ -127,7 +127,10 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - Validation doesn't require `readOnly` properties in request bodies.
 - Header and cookie values that are arrays are sent in the simple style (`a,b`); objects are an error instead of `table: 0x…`.
 - Servers declared by an operation follow `:server-index`/`--server-index`, and `:server-vars` may set their variables.
-- Relative URLs (next-page links, `$ref`s) keep their query and fragment as written.
+- Relative URLs (next-page links, `$ref`s) keep their query, fragment, trailing slash and empty segments as written; only `.` and `..` segments are resolved.
+- Pagination and redirects of requests with JSON query parameters no longer fail.
+- Arazzo accepts server variables that only an operation's or path item's servers declare.
+- `--server-index` on a spec without `servers` reports 0 servers.
 - Help names an operation by the name the client gave it, also when its operationId's name was taken.
 - Validation lets names matching `patternProperties` through `additionalProperties: false`, and ignores `required: true` (a Swagger 2 leftover) instead of crashing; so do help and completion.
 - Network-path references (`//host/path`) in `$ref`s and server URLs keep the spec's scheme only.
@@ -140,7 +143,9 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - An external signing tool that fails (non-zero exit, output that isn't a JSON object) stops the request instead of letting it go out unsigned; so does a bearer-token tool that fails.
 - `atlas auth` reads a query API key's `env:` value, and takes `--timeout`.
 - The CLI validates bodies and attaches multipart files whatever the case of the media type; completion follows `--server-index N` as well as `--server-index=N`.
-- A config, `profiles` or `arazzo` section, or profile `schema` of the wrong type is reported clearly; a repeated JSON query parameter is an error.
+- A config, `profiles` or `arazzo` section, Arazzo context (`file`, `inputs`), profile, `extends` target or profile `schema` of the wrong type is reported clearly; a repeated JSON query parameter is an error.
+- A required query parameter that the profile's `query` or a query API key provides is not reported missing.
+- A cached OAuth token is used only with the token endpoint and client that issued it: after changing a profile's auth, a new token is obtained instead of sending the old one (tokens cached by earlier versions are obtained again once).
 - A profile without `schema` is reported as such instead of being read as a file path; `--b.` fields on an array `-d` body are an error; colours go to stderr only when it is a terminal.
 - Profiles whose `auth`, `headers`, `query`, `ssl`, `tls`, `server` or `retry` is not an object, or whose `auth` has no `name`, are errors instead of being ignored (a string `auth` sent requests unauthenticated); so are unknown `--ssl.` options and a `--timeout` of 0 or less. Malformed Restish configs and workflows without a string `workflowId` give clear messages.
 - Completion lists the operations of specs whose `$ref`s point into other files.

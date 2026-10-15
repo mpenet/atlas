@@ -297,7 +297,8 @@
                           (table.insert seen req)
                           (let [util (require :atlas.util)]
                             (or (. routes
-                                   (util.append-query req.url (or req.query {})))
+                                   (util.append-query req.url (or req.query {})
+                                                      req.query-styles))
                                 {:status 404 :headers {}})))
                         seen)))
 
@@ -331,6 +332,18 @@
                                               :headers creds})
                       (assert.are.same {:accept "application/json"}
                                        (. seen 2 :headers)))))
+              (it "follows redirects of requests with JSON query parameters"
+                  (fn []
+                    (let [(send seen) (site {"https://a.test/x?filter=%7B%22a%22%3A%7B%22b%22%3A1%7D%7D" (moved "/y")
+                                             "https://a.test/y" {:status 200
+                                                                 :headers {}}})
+                          resp (http.follow-redirects send
+                                                      {:method "GET"
+                                                       :url "https://a.test/x"
+                                                       :query {:filter {:a {:b 1}}}
+                                                       :query-styles {:filter {:json true}}
+                                                       :headers {}})]
+                      (assert.are.equal 200 resp.status))))
               (it "keeps a query API key on the same origin only"
                   (fn []
                     (let [(send seen) (site {"https://a.test/x?k=K&n=1" (moved "/y")

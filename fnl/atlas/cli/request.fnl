@@ -119,7 +119,9 @@ from the JSON text given on the command line, so it isn't encoded twice."
 (fn check-params [op request]
   "Check request query/headers against the operation's declared parameters.
 Returns (errors warnings): missing required params are errors, undeclared
-query names are warnings. Header names match case-insensitively."
+query names are warnings. Header names match case-insensitively;
+request.implied-query names the query parameters added on the way (profile
+query, query API key), present but not given."
   (let [errors []
         warnings []
         declared-query {}]
@@ -128,7 +130,8 @@ query names are warnings. Header names match case-insensitively."
         :query (do
                  (tset declared-query param.name true)
                  (when (and param.required
-                            (= nil (?. request :query param.name)))
+                            (= nil (?. request :query param.name))
+                            (not (?. request :implied-query param.name)))
                    (table.insert errors
                                  (string.format "missing required query parameter '%s' (--q.%s=…)"
                                                 param.name param.name))))

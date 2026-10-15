@@ -39,21 +39,23 @@ winning."
           (tset result k v)))
     result))
 
+(fn object? [v]
+  (and (= (type v) :table) (not= v json.null) (not (json.array? v))))
+
 (fn resolve-profile [name profiles ?seen]
   (let [seen (or ?seen {})
         p (. profiles name)]
     (when (not p) (error (.. "Profile not found: " name) 0))
     (when (. seen name) (error (.. "Circular extends: " name) 0))
     (tset seen name true)
+    (when (not (object? p))
+      (error (.. "profile " name " must be an object") 0))
     (if p.extends
         (let [base (resolve-profile p.extends profiles seen)
               child (collect [k v (pairs p)] k v)]
           (tset child :extends nil)
           (merge-profiles base child))
         p)))
-
-(fn object? [v]
-  (and (= (type v) :table) (not= v json.null) (not (json.array? v))))
 
 ;; profile settings that hold JSON objects
 (local object-settings [:auth :headers :query :ssl :tls :server :retry])
@@ -65,6 +67,13 @@ winning."
   (each [_ k (ipairs [:profiles :arazzo :retry])]
     (when (not (or (= nil (. config k)) (object? (. config k))))
       (error (.. "config: " k " must be an object") 0)))
+  (each [name context (pairs (or config.arazzo {}))]
+    (when (not (and (object? context) (= (type context.file) :string)))
+      (error (.. "config: arazzo " name
+                 " must be an object with a file, like {\"file\": \"flow.yaml\"}")
+             0))
+    (when (not (or (= nil context.inputs) (object? context.inputs)))
+      (error (.. "config: arazzo " name ": inputs must be an object") 0)))
   config)
 
 (fn check-profile [name profile]
@@ -243,6 +252,15 @@ request signing, logging, and the transport (or dry-run printing)."
      :authorize (when (and auth-cfg (not p.dry-run))
                   #(or (auth.wrap-http-fn auth-cfg $) $))
      :auth-header-names auth-names
+     ;; query parameters added to every request
+     :implied-query (let [names (collect [k (pairs (or (?. profile :query) {}))]
+                                  k
+                                  true)
+                          key (when (and auth-cfg
+                                         (auth.api-key-in-query? auth-cfg))
+                                (?. auth-cfg :params :name))]
+                      (when key (tset names key true))
+                      names)
      :ssl ssl
      :timeout (request-timeout profile p config)
      :base-url (or p.base-url (?. profile :base-url))

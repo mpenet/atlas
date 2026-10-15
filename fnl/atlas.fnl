@@ -242,9 +242,12 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
                     [{:url "/"}])
         index (or (?. ?opts :server-index) 1)
         server (when (and (not (?. ?opts :base-url)) (> (length servers) 0))
-                 (assert (. servers index)
+                 (assert (and (. servers index)
+                              ;; the default server at / is no choice
+                              (or (= index 1) (not= nil (?. schema :servers 1))))
                          (string.format "server index %s out of range (schema has %d servers)"
-                                        (tostring index) (length servers)))
+                                        (tostring index)
+                                        (length (or schema.servers []))))
                  (. servers index))
         entries (schema-operations schema deref)
         ;; the server of an operation that declares its own (or whose path

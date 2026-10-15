@@ -128,7 +128,7 @@ req.sensitive-headers and any whose name looks like a credential."
         method (: (or req.method "GET") :upper)]
     (when (and (. redirect-status resp.status) location
                (or (= method "GET") (= method "HEAD")))
-      (let [from (util.append-query req.url (or req.query {}))
+      (let [from (util.append-query req.url (or req.query {}) req.query-styles)
             target ((. (require :socket.url) :absolute) from location)
             target-origin (util.origin target)
             same-origin? (and target-origin

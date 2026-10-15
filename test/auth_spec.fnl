@@ -208,7 +208,8 @@
                         profile (tmp-profile)]
                     (auth.save-token profile
                                      {:access_token "cached"
-                                      :expires_at (+ (os.time) 3600)})
+                                      :expires_at (+ (os.time) 3600)
+                                      :issuer "https://a/token c"})
                     (let [h (auth.get-headers profile
                                               {:name "oauth-client-credentials"
                                                :params {:token_url "https://a/token"
@@ -217,6 +218,29 @@
                       (clean-token profile)
                       (assert.are.same {:authorization "Bearer cached"} h)
                       (assert.are.equal 0 (length calls))))))
+            (it "ignores a token another provider or client issued"
+                (fn []
+                  (let [(http calls) (seq-mock (ok-resp (json-body {:access_token "fresh"})))
+                        auth (reload-auth http)
+                        profile (tmp-profile)]
+                    (auth.save-token profile
+                                     {:access_token "cached"
+                                      :expires_at (+ (os.time) 3600)
+                                      :refresh_token "r-old"
+                                      :issuer "https://other/token c"})
+                    (let [h (auth.get-headers profile
+                                              {:name "oauth-client-credentials"
+                                               :params {:token_url "https://a/token"
+                                                        :client_id "c"
+                                                        :client_secret "s"}}
+                                              {})
+                          saved (auth.load-token profile)]
+                      (clean-token profile)
+                      (assert.are.same {:authorization "Bearer fresh"} h)
+                      (assert.are.equal 1 (length calls))
+                      (assert.is_nil (: (. calls 1 :raw-body) :find "r-old" 1
+                                        true))
+                      (assert.are.equal "https://a/token c" saved.issuer)))))
             (it "authenticates again when a refresh fails"
                 (fn []
                   (let [(http calls) (seq-mock (err-resp {:error "invalid_grant"})
@@ -228,7 +252,8 @@
                     (auth.save-token profile
                                      {:access_token "old"
                                       :expires_at 1
-                                      :refresh_token "r1"})
+                                      :refresh_token "r1"
+                                      :issuer "https://a/token c"})
                     (set io.stderr {:write (fn [_ s] (table.insert err s))})
                     (let [(ok h) (pcall auth.get-headers profile
                                         {:name "oauth-client-credentials"
@@ -693,7 +718,8 @@
                     (auth.save-token profile
                                      {:access_token "old"
                                       :expires_at 1
-                                      :refresh_token "r1"})
+                                      :refresh_token "r1"
+                                      :issuer "https://a.example.com/token cid"})
                     (assert.are.same {:authorization "Bearer new"}
                                      (auth.get-headers profile cfg {}))
                     (let [saved (auth.load-token profile)]

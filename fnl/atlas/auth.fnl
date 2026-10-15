@@ -87,7 +87,12 @@ means none): decoded from the raw text when there is one."
         (when (= (type resp.body) :table)
           resp.body))))
 
-(fn store-token [resp profile-name ?previous]
+(fn issuer [params]
+  "Who a token comes from: its token endpoint and client. A cached token is
+used only with the auth settings that obtained it."
+  (.. (tostring params.token_url) " " (tostring params.client_id)))
+
+(fn store-token [resp profile-name params ?previous]
   (assert (util.success? resp.status)
           (let [body (json-body resp)
                 detail (when body
@@ -100,7 +105,8 @@ means none): decoded from the raw text when there is one."
                        (not= body.access_token ""))
                   "token response has no access_token")
         data {:access_token body.access_token
-              :token_type (or body.token_type "Bearer")}]
+              :token_type (or body.token_type "Bearer")
+              :issuer (issuer params)}]
     (when body.expires_in
       (tset data :expires_at (+ (os.time) body.expires_in)))
     (match (or body.refresh_token (?. ?previous :refresh_token))
@@ -118,7 +124,7 @@ means none): decoded from the raw text when there is one."
       (tset form :client_secret (expand-env params.client_secret)))
     (let [(ok resp) (pcall post-form params.token_url form net)]
       (when (and ok (util.success? resp.status))
-        (store-token resp profile-name cached)))))
+        (store-token resp profile-name params cached)))))
 
 ;; ---- client credentials ----
 
@@ -128,7 +134,7 @@ means none): decoded from the raw text when there is one."
               :client_secret (expand-env (or params.client_secret ""))}]
     (when params.scope (tset form :scope params.scope))
     (when params.audience (tset form :audience params.audience))
-    (store-token (post-form params.token_url form net) profile-name)))
+    (store-token (post-form params.token_url form net) profile-name params)))
 
 ;; ---- device authorization ----
 
@@ -164,7 +170,7 @@ returns the stored token, raising on expiry, denial or timeout."
                            net)
           body (when ok (json-body resp))]
       (if (and body (util.success? resp.status))
-          (set token (store-token resp profile-name))
+          (set token (store-token resp profile-name params))
           (match (?. body :error)
             "slow_down" (set interval (+ interval 5))
             "expired_token" (error "device code expired")
@@ -285,7 +291,7 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
         (when params.client_secret
           (tset form :client_secret (expand-env params.client_secret)))
         (tset form :code_verifier code-verifier)
-        (store-token (post-form params.token_url form net) profile-name)))))
+        (store-token (post-form params.token_url form net) profile-name params)))))
 
 ;; ---- external tool ----
 
@@ -351,7 +357,12 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
       _ (error (.. "unsupported auth type: " auth-config.name)))))
 
 (fn ensure-token [profile-name auth-config net]
-  (let [cached (load-token profile-name)]
+  ;; a token from other auth settings (another provider or client) is
+  ;; neither used nor refreshed
+  (let [stored (load-token profile-name)
+        cached (when (and stored
+                          (= stored.issuer (issuer (or auth-config.params {}))))
+                 stored)]
     (if (token-valid? cached)
         cached.access_token
         (let [data (if (and cached cached.refresh_token)

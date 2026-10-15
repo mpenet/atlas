@@ -27,7 +27,8 @@
         : format-servers
         : print-arazzo-result
         : list-arazzo-workflows
-        : wrap-log-request} (require :atlas.cli.output))
+        : wrap-log-request
+        : strip-location} (require :atlas.cli.output))
 
 (local {: config-path
         : load-config
@@ -76,7 +77,8 @@
           (print (.. name "\t"
                      (match (pcall find-profile config name)
                        (true p) (or (?. p :schema) "(no schema)")
-                       (_ err) (.. "(broken: " (tostring err) ")"))))))))
+                       (_ err) (.. "(broken: " (strip-location (tostring err))
+                                   ")"))))))))
 
 (fn profile-show [config name]
   (when (not name)
@@ -366,7 +368,10 @@ invalid body unless --no-validate."
     ;; headers auth will add count as present without authenticating now
     (each [_ name (ipairs opts.auth-header-names)]
       (tset headers name "<auth>"))
-    (let [(errors warnings) (check-params op {:query request.query : headers})]
+    (let [(errors warnings) (check-params op
+                                          {:query request.query
+                                           : headers
+                                           :implied-query opts.implied-query})]
       (each [_ e (ipairs (check-body op request.body))]
         (table.insert errors e))
       (each [_ w (ipairs warnings)]

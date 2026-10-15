@@ -320,6 +320,29 @@
                       (assert.is_truthy (r.err:find "filter takes one JSON value"
                                                     1 true)
                                         r.err)))))
+            (it "counts query parameters the profile or a query key adds"
+                (fn []
+                  (let [spec (.. (os.tmpname) ".json")]
+                    (with-open [f (io.open spec :w)]
+                      (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{\"/items\":{\"get\":{\"operationId\":\"listItems\",\"parameters\":[{\"name\":\"appid\",\"in\":\"query\",\"required\":true}],\"responses\":{}}}}}"))
+                    (let [cfg {:profiles {:q {:schema spec
+                                              :auth {:name "api-key"
+                                                     :params {:in "query"
+                                                              :name "appid"
+                                                              :value "K"}}}
+                                          :pq {:schema spec
+                                               :query {:appid "P"}}}}
+                          rq (with-config cfg
+                               #(atlas-run ["op" "q" "list-items" "--dry-run"]))
+                          rpq (with-config cfg
+                                #(atlas-run ["op"
+                                             "pq"
+                                             "list-items"
+                                             "--dry-run"]))]
+                      (os.remove spec)
+                      (assert.are.equal 0 rq.code)
+                      (assert.are.equal 0 rpq.code)
+                      (assert.is_nil (rpq.err:find "warning" 1 true))))))
             (it "rejects a body for an operation that takes none"
                 (fn []
                   (each [_ extra (ipairs ["-d={}" "--b.z=2"])]
@@ -786,6 +809,28 @@
                       (assert.is_truthy (r.err:find msg 1 true) r.err)
                       (assert.is_truthy (: (.. listed.out listed.err) :find msg
                                            1 true))))))
+            (it "rejects Arazzo contexts and extends of the wrong shape"
+                (fn []
+                  (each [_ [cfg args msg] (ipairs [[{:arazzo {:pets "/x/wf.yaml"}}
+                                                    ["az" "pets"]
+                                                    "config: arazzo pets must be an object with a file"]
+                                                   [{:arazzo {:m {:file "wf.yaml"
+                                                                  :inputs "str"}}}
+                                                    ["az" "m" "go"]
+                                                    "config: arazzo m: inputs must be an object"]
+                                                   [{:profiles {:x {:schema "s.json"
+                                                                    :extends "y"}
+                                                                :y "oops"}}
+                                                    ["op" "x" "--list"]
+                                                    "profile y must be an object"]])]
+                    (let [r (with-config cfg #(atlas-run args))]
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find msg 1 true) r.err)))
+                  (let [r (with-config {:profiles {:x {:schema "s.json"
+                                                       :extends "y"}
+                                                   :y "oops"}}
+                            #(atlas-run ["profile" "list"]))]
+                    (assert.is_nil (r.out:find ".lua:" 1 true) r.out))))
             (it "rejects profiles whose settings have the wrong shape"
                 (fn []
                   (each [_ [profile msg] (ipairs [[{:schema "test/fixtures/cli-api.json"

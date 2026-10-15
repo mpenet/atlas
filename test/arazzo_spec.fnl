@@ -125,6 +125,19 @@
                       (os.remove path)
                       (assert.are.equal "https://eu.a.test/x"
                                         (clients.a.ax.url-for))))))
+            (it "takes variables of servers an operation declares"
+                (fn []
+                  (let [path (os.tmpname)]
+                    (with-open [f (io.open path :w)]
+                      (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://api.example.com\"}],\"paths\":{\"/x\":{\"get\":{\"operationId\":\"getX\",\"servers\":[{\"url\":\"https://{region}.example.com\",\"variables\":{\"region\":{\"default\":\"eu\"}}}],\"responses\":{}}}}}"))
+                    (let [clients (arazzo.build-clients {:sourceDescriptions [{:name "a"
+                                                                               :type "openapi"
+                                                                               :url path}]
+                                                         :workflows []}
+                                                        {:server-vars {:region "us"}})]
+                      (os.remove path)
+                      (assert.are.equal "https://us.example.com/x"
+                                        (clients.a.get-x.url-for))))))
             (it "loads sources that don't say their type"
                 (fn []
                   (let [clients (arazzo.build-clients {:sourceDescriptions [{:name "api"

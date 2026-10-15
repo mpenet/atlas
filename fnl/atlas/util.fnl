@@ -262,17 +262,26 @@ existing one."
         (.. url "?" qs))))
 
 (fn normalize-segments [path]
-  "Collapse ./ and ../ segments in a slash-separated path; ../ never climbs
-above the root of an absolute path."
-  (let [absolute? (= (path:sub 1 1) "/")
+  "Remove . and .. segments from a slash-separated path (RFC 3986): empty
+segments and a trailing slash stay; .. never climbs above the root of an
+absolute path."
+  (let [segs (icollect [seg (: (.. path "/") :gmatch "([^/]*)/")]
+               seg)
+        absolute? (= (. segs 1) "")
+        ;; the root's empty segment is never removed
+        floor (if absolute? 1 0)
         out []]
-    (each [seg (path:gmatch "[^/]+")]
-      (if (= seg ".") nil (= seg "..")
-          (if (and (> (length out) 0) (not= (. out (length out)) ".."))
-              (table.remove out)
-              (when (not absolute?) (table.insert out seg)))
-          (table.insert out seg)))
-    (.. (if absolute? "/" "") (table.concat out "/"))))
+    (each [i seg (ipairs segs)]
+      (let [last? (= i (length segs))]
+        (if (= seg ".") (when last? (table.insert out "")) (= seg "..")
+            (do
+              (if (and (> (length out) floor) (not= (. out (length out)) ".."))
+                  (table.remove out)
+                  (when (not absolute?) (table.insert out "..")))
+              ;; a/b/.. is the directory a/
+              (when last? (table.insert out "")))
+            (table.insert out seg))))
+    (table.concat out "/")))
 
 (fn resolve-reference [base ref]
   "Resolve ref (URL or path) relative to the document located at base."

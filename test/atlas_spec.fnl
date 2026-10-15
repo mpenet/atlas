@@ -679,6 +679,19 @@
 
 (describe "root-relative server URLs"
           (fn []
+            (it "make a server index an error when the spec declares none"
+                (fn []
+                  (let [doc (schema {"/x" {:get {:operationId "getX"
+                                                 :responses {}}}})]
+                    (set doc.servers nil)
+                    (let [(ok err) (pcall atlas.client doc
+                                          {:server-index 2
+                                           :source-url "https://api.example.com/openapi.json"
+                                           :http-fn (mock-http)})]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "server index 2 out of range (schema has 0 servers)"
+                                           1 true))))))
             (it "default to / when the spec declares no servers"
                 (fn []
                   (each [_ servers (ipairs [:absent []])]
