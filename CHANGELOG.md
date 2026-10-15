@@ -10,6 +10,7 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - `atlas.base-url`: the URL a client of a schema sends requests to.
 - `--select` filters: `[?state==running]`, `[?size>10]`, `[?tags.env=="prod"]`, `[?tags]`.
 - `--output=table`, `csv` and `tsv` for arrays of objects, with the columns a `{a,b}` selection picks.
+- `atlas mcp PROFILE`: an MCP server over stdio (protocol 2026-07-28, and the earlier ones that open with `initialize`). The operations become tools, authenticated with the profile: the read-only ones by default, all with `--allow-writes`, or those the profile's `mcp.operations` lists. `--arazzo=NAME` adds the workflows of an Arazzo context as tools.
 - YAML responses are decoded, and JSON Lines responses (`application/x-ndjson`, `application/jsonl`) become an array of their lines' values.
 
 ### Changed

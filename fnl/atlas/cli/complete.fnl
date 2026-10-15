@@ -50,6 +50,7 @@ own scope, :any for the API commands op, az and http, or one of its :also."
   (print "  op  <profile-or-schema> [operation] [path-params...]  Run an API operation")
   (print "  az  <name-or-file> [workflow-id] [path-params...]     Run an Arazzo workflow")
   (print "  http [METHOD] <url-or-path> [--profile NAME]          Send a request without a spec")
+  (print "  mcp <profile-or-schema> [--allow-writes]              Serve the operations to AI agents (MCP)")
   (print "  profile <list|show> [name]                            Manage profiles")
   (print "  profile import-restish [FILE] [--dry-run]             Add profiles from a Restish config")
   (print "  auth    <profile> [--logout]                          Authenticate a profile")
@@ -57,7 +58,8 @@ own scope, :any for the API commands op, az and http, or one of its :also."
   (print "  --version                                             Print the version")
   (each [_ [title scope] (ipairs [["Options (op):" :op]
                                   ["Options (az):" :az]
-                                  ["Options (http):" :http]])]
+                                  ["Options (http):" :http]
+                                  ["Options (mcp):" :mcp]])]
     (print "")
     (print title)
     (each [_ o (ipairs (scope-options scope))]
@@ -197,10 +199,11 @@ operation, or an Arazzo document's workflow and inputs."
                                             :az
                                             :completion
                                             :http
+                                            :mcp
                                             :op
                                             :profile])]
                       {:value c})
-        (and (or (= cmd :op) (= cmd :auth)) (= n 1)) profiles
+        (and (or (= cmd :op) (= cmd :auth) (= cmd :mcp)) (= n 1)) profiles
         (and (= cmd :http) (= n 1))
         (icollect [_ m (ipairs [:DELETE :GET :HEAD :OPTIONS :PATCH :POST :PUT])]
           {:value m}) (and (= cmd :profile) (= n 1))
@@ -231,6 +234,7 @@ operation, or an Arazzo document's workflow and inputs."
                                   :az :az
                                   :arazzo :az
                                   :http :http
+                                  :mcp :mcp
                                   :auth :auth
                                   :profile :profile
                                   _ :none)

@@ -844,9 +844,16 @@
                                     "az"
                                     "completion"
                                     "http"
+                                    "mcp"
                                     "op"
                                     "profile"]
                                    (complete ""))))
+            (it "completes mcp's profiles and options"
+                (fn []
+                  (assert.are.same ["exo"] (complete "mcp e"))
+                  (assert.are.same ["--allow-writes"]
+                                   (complete "mcp exo --allow"))
+                  (assert.are.same [] (complete "mcp exo --sel"))))
             (it "completes http methods and http's options"
                 (fn []
                   (assert.are.same ["PATCH" "POST" "PUT"] (complete "http P"))

@@ -1583,3 +1583,204 @@
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "Profile not found: nope" 1
                                                   true)))))))
+
+(local mcp-meta
+       {"io.modelcontextprotocol/protocolVersion" "2026-07-28"
+        "io.modelcontextprotocol/clientCapabilities" {}})
+
+(fn mcp-run [args messages ?routes]
+  "Run atlas mcp in-process, reading messages (tables) as its input; returns
+{:code :responses :out :err :requests}."
+  (let [json (require :atlas.json)
+        (transport requests) (routes-transport (or ?routes {}))
+        lines (icollect [_ m (ipairs messages)]
+                (json.encode m))
+        responses []
+        out []
+        err []
+        real-print _G.print
+        real-stderr io.stderr]
+    (var i 0)
+    (set _G.print
+         (fn [...]
+           (table.insert out (table.concat [...] "\t"))))
+    (set io.stderr {:write (fn [_ s] (table.insert err s))})
+    (let [(ok code) (pcall cli.run args
+                           {: transport
+                            :config current-config
+                            :read-line (fn []
+                                         (set i (+ i 1))
+                                         (. lines i))
+                            :write-line #(table.insert responses
+                                                       (json.decode $ true))})]
+      (set _G.print real-print)
+      (set io.stderr real-stderr)
+      (assert ok code)
+      {: code
+       : responses
+       :out (table.concat out "\n")
+       :err (table.concat err)
+       : requests})))
+
+(fn tool-names [r]
+  (icollect [_ t (ipairs (. r.responses 1 :result :tools))]
+    t.name))
+
+(fn call [id name arguments]
+  {:jsonrpc "2.0"
+   : id
+   :method "tools/call"
+   :params {:_meta mcp-meta : name : arguments}})
+
+(local list-tools {:jsonrpc "2.0"
+                   :id 1
+                   :method "tools/list"
+                   :params {:_meta mcp-meta}})
+
+(describe "atlas mcp"
+          (fn []
+            (it "offers the read-only operations as tools"
+                (fn []
+                  (let [r (mcp-run ["mcp" "p"] [list-tools])]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.same ["get-pet" "get-secure" "list-pets"]
+                                     (tool-names r))
+                    (assert.are.equal "" r.out)
+                    ;; the profile's auth supplies Authorization
+                    (assert.is_nil (. r.responses 1 :result :tools 2
+                                      :inputSchema :properties :Authorization)))))
+            (it "offers every operation with --allow-writes"
+                (fn []
+                  (assert.are.same ["add-pet"
+                                    "get-pet"
+                                    "get-secure"
+                                    "list-pets"]
+                                   (tool-names (mcp-run ["mcp"
+                                                         "p"
+                                                         "--allow-writes"]
+                                                        [list-tools])))))
+            (it "offers the operations the profile lists"
+                (fn []
+                  (with-config {:profiles {:m {:schema "test/fixtures/cli-api.json"
+                                               :mcp {:operations ["add-pet"
+                                                                  "list-pets"]}}}}
+                    #(assert.are.same ["add-pet" "list-pets"]
+                                      (tool-names (mcp-run ["mcp" "m"]
+                                                           [list-tools]))))
+                  (with-config {:profiles {:m {:schema "test/fixtures/cli-api.json"
+                                               :mcp {:operations ["nope"]}}}}
+                    #(let [r (mcp-run ["mcp" "m"] [list-tools])]
+                       (assert.are.equal 1 r.code)
+                       (assert.is_truthy (r.err:find "unknown operation in mcp.operations: nope"
+                                                     1 true))))
+                  (with-config {:profiles {:m {:schema "test/fixtures/cli-api.json"
+                                               :mcp {:operations "add-pet"}}}}
+                    #(let [r (mcp-run ["mcp" "m"] [list-tools])]
+                       (assert.are.equal 1 r.code)
+                       (assert.is_truthy (r.err:find "mcp.operations must be a list of operation names"
+                                                     1 true))))))
+            (it "calls the API with the profile's auth"
+                (fn []
+                  (let [r (mcp-run ["mcp" "p"] [(call 2 "get-pet" {:id "7"})]
+                                   {"GET https://api.test/pets/7" (respond 200
+                                                                           {:name "Rex"})})
+                        result (. r.responses 1 :result)]
+                    (assert.are.equal "Bearer t0k"
+                                      (. r.requests 1 :headers :authorization))
+                    (assert.are.equal :complete result.resultType)
+                    (assert.is_false result.isError)
+                    (assert.are.same [{:type :text :text "{\"name\":\"Rex\"}"}]
+                                     result.content))))
+            (it "reports HTTP errors as tool errors"
+                (fn []
+                  (let [r (mcp-run ["mcp" "p" "--retry=0"]
+                                   [(call 2 "get-pet" {:id "1"})]
+                                   {"GET https://api.test/pets/1" (respond 404
+                                                                           {:error "no pet"})})
+                        result (. r.responses 1 :result)]
+                    (assert.is_true result.isError)
+                    (assert.are.equal "HTTP 404\n{\"error\":\"no pet\"}"
+                                      (. result.content 1 :text)))))
+            (it "checks arguments before sending"
+                (fn []
+                  (let [r (mcp-run ["mcp" "p" "--allow-writes"]
+                                   [(call 2 "add-pet" {:body {}})
+                                    (call 3 "get-pet" {:id "1" :nope 2})])]
+                    (assert.are.equal 0 (length r.requests))
+                    (assert.is_true (. r.responses 1 :result :isError))
+                    (assert.is_truthy (: (. r.responses 1 :result :content 1
+                                            :text)
+                                         :find "body.name: required" 1 true))
+                    (assert.is_true (. r.responses 2 :result :isError))
+                    (assert.is_truthy (: (. r.responses 2 :result :content 1
+                                            :text)
+                                         :find "unknown argument: nope" 1 true)))))
+            (it "won't call an operation it doesn't offer"
+                (fn []
+                  (let [r (mcp-run ["mcp" "p"]
+                                   [(call 2 "add-pet" {:body {:name "x"}})])]
+                    (assert.are.equal -32602 (. r.responses 1 :error :code))
+                    (assert.are.equal 0 (length r.requests)))))
+            (it "warns when it offers more tools than clients handle well"
+                (fn []
+                  (let [json (require :atlas.json)
+                        spec (.. (os.tmpname) ".json")
+                        paths (collect [_ i (ipairs (fcollect [i 1 101] i))]
+                                (.. "/r" i)
+                                {:get {:operationId (.. "get" i)}})]
+                    (with-open [f (io.open spec :w)]
+                      (f:write (json.encode {:openapi "3.1.0"
+                                             :info {:title "Big"}
+                                             :servers [{:url "https://h.test"}]
+                                             : paths})))
+                    (let [r (mcp-run ["mcp" spec] [])]
+                      (os.remove spec)
+                      (assert.are.equal 0 r.code)
+                      (assert.is_truthy (r.err:find "warning: 101 tools" 1 true))
+                      (assert.is_truthy (r.err:find "mcp.operations" 1 true))))))
+            (it "offers Arazzo workflows as tools"
+                (fn []
+                  (assert.are.same ["get-pet"
+                                    "get-secure"
+                                    "list-pets"
+                                    "workflow.fetchPet"]
+                                   (tool-names (mcp-run ["mcp"
+                                                         "p"
+                                                         "--arazzo=flows"]
+                                                        [list-tools])))
+                  (assert.are.same ["workflow.fetchPet"]
+                                   (tool-names (mcp-run ["mcp"
+                                                         "--arazzo=flows"]
+                                                        [list-tools])))))
+            (it "runs a workflow and returns its outputs"
+                (fn []
+                  (let [r (mcp-run ["mcp" "--arazzo=flows"]
+                                   [(call 2 "workflow.fetchPet" {:id "7"})
+                                    (call 3 "workflow.fetchPet" {:id 7})
+                                    (call 4 "workflow.fetchPet" {:id "1"})]
+                                   {"GET https://api.test/pets/7" (respond 200
+                                                                           {:name "Rex"})})]
+                    (assert.are.same {:isError false
+                                      :content [{:type :text
+                                                 :text "{\"name\":\"Rex\"}"}]}
+                                     (doto (. r.responses 1 :result)
+                                       (tset :resultType nil)
+                                       (tset :_meta nil)))
+                    ;; inputs are checked against the workflow's schema
+                    (assert.is_true (. r.responses 2 :result :isError))
+                    (assert.is_truthy (: (. r.responses 2 :result :content 1
+                                            :text)
+                                         :find "inputs.id" 1 true))
+                    (assert.are.equal 2 (length r.requests))
+                    ;; a failing workflow is a tool error
+                    (assert.is_true (. r.responses 3 :result :isError)))))
+            (it "shows its usage"
+                (fn []
+                  (let [r (mcp-run ["mcp"] [])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "Usage: atlas mcp" 1 true)))
+                  (let [r (mcp-run ["mcp" "p" "extra"] [])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "Usage: atlas mcp" 1 true)))
+                  (let [r (mcp-run ["mcp" "p" "--dry-run"] [])]
+                    (assert.are.equal 1 r.code))))))

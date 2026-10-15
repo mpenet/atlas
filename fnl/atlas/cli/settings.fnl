@@ -58,7 +58,7 @@ winning."
         p)))
 
 ;; profile settings that hold JSON objects
-(local object-settings [:auth :headers :query :ssl :tls :server :retry])
+(local object-settings [:auth :headers :query :ssl :tls :server :retry :mcp])
 
 (fn check-config [config]
   "config, raising when it or its sections have the wrong shape."
@@ -93,6 +93,14 @@ would otherwise be ignored, auth included."
   (when profile.auth
     (when (not (or (= nil profile.auth.params) (object? profile.auth.params)))
       (error (.. "profile " name ": auth params must be an object") 0)))
+  (let [ops (?. profile :mcp :operations)]
+    (when (not (or (= nil ops)
+                   (and (= (type ops) :table) (not (object? ops))
+                        (accumulate [ok true _ op (ipairs ops) &until (not ok)]
+                          (= (type op) :string)))))
+      (error (.. "profile " name
+                 ": mcp.operations must be a list of operation names")
+             0)))
   profile)
 
 (fn find-profile [config name]

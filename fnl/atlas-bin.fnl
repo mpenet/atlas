@@ -67,6 +67,8 @@
 
 (require :atlas.cli.complete)
 
+(require :atlas.cli.mcp)
+
 (require :atlas.cli)
 
 (local cli (require :atlas.cli))

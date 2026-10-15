@@ -1,10 +1,11 @@
-;; ABOUTME: The atlas command line: dispatches the op, az, http, auth, profile
-;; ABOUTME: and completion subcommands; run returns the process exit code.
+;; ABOUTME: The atlas command line: dispatches the op, az, http, mcp, auth,
+;; ABOUTME: profile and completion subcommands; run returns the exit code.
 (local atlas (require :atlas))
 (local arazzo (require :atlas.arazzo))
 (local auth (require :atlas.auth))
 (local cli-help (require :atlas.cli.help))
 (local http-mod (require :atlas.http))
+(local mcp (require :atlas.cli.mcp))
 (local pretty-mod (require :atlas.pretty))
 (local socket (require :socket))
 (local util (require :atlas.util))
@@ -278,29 +279,40 @@ another origin); files directly."
                                     client-opts.authorize)})
         (atlas.load-schema location opts))))
 
-(fn execute-workflow [doc file wf inputs p profile-name profile env]
+(fn workflow-runner [{: doc : file : profile-name : profile} p env ?on-step]
+  "A function running a workflow of doc with its inputs: (ok result) as pcall
+returns them. The clients of its sources are built on first use."
   (let [
         ;; merged pages would change what step expressions like $response.body#/0 refer to
         p (doto (collect [k v (pairs p)] k v)
             (tset :no-paginate true))
-        {: output : no-color : verbose} (display-options profile p env.config)
+        verbose (. (display-options profile p env.config) :verbose)
+        run-opts (client-options profile-name profile p env.config
+                                 env.transport)]
+    (var clients nil)
+    (set run-opts.load-schema (source-schema-loader env run-opts verbose))
+    (set run-opts.on-step ?on-step)
+    (set run-opts.max-gotos p.max-gotos)
+    (set run-opts.max-wait (. (retry-options profile p env.config) :max-wait))
+    (fn [wf inputs]
+      (pcall #(do
+                (when (not clients)
+                  (set clients (arazzo.build-clients doc run-opts file)))
+                (arazzo.run-workflow doc wf.workflowId inputs clients run-opts))))))
+
+(fn execute-workflow [context wf inputs p env]
+  (let [{: output : no-color : verbose} (display-options context.profile p
+                                                         env.config)
         mode (or p.arazzo-output (if verbose :progress :final))
         show-progress (or (= mode :progress) (= mode :full))
         ;; progress goes to stderr
         stderr-color (and (not no-color) (util.terminal? 2))
         paint #(pretty-mod.paint $1 $2 stderr-color)
-        run-opts (client-options profile-name profile p env.config
-                                 env.transport)]
-    (set run-opts.load-schema (source-schema-loader env run-opts verbose))
-    (set run-opts.on-step
-         (when show-progress
-           (progress-reporter output stderr-color)))
-    (set run-opts.max-gotos p.max-gotos)
-    (set run-opts.max-wait (. (retry-options profile p env.config) :max-wait))
+        run (workflow-runner context p env
+                             (when show-progress
+                               (progress-reporter output stderr-color)))]
     (let [t0 (socket.gettime)
-          clients (arazzo.build-clients doc run-opts file)
-          (ok result) (pcall arazzo.run-workflow doc wf.workflowId inputs
-                             clients run-opts)
+          (ok result) (run wf inputs)
           timing (string.format "  %.3fs" (- (socket.gettime) t0))]
       (when show-progress
         (io.stderr:write (if ok
@@ -313,6 +325,21 @@ another origin); files directly."
           (print-arazzo-result result mode output no-color)
           (die (tostring result))))))
 
+(fn arazzo-context [name ?profile-name p env]
+  "{:named :file :doc :profile-name :profile} of an Arazzo context (or file)
+name: the document, and the profile to run it with, ?profile-name else the
+context's."
+  (let [named (?. env.config :arazzo name)
+        file (if named named.file name)
+        profile-name (or ?profile-name (?. named :profile))
+        profile (find-profile env.config profile-name)
+        _ (when (and profile-name (not profile))
+            (die (.. "Profile not found: " profile-name)))
+        doc (arazzo.load-doc file
+                             {:ssl (merge-ssl profile p.ssl)
+                              :timeout (request-timeout profile p env.config)})]
+    {: named : file : doc : profile-name : profile}))
+
 (fn run-arazzo [p env]
   ;; p.schema = name-or-file, p.operation = workflow-id, p.path-params = extra positionals
   (when (or p.dry-run p.curl)
@@ -321,15 +348,7 @@ another origin); files directly."
     (usage-with-choices "Usage: atlas az <name-or-file> <workflow-id> [-i KEY=VAL ...]"
                         "Configured Arazzo contexts" (or env.config.arazzo {})
                         #(or $.file "")))
-  (let [named (?. env.config :arazzo p.schema)
-        file (if named named.file p.schema)
-        profile-name (or p.profile (?. named :profile))
-        profile (find-profile env.config profile-name)
-        _ (when (and profile-name (not profile))
-            (die (.. "Profile not found: " profile-name)))
-        doc (arazzo.load-doc file
-                             {:ssl (merge-ssl profile p.ssl)
-                              :timeout (request-timeout profile p env.config)})
+  (let [{: named : doc &as context} (arazzo-context p.schema p.profile p env)
         wf (when p.operation (arazzo.find-workflow doc p.operation))]
     (if (not p.operation) (list-arazzo-workflows doc) (not wf)
         (die (.. "Unknown workflow: " p.operation)) p.help
@@ -339,7 +358,7 @@ another origin); files directly."
                                                         (arazzo.positional-inputs wf))))
         (let [inputs (workflow-inputs p named doc wf)]
           (check-inputs doc wf inputs p)
-          (execute-workflow doc file wf inputs p profile-name profile env)))))
+          (execute-workflow context wf inputs p env)))))
 
 ;; ---- op ----
 
@@ -362,9 +381,9 @@ parsed by atlas.client."
                            :cache env.schema-cache})
       raw-schema))
 
-(fn check-request [op request opts p]
-  "Warn about undeclared query names; stop on missing required params or an
-invalid body unless --no-validate."
+(fn request-problems [op request opts]
+  "(errors warnings) of request for op: missing required params and body
+errors, and undeclared query names."
   (let [headers (collect [k v (pairs opts.headers)] k v)]
     (each [k v (pairs (or request.headers {}))]
       (tset headers k v))
@@ -377,11 +396,17 @@ invalid body unless --no-validate."
                                            :implied-query opts.implied-query})]
       (each [_ e (ipairs (check-body op request.body))]
         (table.insert errors e))
-      (each [_ w (ipairs warnings)]
-        (io.stderr:write (.. "warning: " (util.printable w) "\n")))
-      (when (and (next errors) (not p.no-validate))
-        (die (.. (table.concat errors "\n")
-                 "\n(use --no-validate to send anyway)"))))))
+      (values errors warnings))))
+
+(fn check-request [op request opts p]
+  "Warn about undeclared query names; stop on missing required params or an
+invalid body unless --no-validate."
+  (let [(errors warnings) (request-problems op request opts)]
+    (each [_ w (ipairs warnings)]
+      (io.stderr:write (.. "warning: " (util.printable w) "\n")))
+    (when (and (next errors) (not p.no-validate))
+      (die (.. (table.concat errors "\n")
+               "\n(use --no-validate to send anyway)")))))
 
 (fn check-arguments [op p]
   "Stop on arguments the operation can't use."
@@ -404,11 +429,13 @@ invalid body unless --no-validate."
                       (- (socket.gettime) t0) p.ignore-status)
           (die (.. "request failed: " (tostring resp)))))))
 
-(fn run-op [p env]
+(fn api-setup [p env usage]
+  "{:profile :schema :opts} for a command naming a profile or a spec
+(p.schema): the profile, the spec (parsed when fetched, else its path) and
+the client options."
   (let [config env.config]
     (when (not p.schema)
-      (usage-with-choices "Usage: atlas op <profile-or-schema> [operation] [args...]"
-                          "Configured profiles" (or config.profiles {})
+      (usage-with-choices usage "Configured profiles" (or config.profiles {})
                           #(or $.schema "(no schema)")))
     (let [profile (find-profile config p.schema)
           raw-schema (if (not profile) p.schema
@@ -431,29 +458,37 @@ invalid body unless --no-validate."
                                   :authorize opts.authorize
                                   :base-url opts.base-url}
                                  verbose))
-      (if p.servers
-          (let [servers (atlas.servers (if (= (type schema) :string)
-                                           (atlas.load-schema schema)
-                                           schema))
-                index (or opts.server-index 1)
-                selected (. servers index)
-                (ok err) (if selected
-                             (pcall atlas.server-url selected
-                                    (or opts.server-vars {}))
-                             true)]
-            (when (not ok)
-              (die (tostring err)))
-            (print (util.printable (format-servers servers index
-                                                   opts.server-vars))))
-          (let [(ok c) (pcall atlas.client schema opts)
-                c (if ok c (die (.. "failed to build client: " (tostring c))))
-                op (when p.operation
-                     (or (. c p.operation)
-                         (die (.. "Unknown operation: " p.operation))))]
-            (if (or p.list (not op)) (list-ops c) p.help
-                (print (util.printable (cli-help.build-cli op.path op.method
-                                                           op.spec op.name)))
-                (send-op op p opts profile config)))))))
+      {: profile : schema : opts})))
+
+(fn build-client [schema opts]
+  (let [(ok c) (pcall atlas.client schema opts)]
+    (if ok c (die (.. "failed to build client: " (tostring c))))))
+
+(fn run-op [p env]
+  (let [config env.config
+        {: profile : schema : opts} (api-setup p env
+                                               "Usage: atlas op <profile-or-schema> [operation] [args...]")]
+    (if p.servers
+        (let [servers (atlas.servers (if (= (type schema) :string)
+                                         (atlas.load-schema schema)
+                                         schema))
+              index (or opts.server-index 1)
+              selected (. servers index)
+              (ok err) (if selected
+                           (pcall atlas.server-url selected
+                                  (or opts.server-vars {}))
+                           true)]
+          (when (not ok)
+            (die (tostring err)))
+          (print (util.printable (format-servers servers index opts.server-vars))))
+        (let [c (build-client schema opts)
+              op (when p.operation
+                   (or (. c p.operation)
+                       (die (.. "Unknown operation: " p.operation))))]
+          (if (or p.list (not op)) (list-ops c) p.help
+              (print (util.printable (cli-help.build-cli op.path op.method
+                                                         op.spec op.name)))
+              (send-op op p opts profile config))))))
 
 ;; ---- http ----
 
@@ -541,6 +576,125 @@ JSON or YAML one); otherwise -d is sent as given, as JSON when it is JSON."
                       (- (socket.gettime) t0) p.ignore-status)
           (die (.. "request failed: " (tostring resp)))))))
 
+;; ---- mcp ----
+
+(local mcp-usage
+       "Usage: atlas mcp <profile-or-schema> [--allow-writes] [--arazzo NAME]")
+
+(fn mcp-operations [c profile p]
+  "The operations atlas mcp offers: those the profile's mcp.operations lists,
+else the read-only ones (all with --allow-writes), by name."
+  (let [listed (?. profile :mcp :operations)
+        ops (if listed
+                (icollect [_ name (ipairs listed)]
+                  (or (. c name)
+                      (die (.. "unknown operation in mcp.operations: " name))))
+                (icollect [_ op (pairs c)]
+                  (when (or p.allow-writes
+                            (. {:get true :head true :options true}
+                               (op.method:lower)))
+                    op)))]
+    (table.sort ops #(< $1.name $2.name))
+    ops))
+
+(fn tool-error [text]
+  {:content [{:type :text : text}] :isError true})
+
+(fn tool-text [body]
+  "A response body as tool result text: JSON, or text when it is UTF-8."
+  (if (= nil body) nil
+      (= (type body) :table) (json.encode body)
+      (utf8.len body) body
+      (.. "(" (length body) " bytes that aren't text)")))
+
+(fn call-tool [op arguments opts tool-opts]
+  "The tools/call result of op for arguments: the response body, or a tool
+error for arguments the operation can't take and for HTTP errors."
+  (let [(ok req) (pcall mcp.request op arguments tool-opts)
+        errors (if ok (request-problems op req opts) [])]
+    (if (not ok) (tool-error req) (next errors)
+        (tool-error (table.concat errors "\n"))
+        (let [(sent resp) (pcall op.invoke req)
+              text (when sent (tool-text resp.body))]
+          (if (not sent) (tool-error (.. "request failed: " (tostring resp)))
+              (>= resp.status 400)
+              (tool-error (.. "HTTP " resp.status (if text (.. "\n" text) "")))
+              {:content [{:type :text :text (or text (.. "HTTP " resp.status))}]
+               :isError false})))))
+
+(fn operation-tools [p env]
+  "[[tool call] ...] for the operations atlas mcp offers of p.schema."
+  (let [{: profile : schema : opts} (api-setup p env mcp-usage)
+        document (if (= (type schema) :string) (atlas.load-schema schema)
+                     schema)
+        _ (when (= (type schema) :string)
+            (set opts.source-url schema))
+        c (build-client document opts)
+        supplied-headers (collect [k (pairs opts.headers)] (k:lower)
+                           true)
+        _ (each [_ name (ipairs opts.auth-header-names)]
+            (tset supplied-headers (name:lower) true))
+        tool-opts {:openapi-30 (not (: (tostring (or document.openapi ""))
+                                       :match "^3%.[1-9]"))
+                   : supplied-headers
+                   :supplied-query opts.implied-query}]
+    (icollect [_ op (ipairs (mcp-operations c profile p))]
+      [(mcp.tool op tool-opts) #(call-tool op $ opts tool-opts)])))
+
+(fn workflow-tools [p env]
+  "[[tool call] ...] for the workflows of the Arazzo context or file
+p.arazzo, run with the context's profile, else the profile atlas mcp names."
+  (let [positional (when (and p.schema (find-profile env.config p.schema))
+                     p.schema)
+        context (arazzo-context p.arazzo
+                                (or (?. env.config :arazzo p.arazzo :profile)
+                                    positional)
+                                p env)
+        run (workflow-runner context p env)]
+    (icollect [_ wf (ipairs (or context.doc.workflows []))]
+      (let [schema (arazzo.workflow-inputs context.doc wf)]
+        [(mcp.workflow-tool wf schema)
+         (fn [inputs]
+           (let [errors (if schema (validate.check schema inputs :inputs) [])]
+             (if (next errors) (tool-error (table.concat errors "\n"))
+                 (let [(ok result) (run wf inputs)]
+                   (if ok
+                       {:content [{:type :text
+                                   :text (json.encode (or result.outputs {}))}]
+                        :isError false}
+                       (tool-error (tostring result)))))))]))))
+
+(fn run-mcp [p env]
+  (when (or p.operation (next p.path-params))
+    (die mcp-usage))
+  (let [entries (if (or p.schema (not p.arazzo)) (operation-tools p env) [])
+        _ (when p.arazzo
+            (each [_ entry (ipairs (workflow-tools p env))]
+              (table.insert entries entry)))
+        calls (collect [_ [tool call] (ipairs entries)] tool.name call)
+        handle (mcp.handler {:tools (icollect [_ [tool] (ipairs entries)] tool)
+                             :call #((. calls $1) $2)
+                             :version atlas.version
+                             :instructions "Each tool calls an operation of an HTTP API, or runs an Arazzo workflow, through atlas. Path, query and header parameters are arguments by name; a request body is the body argument."})
+        real-print _G.print]
+    (when (> (length entries) 100)
+      (io.stderr:write (.. "warning: " (length entries)
+                           " tools: AI clients work best with far fewer; list the ones to offer in the profile's mcp.operations\n")))
+    ;; stdout carries the protocol only
+    (set _G.print (fn [...]
+                    (io.stderr:write (.. (table.concat (icollect [_ v (ipairs [...])]
+                                                         (tostring v))
+                                                       "\t")
+                                         "\n"))))
+    (let [(ok err) (pcall mcp.serve handle (or env.read-line #(io.read :l))
+                          (or env.write-line
+                              #(doto io.stdout
+                                 (: :write $ "\n")
+                                 (: :flush))))]
+      (set _G.print real-print)
+      (when (not ok)
+        (error err 0)))))
+
 ;; ---- entry points ----
 
 (fn dispatch [args env]
@@ -565,8 +719,9 @@ JSON or YAML one); otherwise -d is sent as given, as JSON when it is JSON."
           (where (or :az :arazzo)) (run-arazzo p env)
           :op (run-op p env)
           :http (run-http p env)
+          :mcp (run-mcp p env)
           _ (die (.. "Unknown command: " (tostring p.cmd)
-                     "\nUsage: atlas <op|az|http|profile|auth|completion> ..."))))))
+                     "\nUsage: atlas <op|az|http|mcp|profile|auth|completion> ..."))))))
 
 (fn run [args ?env]
   "Run atlas with args and return the exit code.

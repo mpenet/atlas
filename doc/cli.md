@@ -73,6 +73,7 @@ luarocks installs the Lua dependencies (lunajson, luasocket, lyaml) and compiles
 atlas op <profile-or-schema> [operation] [path-params...] [options]
 atlas az <name-or-file> [workflow-id] [path-params...] [options]
 atlas http [METHOD] <url-or-path> [options]
+atlas mcp <profile-or-schema> [--allow-writes] [--arazzo NAME] [options]
 atlas profile list
 atlas profile show <name>
 atlas profile import-restish [file] [--dry-run]
@@ -86,6 +87,7 @@ atlas --version
 | `op` | Call an operation. The first argument is a profile name, or a spec's URL or file path (JSON or YAML). Without an operation, lists the operations. |
 | `az` | Run an [Arazzo workflow](arazzo.md) (`arazzo` is an alias). Without a workflow id, lists the workflows. |
 | `http` | Sends a request to any URL, without a spec; see [Requests without a spec](#requests-without-a-spec-http). |
+| `mcp` | Serves the API's operations, and Arazzo workflows, as tools to AI agents (MCP over stdio); see [MCP server](#mcp-server). |
 | `profile list` | Profiles with the schema each one uses, inherited ones included. |
 | `profile show` | A profile as atlas uses it, `extends` resolved. |
 | `profile import-restish` | Adds the APIs of a Restish configuration as profiles; see [Moving from Restish](guide.md#moving-from-restish). |
@@ -159,6 +161,15 @@ The method defaults to `GET`. A path (`/zones`) is appended to the API's URL: `-
 `http` goes through the same profile headers and query, authentication, retries, pagination, redirects, output and exit codes as `op`. It skips the spec-driven parts: operation names, parameter and body checks, and `--help` per operation. Its body is sent as given: `-d` with JSON is sent as JSON, with `Content-Type: application/json`; anything else goes as is, with the content type you set with `--h.Content-Type=…`. `--b.` fields build a JSON object, on top of `-d`'s JSON or YAML object if one is given.
 
 `http` takes `--profile=NAME` and the `op` options above except `--list`, `--servers`, `--no-validate`, `--reload` and `--cache-ttl`.
+
+### MCP server (`mcp`)
+
+| Option | Description |
+|--------|-------------|
+| `--allow-writes` | Offer every operation, not only GET, HEAD and OPTIONS |
+| `--arazzo=NAME` | Also offer the workflows of an Arazzo context or file |
+
+`mcp` also takes `-v`, `--timeout`, the retry options, `--max-pages`, `--no-paginate`, `--base-url`, `--server-index`, `--server.`, `--ssl.`, `--reload` and `--cache-ttl` as above.
 
 ### Others
 
@@ -361,8 +372,41 @@ Settings apply in this order, first found wins: command-line option, profile, to
 | `output` | string | Output format |
 | `no-color` | boolean | Never colour the output |
 | `verbose` | boolean | Always log requests and responses |
+| `mcp` | object | `{"operations": [...]}`: the operations `atlas mcp` offers; see [MCP server](#mcp-server) |
 
 A profile with `extends` takes every key of the profile it names and overrides them with its own, except `headers`, which are merged key by key. Chains (`a` extends `b` extends `c`) work; a cycle is an error. `atlas profile show NAME` prints the result.
+
+## MCP server
+
+`atlas mcp` makes an API usable by AI agents (Claude, Cursor, …) through the [Model Context Protocol](https://modelcontextprotocol.io): each operation becomes a tool the agent can call, authenticated with the profile. The credentials stay with atlas; the agent sees the tools and the responses.
+
+```sh
+# Claude Code
+claude mcp add exo -- atlas mcp exo
+```
+
+```json
+{"mcpServers": {"exo": {"command": "atlas", "args": ["mcp", "exo"]}}}
+```
+
+The second form is the configuration file of Claude Desktop and most other clients. Give the full path of `atlas` if the client doesn't search your `PATH`.
+
+**Which operations.** By default, the read-only ones: GET, HEAD and OPTIONS. `--allow-writes` offers them all. A profile's `mcp.operations` lists exactly the operations to offer, writes included:
+
+```json
+{"profiles": {"exo": {"schema": "https://api.example.com/openapi.json",
+                      "mcp": {"operations": ["list-instances", "get-instance", "start-instance"]}}}}
+```
+
+Offer as few as the task needs: every tool's description and schema goes into the agent's context, and above 100 tools atlas warns. A large API (GitHub's read-only operations alone take about 900 KB) needs a list.
+
+**Tools.** A tool is named like the operation in `atlas op` (`list-instances`). Its arguments are the path, query and header parameters, by name, and the request body as `body`; a name that two parameters share takes their location as prefix (`query.id`). Headers and query parameters the profile or its authentication adds are not arguments. The input schema is the spec's, in JSON Schema 2020-12 (OpenAPI 3.0's `nullable` and boolean `exclusiveMinimum`/`exclusiveMaximum` converted; recursive schemas as `$defs`). Annotations say which tools only read (`readOnlyHint`), and which may destroy (DELETE, PUT, PATCH) or are idempotent.
+
+**Calls.** atlas checks the arguments like `atlas op` does (required parameters, the body against its schema) and sends nothing when they are wrong. The result is the response body: JSON, or text. A 4xx or 5xx response, a network error or wrong arguments come back as a tool error with the status and body, so the agent can correct itself. Profile headers, retries, pagination and `-v` (on stderr) apply as for `atlas op`.
+
+**Workflows.** `--arazzo=NAME` adds the workflows of an Arazzo context or file as tools named `workflow.WORKFLOW-ID`, with the workflow's inputs as arguments. They run with the context's profile, else the profile `atlas mcp` names, and return the workflow's outputs. `atlas mcp --arazzo=NAME` without a profile offers the workflows alone. They are offered whatever they do: list them in the context only if the agent may run them.
+
+**Protocol.** atlas speaks MCP 2026-07-28, without sessions, and the earlier versions that open with `initialize` (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05), over stdio. It reads one JSON-RPC message per line on stdin and writes the answers on stdout; logs go to stderr. It stops when stdin closes.
 
 ## Authentication
 

@@ -56,38 +56,42 @@
          :value :number
          :positive true
          :scope :any
-         :also [:auth]
+         :also [:mcp :auth]
          :help "Timeout in seconds"}
         {:names ["--max-pages"]
          :key :max-pages
          :value :number
          :scope :op
-         :also [:http]
+         :also [:mcp :http]
          :help "Max pages to follow via Link rel=next (default: 25)"}
         {:names ["--no-paginate"]
          :key :no-paginate
          :scope :op
-         :also [:http]
+         :also [:mcp :http]
          :help "Return only the first page"}
         {:names ["--retry"]
          :key :retry
          :value :number
          :scope :any
+         :also [:mcp]
          :help "Retries for 408/429/5xx and network errors (default: 2)"}
         {:names ["--retry-unsafe"]
          :key :retry-unsafe
          :scope :any
+         :also [:mcp]
          :help "Also retry POST/PUT/PATCH/DELETE"}
         {:names ["--retry-max-wait"]
          :key :retry-max-wait
          :value :number
          :scope :any
+         :also [:mcp]
          :help "Max seconds to wait between retries (default: 300)"}
         {:names ["--base-url"]
          :key :base-url
          :value :string
          :arg "URL"
          :scope :any
+         :also [:mcp]
          :help "Override base URL"}
         {:names ["--servers"]
          :key :servers
@@ -97,15 +101,17 @@
          :key :server-index
          :value :number
          :scope :any
+         :also [:mcp]
          :help "Use the schema's Nth server (default: 1)"}
         {:family "--server."
          :shown "--server.NAME=VAL"
          :scope :any
+         :also [:mcp]
          :help "Set a server URL variable (e.g. --server.zone=de-fra-1)"}
         {:family "--ssl."
          :shown "--ssl.KEY=VAL"
          :scope :any
-         :also [:auth]
+         :also [:mcp :auth]
          :help "TLS option: cafile, capath, certificate, key, verify (e.g. --ssl.verify=none)"}
         {:names ["--output"]
          :key :output
@@ -129,10 +135,12 @@
          :key :verbose
          :shown "-v, --verbose"
          :scope :any
+         :also [:mcp]
          :help "Show status, headers and requests"}
         {:names ["--reload"]
          :key :reload
          :scope :op
+         :also [:mcp]
          :help "Re-fetch and re-cache the schema"}
         {:names ["--ignore-status"]
          :key :ignore-status
@@ -160,6 +168,7 @@
          :key :cache-ttl
          :value :number
          :scope :op
+         :also [:mcp]
          :help "Schema cache TTL in seconds (default: 3600)"}
         {:names ["--profile"]
          :key :profile
@@ -194,6 +203,16 @@
          :value :number
          :scope :az
          :help "Max gotos to one step before aborting (default: 50)"}
+        {:names ["--arazzo"]
+         :key :arazzo
+         :value :string
+         :arg "NAME"
+         :scope :mcp
+         :help "Also offer the workflows of an Arazzo context or file"}
+        {:names ["--allow-writes"]
+         :key :allow-writes
+         :scope :mcp
+         :help "Offer the operations that change things too, not only reads"}
         {:names ["--logout"]
          :key :logout
          :scope :auth
@@ -280,6 +299,7 @@ returns (kind key value); kind is a value of field-prefixes."
 
 (local command-scopes {:op :op
                        :http :http
+                       :mcp :mcp
                        :az :az
                        :arazzo :az
                        :auth :auth

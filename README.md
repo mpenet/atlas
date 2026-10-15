@@ -10,6 +10,7 @@ Point `atlas` at a spec and every operation becomes a command, with its own help
 - **Output you can use.** Pretty JSON or YAML, tables and CSV, `--select` to pick and filter what you need, exit codes that tell 4xx from 5xx.
 - **Profiles and authentication.** Bearer, Basic, API keys, OAuth 2.0 (authorization code with PKCE, client credentials, device flow), external signing tools, mutual TLS.
 - **Any URL, too.** `atlas http GET /zones --profile exo` sends a request without a spec, with the profile's authentication; a profile's credentials only go to its own API.
+- **Ready for AI agents.** `atlas mcp exo` serves an API to Claude, Cursor and other [MCP](https://modelcontextprotocol.io) clients: operations become tools, authenticated with your profile, read-only unless you allow more.
 - **Workflows.** Run multi-step [Arazzo](https://spec.openapis.org/arazzo/latest.html) workflows: chain calls, poll until a job finishes, branch on results.
 - **Safe by default.** Verified TLS, credentials never follow a redirect to another host, secrets redacted from logs and `--dry-run`.
 - **One small static binary** for macOS and Linux, about 2 MB, with no runtime dependencies. Also a [Fennel/Lua library](doc/library.md).

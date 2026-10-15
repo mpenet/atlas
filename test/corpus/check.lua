@@ -1,8 +1,10 @@
 -- ABOUTME: Corpus check: loads real-world OpenAPI specs, builds clients and
--- ABOUTME: exercises every operation offline (names, help, URLs, invoke, checks).
+-- ABOUTME: exercises every operation offline (names, help, URLs, invoke, checks, MCP tools).
 local atlas = require("atlas")
 local help = require("atlas.cli.help")
 local request = require("atlas.cli.request")
+local mcp = require("atlas.cli.mcp")
+local json = require("atlas.json")
 local socket = require("socket")
 
 local function stub(req) return {status = 200, headers = {}, body = {}, raw = "{}"} end
@@ -43,6 +45,10 @@ for _, file in ipairs(files) do
         check("invoke", function() op.invoke({path = path, body = op["has-body"] and {} or nil}) end)
         check("check-params", function() request["check-params"](op, {query = {}, headers = {}}) end)
         check("check-body", function() if op["has-body"] then request["check-body"](op, "{}") end end)
+        check("mcp-tool", function()
+          local openapi30 = not tostring(schema.openapi or ""):match("^3%.[1-9]")
+          assert(json.decode(json.encode(mcp.tool(op, {["openapi-30"] = openapi30}))).inputSchema)
+        end)
       end
       local t_ops = socket.gettime() - t2
       print(string.format("%-18s ops=%-5d load=%.2fs client=%.2fs ops=%.2fs", file, n, t_load, t_client, t_ops))
