@@ -28,7 +28,8 @@
         : print-arazzo-result
         : list-arazzo-workflows
         : wrap-log-request
-        : strip-location} (require :atlas.cli.output))
+        : strip-location
+        : check-select} (require :atlas.cli.output))
 
 (local {: config-path
         : load-config
@@ -549,6 +550,8 @@ JSON or YAML one); otherwise -d is sent as given, as JSON when it is JSON."
       (print (.. "atlas " atlas.version " ("
                  ((. (require :atlas.curl) :version)) ")"))
       (let [p (parse-args args)]
+        (when p.select
+          (check-select p.select))
         (match p.cmd
           nil (usage)
           :completion (match p.schema

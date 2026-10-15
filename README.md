@@ -7,7 +7,7 @@ A command line for any HTTP API that publishes an [OpenAPI 3](https://spec.opena
 Point `atlas` at a spec and every operation becomes a command, with its own help, shell completion, and checks that catch mistakes before anything is sent. No code generation: the spec is read when you run the command.
 
 - **Every operation, at your fingertips.** Path parameters as arguments, `--q.` / `--h.` / `--b.` for query, headers and body fields, typed from the spec.
-- **Output you can use.** Pretty JSON or YAML, `--select` to pick what you need, exit codes that tell 4xx from 5xx.
+- **Output you can use.** Pretty JSON or YAML, tables and CSV, `--select` to pick and filter what you need, exit codes that tell 4xx from 5xx.
 - **Profiles and authentication.** Bearer, Basic, API keys, OAuth 2.0 (authorization code with PKCE, client credentials, device flow), external signing tools, mutual TLS.
 - **Any URL, too.** `atlas http GET /zones --profile exo` sends a request without a spec, with the profile's authentication; a profile's credentials only go to its own API.
 - **Workflows.** Run multi-step [Arazzo](https://spec.openapis.org/arazzo/latest.html) workflows: chain calls, poll until a job finishes, branch on results.

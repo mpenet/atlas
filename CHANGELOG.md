@@ -8,6 +8,12 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 
 - `atlas http [METHOD] URL-or-path`: a request without a spec, with a profile's headers, authentication and TLS settings, retries, pagination, `-v`, `--dry-run`/`--curl` and the usual output and exit codes. A path is appended to the profile's API URL; a profile's credentials are only sent to its API's origin.
 - `atlas.base-url`: the URL a client of a schema sends requests to.
+- `--select` filters: `[?state==running]`, `[?size>10]`, `[?tags.env=="prod"]`, `[?tags]`.
+- `--output=table`, `csv` and `tsv` for arrays of objects, with the columns a `{a,b}` selection picks.
+
+### Changed
+
+- `--output=raw` prints a selected array of strings, numbers or booleans one value per line.
 
 ## [1.0.0-beta4] - 2026-10-15
 

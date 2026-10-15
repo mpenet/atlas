@@ -594,6 +594,18 @@
                                                                              {:name "Rex"})})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "name: Rex" r.out))))
+            (it "prints outputs as a table row"
+                (fn []
+                  (let [r (atlas-run ["az"
+                                      "flows"
+                                      "fetchPet"
+                                      "-i"
+                                      "id=7"
+                                      "--output=csv"]
+                                     {"GET https://api.test/pets/7" (respond 200
+                                                                             {:name "Rex"})})]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "name\nRex" r.out))))
             (it "validates workflow inputs against the inputs schema"
                 (fn []
                   (let [r (atlas-run ["az"
@@ -1099,7 +1111,7 @@
                 (fn []
                   (let [r (atlas-run ["op" "p" "get-pet" "3" "--output=yml"])]
                     (assert.are.equal 1 r.code)
-                    (assert.is_truthy (r.err:find "--output must be one of json, yaml, raw, status, headers"
+                    (assert.is_truthy (r.err:find "--output must be one of json, yaml, raw, table, csv, tsv, status, headers"
                                                   1 true)))
                   (let [r (atlas-run ["op"
                                       "p"
@@ -1550,6 +1562,15 @@
                   (let [r (atlas-run ["http"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "Usage: atlas http" 1 true)))))
+            (it "checks --select before sending"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "POST"
+                                      "https://h.test/x"
+                                      "--select=.a[?b=1]"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "invalid filter" 1 true))
+                    (assert.are.equal 0 (length r.requests)))))
             (it "prints usage for --help without sending"
                 (fn []
                   (let [r (atlas-run ["http" "GET" "https://h.test/" "--help"])]

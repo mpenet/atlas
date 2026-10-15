@@ -111,9 +111,9 @@
          :key :output
          :value :string
          :arg "FORMAT"
-         :choices [:json :yaml :raw :status :headers]
+         :choices [:json :yaml :raw :table :csv :tsv :status :headers]
          :scope :any
-         :help "json (default), yaml, raw, status or headers"}
+         :help "json (default), yaml, raw, table, csv, tsv, status or headers"}
         {:names ["--select"]
          :key :select
          :value :string

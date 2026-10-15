@@ -90,11 +90,77 @@ from specs and servers."
                         (when (= (type obj) :table) (pick obj))))
           (pick value)))))
 
+(fn filter-end [path]
+  "Index of the ] closing the filter at the start of path, quotes skipped."
+  (var quoted false)
+  (var escaped false)
+  (var close nil)
+  (for [i 3 (length path) &until close]
+    (let [c (path:sub i i)]
+      (if escaped (set escaped false)
+          (and quoted (= c "\\")) (set escaped true)
+          (= c "\"") (set quoted (not quoted))
+          (and (not quoted) (= c "]")) (set close i))))
+  close)
+
+(local comparisons
+       {"==" #(= $1 $2)
+        "!=" #(not= $1 $2)
+        "<" #(and (= (type $1) (type $2)) (< $1 $2))
+        "<=" #(and (= (type $1) (type $2)) (<= $1 $2))
+        ">" #(and (= (type $1) (type $2)) (> $1 $2))
+        ">=" #(and (= (type $1) (type $2)) (>= $1 $2))})
+
+(fn filter-value [raw fail]
+  "A filter's value: JSON (a quoted string, number, true, false, null), else
+the text itself."
+  (let [(ok v) (pcall json.decode raw true)]
+    (if (and ok (or (not= (type v) :table) (= v json.null))) v
+        (raw:match "^\"") (fail)
+        (= raw "") (fail)
+        raw)))
+
+(fn parse-filter [path select-path]
+  "(keep rest) for the [?PATH OP VALUE] or [?PATH] at the start of path: keep
+says whether an element matches."
+  (let [close (filter-end path)
+        fail #(error (.. "--select: invalid filter in " path) 0)
+        _ (when (not close) (fail))
+        condition (path:sub 3 (- close 1))
+        (lhs op rhs) (condition:match "^%s*(.-)%s*([=!<>]=?)%s*(.-)%s*$")
+        field (or lhs (condition:match "^%s*(.-)%s*$"))
+        compare (when op (or (. comparisons op) (fail)))]
+    (when (not (field:match "^%.?[%w_%-]+[%w_%-%.]*$"))
+      (fail))
+    (values (if compare
+                (let [value (filter-value rhs fail)
+                      ;; operands of a type that can't be ordered never match
+                      orderable #(let [t (type $)]
+                                   (or (= t :number) (= t :string)))]
+                  #(let [found (select-path $ field) ;; a missing field is null
+                         v (if (= nil found) json.null found)]
+                     (if (or (= op "==") (= op "!=")) (compare v value)
+                         (and (orderable v) (orderable value) (compare v value)))))
+                #(let [v (select-path $ field)]
+                   (and (not= nil v) (not= json.null v) (not= false v))))
+            (path:sub (+ close 1)))))
+
 (fn select-path [data path]
   "Value at path in data: .field, [N] (0-based), [] to map the rest of the path
-over an array, {a,b} to keep fields. nil when the path doesn't match."
+over an array, [?PATH OP VALUE] to keep the elements that match (then map the
+rest over them), {a,b} to keep fields. nil when the path doesn't match."
   (if (or (= nil data) (= path "")) data (path:match "^%.")
-      (select-path data (path:sub 2)) (path:match "^%[%]")
+      (select-path data (path:sub 2)) (path:match "^%[%?")
+      (let [(keep rest) (parse-filter path select-path)]
+        (when (and (container? data)
+                   (or (json.array? data) (= nil (next data))))
+          (let [kept (json.array (icollect [_ v (ipairs data)]
+                                   (when (keep v) v)))]
+            ;; filters in a row narrow the same array
+            (if (rest:match "^%[%?") (select-path kept rest)
+                (json.array (icollect [_ v (ipairs kept)]
+                              (select-path v rest)))))))
+      (path:match "^%[%]")
       (when (container? data)
         (json.array (icollect [_ v (ipairs data)] (select-path v (path:sub 3)))))
       (path:match "^%[%d+%]")
@@ -114,6 +180,15 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
       (let [(key rest) (path:match "^([^%.%[{]+)(.*)$")]
         (when (and key (container? data))
           (select-path (. data key) rest)))))
+
+(fn check-select [path]
+  "Raise for a malformed filter anywhere in path, before anything is sent."
+  (var rest path)
+  (var at (path:find "[?" 1 true))
+  (while at
+    (let [(_ after) (parse-filter (rest:sub at) select-path)]
+      (set rest after)
+      (set at (rest:find "[?" 1 true)))))
 
 (fn request-text [req]
   "Human-readable request, credentials redacted."
@@ -178,6 +253,100 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
                                           (tostring (redact-header k v))
                                           v)))) "\n"))
 
+(fn cell-text [v]
+  "A value as table cell text: nothing for null, compact JSON for objects and
+arrays."
+  (if (or (= nil v) (= json.null v)) ""
+      (= (type v) :string) v
+      (json.encode v)))
+
+(fn csv-field [text]
+  (if (text:find "[,\"\r\n]")
+      (.. "\"" (pick-values 1 (text:gsub "\"" "\"\"")) "\"")
+      text))
+
+(fn tsv-field [text]
+  (pick-values 1
+               (text:gsub "[\\\t\n\r]"
+                          {"\\" "\\\\" "\t" "\\t" "\n" "\\n" "\r" "\\r"})))
+
+(fn text-width [text]
+  (or (utf8.len text) (length text)))
+
+(fn aligned [rows]
+  "rows of cells as columns padded to their widest cell, two spaces apart."
+  (let [widths []]
+    (each [_ row (ipairs rows)]
+      (each [i cell (ipairs row)]
+        (tset widths i (math.max (or (. widths i) 0) (text-width cell)))))
+    (table.concat (icollect [_ row (ipairs rows)]
+                    (let [line (table.concat (icollect [i cell (ipairs row)]
+                                               (.. cell
+                                                   (string.rep " "
+                                                               (- (. widths i)
+                                                                  (text-width cell)))))
+                                             "  ")]
+                      (pick-values 1 (line:gsub "%s+$" ""))))
+                  "\n")))
+
+(local table-fields
+       {:csv csv-field
+        :tsv tsv-field
+        ;; a cell stays on its line, its control characters off
+        ;; the terminal
+        :table #(util.printable (tsv-field $))})
+
+(fn tabulate [value fmt ?columns]
+  "value as table, csv or tsv text: an array of objects (or one object) is a
+row each, under a header of ?columns or of every key, sorted; an array of
+other values is one per line."
+  (let [field (. table-fields fmt)
+        rows (if (or (json.array? value)
+                     (and (container? value) (= nil (next value))))
+                 value
+                 [value])
+        objects (icollect [_ row (ipairs rows)]
+                  (when (container? row) row))]
+    (if (= nil (next objects))
+        (table.concat (icollect [_ row (ipairs rows)]
+                        (field (cell-text row))) "\n")
+        (let [columns (or ?columns
+                          (let [seen {}]
+                            (each [_ obj (ipairs objects)]
+                              (each [k (pairs obj)]
+                                (tset seen k true)))
+                            (doto (icollect [k (pairs seen)] k)
+                              (table.sort))))
+              lines [(icollect [_ c (ipairs columns)]
+                       (field c))]]
+          (each [_ obj (ipairs objects)]
+            (table.insert lines
+                          (icollect [_ c (ipairs columns)]
+                            (field (cell-text (. obj c))))))
+          (if (= fmt :table)
+              (aligned lines)
+              (table.concat (icollect [_ cells (ipairs lines)]
+                              (table.concat cells (if (= fmt :csv) "," "\t")))
+                            "\n"))))))
+
+(fn selected-fields [?select]
+  "The fields a selection ending in {a,b} picks, in its order."
+  (let [picked (when ?select
+                 (?select:match "{([^}]*)}%s*$"))]
+    (when picked
+      (icollect [f (picked:gmatch "[^,]+")]
+        (f:match "^%s*(.-)%s*$")))))
+
+(fn raw-text [v]
+  "A selection as raw text: strings as they are, a list of values one per
+line, objects as JSON."
+  (if (not= (type v) :table) (tostring v)
+      (and (json.array? v) (accumulate [all true _ x (ipairs v) &until (not all)]
+                             (not (container? x))))
+      (table.concat (icollect [_ x (ipairs v)]
+                      (if (= x json.null) "null" (tostring x)))
+                    "\n") (render v :json false)))
+
 (fn format-output [resp output use-color ?select]
   "Text to print for a successful response, or nil when there is nothing to show."
   (let [body (if (and ?select resp.body) (select-path resp.body ?select)
@@ -187,10 +356,12 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
       :headers (header-lines resp.headers)
       :raw (if ?select
                (when (not= nil body)
-                 (if (= (type body) :table) (render body :json false)
-                     (tostring body)))
+                 (raw-text body))
                (when (and resp.raw (> (length resp.raw) 0))
                  resp.raw))
+      (where (or :table :csv :tsv)) (when (not= nil body)
+                                      (tabulate body output
+                                                (selected-fields ?select)))
       fmt (when (not= nil body) (render body fmt use-color)))))
 
 (fn exit-code [status ignore-status]
@@ -313,7 +484,8 @@ variable shows the value in effect."
   (when step.response (print (render step.response.body))))
 
 (fn print-arazzo-result [result mode output no-color]
-  (let [render #(render $ output (not no-color))
+  (let [render #(if (. table-fields output) (tabulate $ output)
+                    (render $ output (not no-color)))
         has-outputs (next (or result.outputs {}))]
     (match (or mode :final)
       ;; progress already went to stderr while the workflow ran
@@ -348,6 +520,7 @@ variable shows the value in effect."
  : op?
  : list-ops
  : select-path
+ : check-select
  : sorted-headers
  : request-text
  : curl-command

@@ -1561,3 +1561,170 @@ answers candidates; one reply per line, each followed by |."
                   (fn []
                     (assert.are.same [{:a 1}]
                                      (cli.select-path [{:a 1 :b 2} 3 "x"] "{a}")))))))
+
+(describe "cli.select-path filters"
+          (fn []
+            (let [data {:items [{:id 1
+                                 :name "a"
+                                 :state "running"
+                                 :size 10
+                                 :tags {:env "prod"}}
+                                {:id 2 :name "b]c" :state "stopped" :size 20}
+                                {:id 3
+                                 :name "d"
+                                 :state "running"
+                                 :size 30
+                                 :tags {:env "dev"}}]}]
+              (it "keeps the elements that match, bare or JSON values"
+                  (fn []
+                    (assert.are.same [1 3]
+                                     (cli.select-path data
+                                                      ".items[?state==running].id"))
+                    (assert.are.same [1 3]
+                                     (cli.select-path data
+                                                      ".items[?state==\"running\"].id"))
+                    (assert.are.same [2]
+                                     (cli.select-path data
+                                                      ".items[?state!=running].id"))))
+              (it "compares numbers"
+                  (fn []
+                    (assert.are.same ["b]c" "d"]
+                                     (cli.select-path data
+                                                      ".items[?size>15].name"))
+                    (assert.are.same [1]
+                                     (cli.select-path data
+                                                      ".items[?size<=10].id"))
+                    (assert.are.same [2 3]
+                                     (cli.select-path data
+                                                      ".items[?size>=20].id"))
+                    (assert.are.same [1]
+                                     (cli.select-path data
+                                                      ".items[?size<20.5][?size<11].id"))))
+              (it "follows paths in the condition"
+                  (fn []
+                    (assert.are.same [1]
+                                     (cli.select-path data
+                                                      ".items[?tags.env==prod].id"))
+                    (assert.are.same [3]
+                                     (cli.select-path data
+                                                      ".items[?.tags.env==\"dev\"].id"))))
+              (it "tests presence without an operator"
+                  (fn []
+                    (assert.are.same [1 3]
+                                     (cli.select-path data ".items[?tags].id"))))
+              (it "treats missing fields as null"
+                  (fn []
+                    (let [json (require :atlas.json)]
+                      (assert.are.same [2]
+                                       (cli.select-path data
+                                                        ".items[?tags==null].id"))
+                      (assert.are.same [9]
+                                       (cli.select-path {:a [{:id 9
+                                                              :x json.null}
+                                                             {:id 8 :x 1}]}
+                                                        ".a[?x==null].id"))
+                      (assert.are.same [8]
+                                       (cli.select-path {:a [{:id 9
+                                                              :x json.null}
+                                                             {:id 8 :x 1}]}
+                                                        ".a[?x].id")))))
+              (it "reads brackets inside quoted values"
+                  (fn []
+                    (assert.are.same [2]
+                                     (cli.select-path data
+                                                      ".items[?name==\"b]c\"].id"))))
+              (it "gives whole elements, and an empty array when none match"
+                  (fn []
+                    (assert.are.same [{:id 2
+                                       :name "b]c"
+                                       :state "stopped"
+                                       :size 20}]
+                                     (cli.select-path data
+                                                      ".items[?state==stopped]"))
+                    (let [json (require :atlas.json)
+                          none (cli.select-path data ".items[?size>99]")]
+                      (assert.is_true (json.array? none))
+                      (assert.are.same [] none))))
+              (it "never matches values of another type"
+                  (fn []
+                    (assert.are.same []
+                                     (cli.select-path data ".items[?name>1].id"))))
+              (it "is nil on things that aren't arrays"
+                  (fn []
+                    (assert.is_nil (cli.select-path data ".items[0][?id==1]"))))
+              (it "checks filters without data"
+                  (fn []
+                    (cli.check-select ".a[?name==\"[?x\"].b[?c>1]")
+                    (assert.is_false (pcall cli.check-select
+                                            ".a[?x==1].b[?c=1]"))))
+              (it "rejects malformed filters"
+                  (fn []
+                    (each [_ path (ipairs [".items[?state=running]"
+                                           ".items[?]"
+                                           ".items[?state==\"x]"
+                                           ".items[?size>]"])]
+                      (let [(ok err) (pcall cli.select-path data path)]
+                        (assert.is_false ok)
+                        (assert.is_truthy (: (tostring err) :find
+                                             "invalid filter" 1 true)))))))))
+
+(describe "cli.format-output tables"
+          (fn []
+            (let [resp {:status 200
+                        :headers {}
+                        :body [{:id 1 :name "a" :tags {:k "v"}}
+                               {:id 22 :name "b,\"c\""}]}]
+              (it "aligns columns, sorted by name, with a header"
+                  (fn []
+                    (assert.are.equal (.. "id  name   tags\n"
+                                          "1   a      {\"k\":\"v\"}\n"
+                                          "22  b,\"c\"")
+                                      (cli.format-output resp :table false))))
+              (it "orders columns as the selection picks them"
+                  (fn []
+                    (assert.are.equal "name   id\na      1\nb,\"c\"  22"
+                                      (cli.format-output resp :table false
+                                                         "[].{name,id}"))))
+              (it "writes CSV with quoting"
+                  (fn []
+                    (assert.are.equal (.. "id,name,tags\n"
+                                          "1,a,\"{\"\"k\"\":\"\"v\"\"}\"\n"
+                                          "22,\"b,\"\"c\"\"\",")
+                                      (cli.format-output resp :csv false))))
+              (it "writes TSV with escapes"
+                  (fn []
+                    (assert.are.equal "a\tb\na\\tb\tx\\ny\\\\"
+                                      (cli.format-output {:status 200
+                                                          :headers {}
+                                                          :body [{:a "a\tb"
+                                                                  :b "x\ny\\"}]}
+                                                         :tsv false "[].{a,b}"))))
+              (it "makes an object one row and a list of values one per line"
+                  (fn []
+                    (assert.are.equal "id\n7"
+                                      (cli.format-output {:status 200
+                                                          :headers {}
+                                                          :body {:id 7}}
+                                                         :csv false))
+                    (assert.are.equal "a\nb c"
+                                      (cli.format-output {:status 200
+                                                          :headers {}
+                                                          :body ["a" "b c"]}
+                                                         :table false))))
+              (it "escapes control characters in tables"
+                  (fn []
+                    (assert.is_nil (: (cli.format-output {:status 200
+                                                          :headers {}
+                                                          :body [{:a "\27[2J"}]}
+                                                         :table false)
+                                      :find "\27" 1 true))))
+              (it "raw prints a list of values one per line"
+                  (fn []
+                    (assert.are.equal "a\n1\ntrue"
+                                      (cli.format-output {:status 200
+                                                          :headers {}
+                                                          :body {:x ["a"
+                                                                     1
+                                                                     true]}
+                                                          :raw "{}"}
+                                                         :raw false ".x")))))))
