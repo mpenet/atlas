@@ -2,6 +2,14 @@
 
 All notable changes to atlas. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.0.0-beta2] - 2026-10-15
+
+The first beta with release binaries: 1.0.0-beta1 was published without them, and its release can no longer take files. The code is that of 1.0.0-beta1: see its section of [CHANGELOG.md](https://github.com/mpenet/atlas/blob/main/CHANGELOG.md) for the changes since 1.0.0-alpha14.
+
+### Fixed
+
+- The release workflow publishes a release only once all its files are uploaded, and builds on Intel macOS runners.
+
 ## [1.0.0-beta1] - 2026-10-15
 
 ### Security
@@ -176,5 +184,6 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 
 Earlier releases are described on the [releases page](https://github.com/mpenet/atlas/releases).
 
+[1.0.0-beta2]: https://github.com/mpenet/atlas/compare/v1.0.0-beta1...v1.0.0-beta2
 [1.0.0-beta1]: https://github.com/mpenet/atlas/compare/v1.0.0-alpha14...v1.0.0-beta1
 [1.0.0-alpha14]: https://github.com/mpenet/atlas/releases/tag/v1.0.0-alpha14
