@@ -226,9 +226,12 @@ returns (kind key value); kind is a value of field-prefixes."
     :header
     (let [existing (accumulate [found nil name (pairs r.headers) &until found]
                      (when (= (name:lower) (k:lower)) name))]
-      ;; repeated header names, in any case, are joined like HTTP does
+      ;; repeated header names, in any case, are joined like HTTP does; cookies
+      ;; have their own separator
       (if existing
-          (tset r.headers existing (.. (. r.headers existing) ", " v))
+          (tset r.headers existing
+                (.. (. r.headers existing) (if (= (k:lower) :cookie) "; " ", ")
+                    v))
           (tset r.headers k v)))
     :body (table.insert r.body-fields [k v])
     :input (table.insert r.input-fields [k v])

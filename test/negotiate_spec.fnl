@@ -65,3 +65,14 @@
                                                          :text/plain {}}}}}]
                     (assert.are.equal (negotiate.pick-accept op)
                                       (negotiate.pick-accept op)))))))
+
+(describe "media type ranges"
+          (fn []
+            (it "come after concrete types"
+                (fn []
+                  (assert.are.equal "application/octet-stream"
+                                    (negotiate.pick-media-type {"*/*" {}
+                                                                "application/octet-stream" {}}))
+                  (assert.are.equal "text/plain"
+                                    (negotiate.pick-media-type {"application/*" {}
+                                                                "text/plain" {}}))))))

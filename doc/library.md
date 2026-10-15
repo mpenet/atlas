@@ -170,7 +170,7 @@ The library never raises on HTTP error statuses — it returns the response tabl
 
 Atlas inspects the schema to set `Content-Type` and `Accept` automatically:
 
-- `Content-Type` is the first of `application/json`, `application/x-www-form-urlencoded`, `multipart/form-data` declared in `requestBody.content`, else any declared type.
+- `Content-Type` is the first of `application/json`, `application/x-www-form-urlencoded`, `multipart/form-data` declared in `requestBody.content`, else another declared type; a range (`*/*`, `application/*`) comes last and sends JSON. In a multipart body, an array is one part per element, all with its name (several files under one field).
 - `Accept` lists every media type declared across the operation's responses.
 
 Client-level and per-request headers override these; header names are matched case-insensitively.

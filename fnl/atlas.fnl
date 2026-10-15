@@ -83,7 +83,9 @@ then the body when the operation has one, then an opts table."
                   (tset :parameters
                         (util.merge-parameters path-item.parameters
                                                op-spec.parameters)))
-        content-type (negotiate.pick-content-type op-spec)
+        ;; the declared media type (to find its schema), and what is sent
+        declared-type (negotiate.pick-content-type op-spec)
+        content-type (negotiate.wire-type declared-type)
         negotiated {:accept (negotiate.pick-accept op-spec)
                     :content-type content-type}
         ;; how each declared query parameter is serialized
@@ -122,7 +124,7 @@ then the body when the operation has one, then an opts table."
                                          :url (operation-url client-opts.base-url
                                                              path req)})))
         param-names (util.extract-path-params path)]
-    (setmetatable {:body-schema (?. op-spec :requestBody :content content-type
+    (setmetatable {:body-schema (?. op-spec :requestBody :content declared-type
                                     :schema)
                    :content-type content-type
                    :has-body (not= nil op-spec.requestBody)

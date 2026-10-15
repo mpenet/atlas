@@ -888,6 +888,49 @@
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "theme=dark; sid=S" (cookie r))
                     (assert.are.equal "sid=MINE" (cookie mine)))))
+            (it "doesn't authenticate when the request already sends the key's cookie"
+                (fn []
+                  (let [r (with-config {:profiles {:ce {:schema "test/fixtures/cli-api.json"
+                                                        :auth {:name "api-key"
+                                                               :params {:in "cookie"
+                                                                        :name "session"
+                                                                        :value "env:ATLAS_TEST_UNSET_KEY"}}}}}
+                            #(atlas-run ["op"
+                                         "ce"
+                                         "list-pets"
+                                         "--h.Cookie=session=mine"]
+                                        {"GET https://api.test/pets" (respond 200
+                                                                              [])}))]
+                    (assert.are.equal 0 r.code r.err))))
+            (it "fetches a spec with the cookie key after a 401, next to the profile's cookies"
+                (fn []
+                  (let [schema-text (with-open [f (io.open "test/fixtures/cli-api.json")]
+                                      (f:read :*a))
+                        util (require :atlas.util)
+                        (transport requests) (routes-transport {"GET https://api.test/openapi.json" (fn [req]
+                                                                                                      (if (: (or (util.header req.headers
+                                                                                                                              :cookie)
+                                                                                                                 "")
+                                                                                                             :find
+                                                                                                             "session=S1"
+                                                                                                             1
+                                                                                                             true)
+                                                                                                          {:status 200
+                                                                                                           :headers {}
+                                                                                                           :raw schema-text}
+                                                                                                          (respond 401
+                                                                                                                   {})))})
+                        code (cli.run ["op" "ckh" "--list"]
+                                      {: transport
+                                       :config {:profiles {:ckh {:schema "https://api.test/openapi.json"
+                                                                 :headers {:Cookie "pref=1"}
+                                                                 :auth {:name "api-key"
+                                                                        :params {:in "cookie"
+                                                                                 :name "session"
+                                                                                 :value "S1"}}}}}
+                                       :schema-cache false})]
+                    (assert.are.equal 0 code)
+                    (assert.are.equal 2 (length requests)))))
             (it "names the auth parameters a profile is missing"
                 (fn []
                   (each [_ [auth msg] (ipairs [[{:name "oauth-client-credentials"

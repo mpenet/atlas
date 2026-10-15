@@ -42,8 +42,15 @@ percent-escaped (as browsers do) so they cannot break out of the header."
   "Returns (payload content-type) for a multipart/form-data body."
   (let [names (doto (icollect [k (pairs body)] k)
                 (table.sort))
-        parts (icollect [_ name (ipairs names)]
-                (multipart-part name (. body name)))
+        parts []
+        _ (each [_ name (ipairs names)]
+            (let [value (. body name)]
+              ;; an array is one part per element, all with its name (OpenAPI:
+              ;; an array's encoding is its items')
+              (if (json.array? value)
+                  (each [_ item (ipairs value)]
+                    (table.insert parts (multipart-part name item)))
+                  (table.insert parts (multipart-part name value)))))
         boundary (multipart-boundary parts)
         chunks []]
     (each [_ part (ipairs parts)]

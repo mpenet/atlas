@@ -182,36 +182,48 @@ net: {:ssl :timeout} for the token endpoint."
   (accumulate [found nil k (pairs headers) &until found]
     (when (= (k:lower) (name:lower)) k)))
 
+(fn has-cookie? [headers name]
+  "Whether the request's Cookie header has a cookie called name."
+  (let [present (util.header headers :cookie)]
+    (and present (accumulate [found false part (present:gmatch "[^;]+")
+                              &until found]
+                   (= (part:match "^%s*([^=]+)=") name)))))
+
 (fn add-cookie [headers cookie]
   "Add cookie (\"name=value\") to the request's Cookie header, unless one of
 that name is already there."
-  (let [key (header-key headers :cookie)
-        name (cookie:match "^([^=]+)=")
-        present (when key (. headers key))]
-    (if (not present) (tset headers :cookie cookie)
-        (not (accumulate [found false part (present:gmatch "[^;]+") &until found]
-               (= (part:match "^%s*([^=]+)=") name))) (tset headers key
-                                                                    (.. present
-                                                                        "; "
-                                                                        cookie)))))
+  (let [key (header-key headers :cookie)]
+    (if (not key) (tset headers :cookie cookie)
+        (not (has-cookie? headers (cookie:match "^([^=]+)="))) (tset headers
+                                                                     key
+                                                                     (.. (. headers
+                                                                            key)
+                                                                         "; "
+                                                                         cookie)))))
 
-(fn with-auth-headers [auth-headers names base-fn]
+(fn add-auth-header [headers k v]
+  "Add auth header k unless the request sets it; a cookie joins the others."
+  (if (= (k:lower) :cookie) (add-cookie headers v)
+      (= nil (util.header headers k)) (tset headers k v)))
+
+(fn with-auth-headers [auth-headers names ?cookie-name base-fn]
   "Adds auth headers to each request; headers already set explicitly win, and
 when they cover every auth header (names), auth doesn't run at all. A cookie
-joins the request's other cookies."
+(?cookie-name) joins the request's other cookies, and only one of its name
+covers it."
   (fn [req]
     (let [headers (collect [k v (pairs (or req.headers {}))]
                     k
                     v)
-          ;; an unrelated cookie doesn't stand for the one auth adds
           covered (and (next names)
                        (accumulate [all true _ n (ipairs names) &until (not all)]
-                         (and (not= n :cookie)
-                              (not= nil (util.header headers n)))))]
+                         (if (= n :cookie)
+                             (and ?cookie-name
+                                  (has-cookie? headers ?cookie-name))
+                             (not= nil (util.header headers n)))))]
       (when (not covered)
         (each [k v (pairs (auth-headers))]
-          (if (= (k:lower) :cookie) (add-cookie headers v)
-              (= nil (util.header headers k)) (tset headers k v))))
+          (add-auth-header headers k v)))
       (base-fn (doto (collect [k v (pairs req)] k v)
                  (tset :headers headers)
                  ;; redirects to another origin must drop them
@@ -298,8 +310,12 @@ request signing, logging, and the transport (or dry-run printing)."
      ;; auth headers are added outside retries and pagination: computed once
      ;; per request, reused by every attempt and page, and an auth failure is
      ;; reported rather than retried as if it were a network error
-     :http-fn (if auth-headers (with-auth-headers auth-headers auth-names
-                                 queried)
+     :http-fn (if auth-headers
+                  (with-auth-headers auth-headers
+                    auth-names
+                    (when (= (?. auth-cfg :params :in) :cookie)
+                      (?. auth-cfg :params :name))
+                    queried)
                   queried)}))
 
 (fn fetch-schema [url opts]
@@ -331,9 +347,8 @@ opts: {:transport :headers :ssl :timeout :auth-headers :authorize :base-url}"
                    (each [k v (pairs (if opts.auth-headers
                                          (opts.auth-headers)
                                          {}))]
-                     (when (= nil (util.header headers k))
-                       (tset headers k v)
-                       (table.insert added k)))
+                     (add-auth-header headers k v)
+                     (table.insert added k))
                    ;; a redirect to another origin must drop them
                    (send (if opts.authorize
                              (opts.authorize opts.transport)

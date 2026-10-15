@@ -268,6 +268,8 @@ operation, or an Arazzo document's workflow and inputs."
   ;; bash inserts replies as they are: quote them, so that spaces and shell
   ;; syntax in spec values stay part of one argument; the word may already
   ;; be typed quoted
+  ;; a candidate equal to the word up to its = leaves nothing to insert
+  (print "    [[ -z \"${c:${#prefix}}\" ]] && continue")
   (print "    if [[ \"$c\" == \"$word\"* ]]; then")
   (print "      printf -v q '%q' \"${c:${#prefix}}\"")
   (print "    else")

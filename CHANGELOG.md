@@ -154,6 +154,10 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - A cookie API key joins the cookies a request already sends instead of being left out; the device flow sends `client_secret` when one is set; Restish imports keep a profile's own `redirect_port` and `redirect_path` (and port 80 for a `redirect_url` without one).
 - A query API key whose name holds `-`, `[` or spaces is no longer added twice (or crashing) on a redirect.
 - A request atlas can't build (a line break in a header, nested query values) fails at once instead of being retried, also with request signing.
+- A cookie API key counts as given only when the request sends a cookie of its name (not any cookie), also when fetching a spec after a 401; repeated `--h.Cookie` values are joined with `; `.
+- Bash completion no longer inserts `''` after `--NAME=`.
+- `profile import-restish` warns about a profile's `url_overrides` and an IPv6 `redirect_url`.
+- Multipart arrays are sent one part per element (several files under one name) instead of as one JSON part; a declared media type range (`*/*`) comes after concrete types and sends JSON instead of `Content-Type: */*`.
 - Completion expands `~/` in spec and workflow paths.
 - A document that isn't an OpenAPI spec (an API's JSON answer, a config file) is reported as such instead of giving an empty listing.
 - Pagination works over a custom `http-fn` that returns only the decoded `:body`.

@@ -173,6 +173,17 @@
                                         :redirect_port 9000
                                         :redirect_path "/cb"}
                                        profiles.a.auth.params))))
+              (it "warns about an IPv6 redirect_url and uses the defaults"
+                  (fn []
+                    (let [(profiles warnings) (convert {:type "oauth-authorization-code"
+                                                        :params {:client_id "c"
+                                                                 :redirect_url "http://[::1]:8484/cb"}})]
+                      (assert.are.equal "localhost"
+                                        profiles.a.auth.params.redirect_host)
+                      (assert.are.equal 8484
+                                        profiles.a.auth.params.redirect_port)
+                      (assert.is_truthy (: (table.concat warnings "\n") :find
+                                           "redirect_url" 1 true)))))
               (it "keeps a profile's own redirect port and path"
                   (fn []
                     (let [profiles (convert {:type "oauth-authorization-code"
@@ -199,3 +210,12 @@
                                                           :auth_method "header"}})]
                       (assert.is_truthy (: (table.concat warnings "\n") :find
                                            "auth_method" 1 true))))))))
+
+(describe "restish.convert profile settings"
+          (fn []
+            (it "warns about a profile's url_overrides"
+                (fn []
+                  (let [(_ warnings) (restish.convert {:apis {:a {:base_url "https://a.example"
+                                                                  :profiles {:default {:url_overrides {"https://a.example" "https://staging.example"}}}}}})]
+                    (assert.is_truthy (: (table.concat warnings "\n") :find
+                                         "url_overrides" 1 true)))))))

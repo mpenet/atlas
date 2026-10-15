@@ -278,6 +278,24 @@
                                                   :body {:a 1}})]
                     (assert.is_nil ct))))))
 
+(describe "multipart arrays"
+          (fn []
+            (it "send one part per element under the same name"
+                (fn []
+                  (let [json (require :atlas.json)
+                        payload (http.encode-body {:headers {:content-type "multipart/form-data"}
+                                                   :body {:files (json.array [{:filename "a.txt"
+                                                                               :content "AAA"}
+                                                                              {:filename "b.txt"
+                                                                               :content "BBB"}])
+                                                          :tags (json.array ["x"
+                                                                             "y"])}})
+                        count #(select 2 (payload:gsub $ ""))]
+                    (assert.are.equal 2 (count "name=\"files\"; filename="))
+                    (assert.are.equal 2 (count "name=\"tags\"\r\n"))
+                    (assert.is_truthy (payload:find "\r\n\r\nAAA\r\n" 1 true))
+                    (assert.is_truthy (payload:find "\r\n\r\ny\r\n" 1 true)))))))
+
 (describe "multipart field names"
           (fn []
             (it "percent-escapes quotes and line breaks"

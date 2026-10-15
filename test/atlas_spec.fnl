@@ -664,6 +664,20 @@
                     (assert.is_nil (. c ""))
                     (assert.are.equal "/a" (. c :get-a :path)))))))
 
+(describe "request bodies declared with a media type range"
+          (fn []
+            (it "are sent as JSON"
+                (fn []
+                  (let [(http calls) (mock-http)
+                        c (atlas.client (schema {"/x" {:post {:operationId "postX"
+                                                              :requestBody {:content {"*/*" {:schema {:type "object"}}}}
+                                                              :responses {}}}})
+                                        {:http-fn http})]
+                    (c.post-x.invoke {:body {:a 1}})
+                    (assert.are.equal "application/json"
+                                      (. calls 1 :headers :content-type))
+                    (assert.are.same {:type "object"} c.post-x.body-schema))))))
+
 (describe "query parameters with content"
           (fn []
             (it "are sent as JSON text"

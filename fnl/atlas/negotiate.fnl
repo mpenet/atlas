@@ -1,11 +1,13 @@
 ;; ABOUTME: Chooses request Content-Type and Accept headers from an operation's
 ;; ABOUTME: declared media types.
 (fn rank [media-type]
-  "Preference of a media type: JSON first, then forms, then the rest."
+  "Preference of a media type: JSON first, then forms, then the rest, ranges
+(*/*, application/*) last."
   (let [mt (media-type:lower)]
     (if (or (mt:match "^application/json") (mt:match "^[^;]*%+json")) 1
         (mt:match "^application/x%-www%-form%-urlencoded") 2
         (mt:match "^multipart/form%-data") 3
+        (mt:find "*" 1 true) 5
         4)))
 
 (fn pick-media-type [content]
@@ -17,6 +19,12 @@ by name, so the choice is the same on every run."
                                      b (rank $2)]
                                  (if (= a b) (< $1 $2) (< a b)))))]
       (. types 1))))
+
+(fn wire-type [media-type]
+  "The Content-Type to send for a declared media type: a range (*/*) names no
+type, so the body goes as JSON."
+  (if (and media-type (media-type:find "*" 1 true)) "application/json"
+      media-type))
 
 (fn pick-content-type [op-spec]
   (when op-spec.requestBody
@@ -39,4 +47,8 @@ rather than an extension (x-...)."
       (table.sort types)
       (table.concat types ", "))))
 
-{: pick-content-type : pick-accept : pick-media-type : response-code?}
+{: pick-content-type
+ : pick-accept
+ : pick-media-type
+ : response-code?
+ : wire-type}

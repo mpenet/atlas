@@ -1375,6 +1375,19 @@ answers candidates; one reply per line, each followed by |."
       (os.remove script-file)
       out)))
 
+(describe "repeated headers"
+          (fn []
+            (it "join cookies with ; and other headers with ,"
+                (fn []
+                  (let [p (cli.parse-args ["op"
+                                           "s"
+                                           "--h.Cookie=a=b"
+                                           "--h.cookie=c=d"
+                                           "--h.X-T=1"
+                                           "--h.x-t=2"])]
+                    (assert.are.equal "a=b; c=d" p.headers.Cookie)
+                    (assert.are.equal "1, 2" (. p.headers :X-T)))))))
+
 (describe "bash completion script"
           (fn []
             (it "treats candidates from the spec as data, and inserts them quoted"
@@ -1412,6 +1425,13 @@ answers candidates; one reply per line, each followed by |."
                                       (bash-complete shell
                                                      "atlas op x y --q.u=https:"
                                                      ["--q.u=https://x.example/a"])))))
+            (it "offers nothing once only the value is left to type"
+                (fn []
+                  ;; printf prints one empty reply line when there are none
+                  (assert.are.equal "|\n"
+                                    (bash-complete "bash"
+                                                   "atlas op x --output="
+                                                   ["--output="]))))
             (it "adds no space after a name waiting for its value"
                 (fn []
                   (assert.are.equal "--q.status=|\n"

@@ -48,12 +48,13 @@ items are left out)."
           ;; the callback Restish registers: redirect_url, else
           ;; http://localhost:8484/
           (let [url params.redirect_url
-                (host port path) (when url
+                ;; atlas listens on 127.0.0.1: an IPv6 host can't be used
+                (host port path) (when (and url (not (url:match "^http://%[")))
                                    (url:match "^http://([^:/]+):?(%d*)(/?[^?#]*)"))]
             (when (and url (not host))
               (warn where
                     (.. "redirect_url " url
-                        " is not an http:// address; set redirect_host, redirect_port and redirect_path")))
+                        " is not an http:// address atlas can listen on; set redirect_host, redirect_port and redirect_path")))
             (when (and params.redirect_scheme
                        (not= params.redirect_scheme :http))
               (warn where
@@ -91,6 +92,8 @@ items are left out)."
         operation-base (or prof.operation_base api.operation_base)
         specs (or api.spec_files [])
         schema (or api.spec_url (. specs 1))
+        _ (when prof.url_overrides
+            (warn where "url_overrides are not supported"))
         auth (or prof.auth
                  (when prof.auth_ref
                    (or (?. config :auth_profiles prof.auth_ref)
