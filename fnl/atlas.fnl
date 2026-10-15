@@ -240,18 +240,47 @@ the spec's location."
         (util.resolve-reference source-url server-url))
       (error "no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts")))
 
+(fn own-server [path-item op-spec index]
+  "The server of an operation that declares its own (or whose path item
+does): the one at the client's index, else its first."
+  (let [list (or (?. op-spec :servers) (?. path-item :servers))]
+    (when (and (= (type list) :table) (. list 1))
+      (or (. list index) (. list 1)))))
+
+(fn declared-vars [server server-vars]
+  "The server-vars server declares: each server takes its own."
+  (collect [k v (pairs server-vars)]
+    (when (?. server :variables k) (values k v))))
+
+(fn check-server-vars [server in-use server-vars]
+  "Raise for a variable that none of the servers in use declares."
+  (each [k (pairs server-vars)]
+    (when (not (accumulate [found false _ s (ipairs in-use) &until found]
+                 (not= nil (?. s :variables k))))
+      ;; its error names the variables server knows
+      (expand-server-url server server-vars))))
+
 (fn base-url [schema ?opts]
   "The URL a client of schema sends requests to: ?opts.base-url, else the
-server at ?opts.server-index (default 1) with ?opts.server-vars applied,
-relative to ?opts.source-url, the spec's location.
+server at ?opts.server-index (default 1) with its ?opts.server-vars applied,
+relative to ?opts.source-url, the spec's location. Like a client, it takes
+the variables of the servers operations declare.
 ?opts — {:base-url :server-index :server-vars :source-url}"
   (or (?. ?opts :base-url)
-      (resolve-server-url (expand-server-url (pick-server schema
-                                                          (or (?. ?opts
-                                                                  :server-index)
-                                                              1))
-                                             (or (?. ?opts :server-vars) {}))
-                          (?. ?opts :source-url))))
+      (let [index (or (?. ?opts :server-index) 1)
+            server (pick-server schema index)
+            server-vars (or (?. ?opts :server-vars) {})
+            in-use [server]]
+        (each [_ item (pairs (or schema.paths {}))]
+          (when (= (type item) :table)
+            (each [method op-spec (pairs item)]
+              (when (and (. http-methods method) (= (type op-spec) :table))
+                (table.insert in-use (own-server item op-spec index))))))
+        (check-server-vars server in-use server-vars)
+        (resolve-server-url (expand-server-url server
+                                               (declared-vars server
+                                                              server-vars))
+                            (?. ?opts :source-url)))))
 
 (fn client [schema ?opts]
   "Build an API client from an OpenAPI 3.x schema.
@@ -285,27 +314,14 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
         server (when (not (?. ?opts :base-url))
                  (pick-server schema index))
         entries (schema-operations schema deref)
-        ;; the server of an operation that declares its own (or whose path
-        ;; item does): the one at the client's index, else its first
-        own-server (fn [path-item op-spec]
-                     (let [list (or (?. op-spec :servers)
-                                    (?. path-item :servers))]
-                       (when (and (= (type list) :table) (. list 1))
-                         (or (. list index) (. list 1)))))
         server-vars (or (?. ?opts :server-vars) {})
-        ;; each server takes the variables it declares; a variable no server
-        ;; in use declares is an error
-        vars-for #(collect [k v (pairs server-vars)]
-                    (when (?. $ :variables k) (values k v)))
+        vars-for #(declared-vars $ server-vars)
         _ (when (and server (not (?. ?opts :base-url)))
-            (let [in-use (doto (icollect [_ e (ipairs entries)]
-                                 (own-server e.path-item e.op-spec))
-                           (table.insert server))]
-              (each [k (pairs server-vars)]
-                (when (not (accumulate [found false _ s (ipairs in-use)
-                                        &until found]
-                             (not= nil (?. s :variables k))))
-                  (expand-server-url server server-vars)))))
+            (check-server-vars server
+                               (doto (icollect [_ e (ipairs entries)]
+                                       (own-server e.path-item e.op-spec index))
+                                 (table.insert server))
+                               server-vars))
         server-url (when (and server (not (?. ?opts :base-url)))
                      (expand-server-url server (vars-for server)))
         base-url (or (?. ?opts :base-url)
@@ -320,7 +336,7 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
         ;; client's unless :base-url was given
         operation-opts (fn [path-item op-spec]
                          (let [own (when (not (?. ?opts :base-url))
-                                     (own-server path-item op-spec))]
+                                     (own-server path-item op-spec index))]
                            (if (not own) client-opts
                                (let [url (expand-server-url own (vars-for own))]
                                  (doto (collect [k v (pairs client-opts)] k v)

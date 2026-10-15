@@ -1666,7 +1666,11 @@ answers candidates; one reply per line, each followed by |."
                                             ".a[?x==1].b[?c=1]"))))
               (it "rejects malformed filters"
                   (fn []
-                    (each [_ path (ipairs [".items[?state=running]"
+                    (each [_ path (ipairs [".items[?x==[1]]"
+                                           ".items[?n===a]"
+                                           ".items[?n==a]]"
+                                           ".items[?n=={}]"
+                                           ".items[?state=running]"
                                            ".items[?]"
                                            ".items[?state==\"x]"
                                            ".items[?size>]"])]

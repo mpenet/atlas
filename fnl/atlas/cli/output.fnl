@@ -116,9 +116,9 @@ from specs and servers."
 the text itself."
   (let [(ok v) (pcall json.decode raw true)]
     (if (and ok (or (not= (type v) :table) (= v json.null))) v
-        (raw:match "^\"") (fail)
-        (= raw "") (fail)
-        raw)))
+        ;; a quoted string, array or object that isn't JSON, or a mistyped
+        ;; operator
+        (raw:match "^[\"%[{=]") (fail) (= raw "") (fail) raw)))
 
 (fn parse-filter [path select-path]
   "(keep rest) for the [?PATH OP VALUE] or [?PATH] at the start of path: keep
@@ -129,8 +129,10 @@ says whether an element matches."
         condition (path:sub 3 (- close 1))
         (lhs op rhs) (condition:match "^%s*(.-)%s*([=!<>]=?)%s*(.-)%s*$")
         field (or lhs (condition:match "^%s*(.-)%s*$"))
-        compare (when op (or (. comparisons op) (fail)))]
-    (when (not (field:match "^%.?[%w_%-]+[%w_%-%.]*$"))
+        compare (when op (or (. comparisons op) (fail)))
+        rest (path:sub (+ close 1))]
+    (when (not (and (field:match "^%.?[%w_%-]+[%w_%-%.]*$")
+                    (or (= rest "") (rest:match "^[%.%[{]"))))
       (fail))
     (values (if compare
                 (let [value (filter-value rhs fail)
@@ -143,7 +145,7 @@ says whether an element matches."
                          (and (orderable v) (orderable value) (compare v value)))))
                 #(let [v (select-path $ field)]
                    (and (not= nil v) (not= json.null v) (not= false v))))
-            (path:sub (+ close 1)))))
+            rest)))
 
 (fn select-path [data path]
   "Value at path in data: .field, [N] (0-based), [] to map the rest of the path

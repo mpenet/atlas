@@ -284,7 +284,7 @@ A 4xx or 5xx response is printed on stderr, after an `HTTP <status>` line, and a
 | `[?PATH OP VALUE]` | The elements of an array whose PATH compares to VALUE; the rest of the path applies to each |
 | `[?PATH]` | The elements of an array where PATH is present and not null or false |
 
-In a filter, OP is `==`, `!=`, `<`, `<=`, `>` or `>=`. PATH is a field or a dotted path into the element (`tags.env`). VALUE is JSON (`"running"`, `10`, `true`, `null`) or else a bare word, taken as a string. A missing field equals `null`. `<`, `<=`, `>` and `>=` compare two numbers or two strings and never match anything else. Filters in a row (`[?a==1][?b==2]`) narrow the same array. A malformed filter is an error.
+In a filter, OP is `==`, `!=`, `<`, `<=`, `>` or `>=`. PATH is a field or a dotted path into the element (`tags.env`). VALUE is a JSON string, number, `true`, `false` or `null`, or else a bare word, taken as a string. A missing field equals `null`. `<`, `<=`, `>` and `>=` compare two numbers or two strings and never match anything else. Filters in a row (`[?a==1][?b==2]`) narrow the same array. A malformed filter is an error.
 
 ```sh
 atlas op petstore get-pet-by-id 7 --select .category.name
@@ -400,13 +400,13 @@ The second form is the configuration file of Claude Desktop and most other clien
 
 Offer as few as the task needs: every tool's description and schema goes into the agent's context, and above 100 tools atlas warns. A large API (GitHub's read-only operations alone take about 900 KB) needs a list.
 
-**Tools.** A tool is named like the operation in `atlas op` (`list-instances`). Its arguments are the path, query and header parameters, by name, and the request body as `body`; a name that two parameters share takes their location as prefix (`query.id`). Headers and query parameters the profile or its authentication adds are not arguments. The input schema is the spec's, in JSON Schema 2020-12 (OpenAPI 3.0's `nullable` and boolean `exclusiveMinimum`/`exclusiveMaximum` converted; recursive schemas as `$defs`). Annotations say which tools only read (`readOnlyHint`), and which may destroy (DELETE, PUT, PATCH) or are idempotent.
+**Tools.** A tool is named like the operation in `atlas op` (`list-instances`). Its arguments are the path, query and header parameters, by name, and the request body as `body`; a name that two parameters share takes their location as prefix (`query.id`). Headers and query parameters the profile or its authentication adds are not arguments. The input schema is the spec's, in JSON Schema 2020-12 (OpenAPI 3.0's `nullable` and boolean `exclusiveMinimum`/`exclusiveMaximum` converted; recursive schemas as `$defs`), without the body's read-only properties. Annotations say which tools only read (`readOnlyHint`), and which may destroy (DELETE, PUT, PATCH) or are idempotent.
 
-**Calls.** atlas checks the arguments like `atlas op` does (required parameters, the body against its schema) and sends nothing when they are wrong. The result is the response body: JSON, or text. A 4xx or 5xx response, a network error or wrong arguments come back as a tool error with the status and body, so the agent can correct itself. Profile headers, retries, pagination and `-v` (on stderr) apply as for `atlas op`.
+**Calls.** atlas checks the arguments before sending anything: required ones, parameter values and the body against their schemas. A JSON body that isn't an object or array (a string, a number) is sent as JSON. The result is the response body: JSON, or text. A 4xx or 5xx response, a network error or wrong arguments come back as a tool error with the status and body, so the agent can correct itself. Profile headers, retries, pagination and `-v` (on stderr) apply as for `atlas op`.
 
 **Workflows.** `--arazzo=NAME` adds the workflows of an Arazzo context or file as tools named `workflow.WORKFLOW-ID`, with the workflow's inputs as arguments. They run with the context's profile, else the profile `atlas mcp` names, and return the workflow's outputs. `atlas mcp --arazzo=NAME` without a profile offers the workflows alone. They are offered whatever they do: list them in the context only if the agent may run them.
 
-**Protocol.** atlas speaks MCP 2026-07-28, without sessions, and the earlier versions that open with `initialize` (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05), over stdio. It reads one JSON-RPC message per line on stdin and writes the answers on stdout; logs go to stderr. It stops when stdin closes.
+**Protocol.** atlas speaks MCP 2026-07-28, without sessions, and the earlier versions that open with `initialize` (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05), over stdio. It reads one JSON-RPC message (or batch) per line on stdin and writes the answers on stdout; logs go to stderr. It stops when stdin closes. External auth tools and the browser of OAuth flows never share its stdin or stdout.
 
 ## Authentication
 

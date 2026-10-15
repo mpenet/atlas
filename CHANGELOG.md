@@ -20,6 +20,8 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 ### Fixed
 
 - Content types that only start like JSON (`application/json-seq`, `application/jsonl`) are no longer decoded as JSON.
+- YAML with an alias inside its own anchor, or whose aliases expand past a million nodes, is refused instead of crashing atlas or making it spin; this covers YAML specs and Arazzo documents too.
+- External auth tools run with stdin from `/dev/null` (unless given the request to sign), and the browser of OAuth flows with stdin and stdout on `/dev/null`.
 
 ## [1.0.0-beta4] - 2026-10-15
 

@@ -540,13 +540,27 @@ JSON or YAML one); otherwise -d is sent as given, as JSON when it is JSON."
               true)
       (values p.body (and (= (type p.body) :string) (pcall json.decode p.body)))))
 
+(local http-methods {:GET true
+                     :HEAD true
+                     :POST true
+                     :PUT true
+                     :PATCH true
+                     :DELETE true
+                     :OPTIONS true
+                     :TRACE true
+                     :CONNECT true})
+
 (fn run-http [p env]
-  (when (or (not p.schema) (next p.path-params))
+  ;; a method alone is a forgotten URL, not a path named after the method
+  (when (or (not p.schema) (next p.path-params)
+            (and (not p.operation) (. http-methods (p.schema:upper))))
     (die http-usage))
   (let [config env.config
         (method target) (if p.operation
                             (values (p.schema:upper) p.operation)
                             (values "GET" p.schema))
+        _ (when (not (method:match "^[!#$%%&'*+%-.^_`|~%w]+$"))
+            (die (.. "invalid HTTP method: " p.schema)))
         profile (find-profile config p.profile)
         _ (when (and p.profile (not profile))
             (die (.. "Profile not found: " p.profile)))

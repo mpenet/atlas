@@ -1577,6 +1577,20 @@
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.out:find "Options (http):" 1 true))
                     (assert.are.equal 0 (length r.requests)))))
+            (it "needs a URL after a method, and takes only valid methods"
+                (fn []
+                  (let [r (atlas-run ["http" "DELETE" "--profile=p"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "Usage: atlas http" 1 true))
+                    (assert.are.equal 0 (length r.requests)))
+                  (let [r (atlas-run ["http"
+                                      "/a"
+                                      "/b"
+                                      "--base-url=https://h.test"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "invalid HTTP method: /a" 1
+                                                  true))
+                    (assert.are.equal 0 (length r.requests)))))
             (it "fails on a profile it doesn't know"
                 (fn []
                   (let [r (atlas-run ["http" "/x" "--profile=nope"])]

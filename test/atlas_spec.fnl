@@ -869,6 +869,22 @@
                   (assert.are.equal "https://specs.test/"
                                     (atlas.base-url {:openapi "3.0.0"}
                                                     {:source-url "https://specs.test/openapi.json"}))))
+            (it "takes the variables of other servers in use, as clients do"
+                (fn []
+                  (let [schema {:openapi "3.0.0"
+                                :servers [{:url "https://h.test/{ver}"
+                                           :variables {:ver {:default "v1"}}}]
+                                :paths {"/echo" {:servers [{:url "https://{zone}.h.test"
+                                                            :variables {:zone {:default "a"}}}]
+                                                 :get {:operationId "echo"}}}}]
+                    (assert.are.equal "https://h.test/v1"
+                                      (atlas.base-url schema
+                                                      {:server-vars {:zone "b"}}))
+                    (assert.are.equal "https://b.h.test/echo"
+                                      ((. (atlas.client schema
+                                                        {:server-vars {:zone "b"}
+                                                         :http-fn #nil})
+                                          :echo :url-for))))))
             (it "rejects unknown server variables"
                 (fn []
                   (let [(ok err) (pcall atlas.base-url multi-server-schema
