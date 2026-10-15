@@ -23,6 +23,12 @@
             (error (.. "environment variable not set: " var-name))))
       s))
 
+(fn param [params key]
+  "params[key] with env:NAME read from the environment, or nil."
+  (let [v (?. params key)]
+    (when (not= nil v)
+      (expand-env v))))
+
 (fn required-param [auth-config key]
   (let [v (?. auth-config :params key)]
     (assert (and v (not= v ""))
@@ -43,9 +49,12 @@
 
 (fn check-params [auth-config]
   "Raise naming the first parameter auth-config's method needs and lacks;
-checked when authenticating, so a profile can be listed or shown anyway."
+checked when authenticating, so a profile can be listed or shown anyway. An
+env: value is only read where it is used (a cached token needs none)."
   (each [_ k (ipairs (or (. required-params auth-config.name) []))]
-    (required-param auth-config k)))
+    (let [v (?. auth-config :params k)]
+      (assert (and v (not= v ""))
+              (string.format "%s auth requires params.%s" auth-config.name k)))))
 
 (fn random-string [n]
   "n characters from [A-Za-z0-9] read from /dev/urandom, without modulo bias."
@@ -151,7 +160,7 @@ used only with the auth settings that obtained it."
   (let [form (client-form params
                           {:grant_type "refresh_token"
                            :refresh_token cached.refresh_token})]
-    (let [(ok resp) (pcall post-form params.token_url form net)]
+    (let [(ok resp) (pcall post-form (param params :token_url) form net)]
       (when (and ok (util.success? resp.status))
         (store-token resp profile-name params cached)))))
 
@@ -161,17 +170,18 @@ used only with the auth settings that obtained it."
   (let [form {:grant_type "client_credentials"
               :client_id (expand-env params.client_id)
               :client_secret (expand-env (or params.client_secret ""))}]
-    (when params.scope (tset form :scope params.scope))
-    (when params.audience (tset form :audience params.audience))
-    (store-token (post-form params.token_url form net) profile-name params)))
+    (tset form :scope (param params :scope))
+    (tset form :audience (param params :audience))
+    (store-token (post-form (param params :token_url) form net) profile-name
+                 params)))
 
 ;; ---- device authorization ----
 
 (fn request-device-code [params net]
   "Start the device flow; returns the device authorization response body."
   (let [form (client-form params {})]
-    (when params.scope (tset form :scope params.scope))
-    (let [resp (post-form (or params.device_authorization_url
+    (tset form :scope (param params :scope))
+    (let [resp (post-form (or (param params :device_authorization_url)
                               (error "oauth-device-authorization requires device_authorization_url"))
                           form net)]
       (assert (util.success? resp.status)
@@ -192,7 +202,7 @@ returns the stored token, raising on expiry, denial or timeout."
   (var token nil)
   (while (and (not token) (< (os.time) deadline))
     (socket.sleep interval)
-    (let [(ok resp) (pcall post-form params.token_url
+    (let [(ok resp) (pcall post-form (param params :token_url)
                            (client-form params
                                         {:grant_type "urn:ietf:params:oauth:grant-type:device_code"
                                          :device_code device.device_code})
@@ -325,10 +335,10 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
                      :client_id (expand-env params.client_id)
                      :redirect_uri redirect-uri
                      :state state
-                     :scope (or params.scope "")
+                     :scope (or (param params :scope) "")
                      :code_challenge (digest.pkce-challenge code-verifier)
                      :code_challenge_method "S256"}]
-    (let [auth-url (util.append-query params.authorize_url auth-params)]
+    (let [auth-url (util.append-query (param params :authorize_url) auth-params)]
       (io.stderr:write (.. "Opening browser for authentication...\n"))
       (io.stderr:write (.. "If browser does not open, visit:\n" auth-url "\n"))
       ((or (?. ?opts :open-browser) open-browser) auth-url)
@@ -338,12 +348,14 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
                                : code
                                :redirect_uri redirect-uri
                                :code_verifier code-verifier})]
-        (store-token (post-form params.token_url form net) profile-name params)))))
+        (store-token (post-form (param params :token_url) form net)
+                     profile-name params)))))
 
 ;; ---- external tool ----
 
 (fn run-external [params stdin-json]
-  (assert params.commandline "external-tool auth requires params.commandline")
+  (assert (param params :commandline)
+          "external-tool auth requires params.commandline")
   (var tmp-path nil)
   (let [cmd (if stdin-json
                 (let [tmp (os.tmpname)
@@ -353,9 +365,9 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
                   (f:close)
                   (set tmp-path tmp)
                   (.. "/bin/sh -c "
-                      (shell-quote (.. "( " params.commandline " ) < "
+                      (shell-quote (.. "( " (param params :commandline) " ) < "
                                        (shell-quote tmp)))))
-                (.. "/bin/sh -c " (shell-quote params.commandline)))
+                (.. "/bin/sh -c " (shell-quote (param params :commandline))))
         h (io.popen cmd)]
     (assert h "failed to start external auth command")
     (let [out (h:read "*a")

@@ -218,6 +218,37 @@
                       (clean-token profile)
                       (assert.are.same {:authorization "Bearer cached"} h)
                       (assert.are.equal 0 (length calls))))))
+            (it "uses a valid cached token without reading env: parameters"
+                (fn []
+                  (let [(http calls) (seq-mock)
+                        auth (reload-auth http)
+                        profile (tmp-profile)
+                        cfg {:name "oauth-client-credentials"
+                             :params {:token_url "https://id.example/token"
+                                      :client_id "env:ATLAS_TEST_UNSET_CID"
+                                      :client_secret "env:ATLAS_TEST_UNSET_CS"}}]
+                    (auth.save-token profile
+                                     {:access_token "tok"
+                                      :expires_at (+ (os.time) 3600)
+                                      :issuer "https://id.example/token env:ATLAS_TEST_UNSET_CID"})
+                    (let [(ok h) (pcall auth.get-headers profile cfg {})]
+                      (clean-token profile)
+                      (assert.is_true ok h)
+                      (assert.are.same {:authorization "Bearer tok"} h)
+                      (assert.are.equal 0 (length calls))))))
+            (it "reads env: in URL parameters too"
+                (fn []
+                  (let [(http calls) (seq-mock (ok-resp (json-body {:access_token "t"})))
+                        auth (reload-auth http)
+                        profile (tmp-profile)]
+                    (auth.get-headers profile
+                                      {:name "oauth-client-credentials"
+                                       :params {:token_url "env:HOME"
+                                                :client_id "c"
+                                                :client_secret "s"}}
+                                      {})
+                    (clean-token profile)
+                    (assert.are.equal (os.getenv :HOME) (. calls 1 :url)))))
             (it "ignores a token another provider or client issued"
                 (fn []
                   (let [(http calls) (seq-mock (ok-resp (json-body {:access_token "fresh"})))
