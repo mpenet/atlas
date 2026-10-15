@@ -122,8 +122,16 @@ jobs:
           awk -v head="## [$v]" 'index($0, head) == 1 {on = 1; next} /^## \[/ {on = 0} on' CHANGELOG.md > notes.md
           test -s notes.md
 
+      # releases are immutable once published: create a draft, upload every
+      # file, then publish
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           body_path: notes.md
+          draft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
