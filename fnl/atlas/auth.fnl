@@ -252,9 +252,11 @@ returns the stored token, raising on expiry, denial or timeout."
   (let [h (io.popen "uname -s")
         sys (if h (let [s (h:read :*l)] (h:close) s) "Linux")
         quoted (shell-quote url)]
+    ;; the browser gets neither atlas's stdin nor its stdout, which atlas mcp
+    ;; uses for the protocol
     (if (= sys "Darwin")
-        (os.execute (.. "open " quoted))
-        (os.execute (.. "xdg-open " quoted " 2>/dev/null &")))))
+        (os.execute (.. "open " quoted " < /dev/null > /dev/null"))
+        (os.execute (.. "xdg-open " quoted " < /dev/null > /dev/null 2>&1 &")))))
 
 (fn start-local-server [?port]
   (let [srv (socket.tcp)
@@ -367,7 +369,11 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
                   (.. "/bin/sh -c "
                       (shell-quote (.. "( " (param params :commandline) " ) < "
                                        (shell-quote tmp)))))
-                (.. "/bin/sh -c " (shell-quote (param params :commandline))))
+                ;; never atlas's own stdin: under atlas mcp it carries the
+                ;; protocol
+                (.. "/bin/sh -c "
+                    (shell-quote (.. "( " (param params :commandline)
+                                     " ) < /dev/null"))))
         h (io.popen cmd)]
     (assert h "failed to start external auth command")
     (let [out (h:read "*a")

@@ -226,6 +226,35 @@
                                     :body {:name "Rex"}}
                                    (mcp.request client.replace-pet
                                                 {:petId 1 :body {:name "Rex"}}))))
+            (it "sends a JSON body that isn't an object as JSON"
+                (fn []
+                  (assert.are.equal "\"x\""
+                                    (. (mcp.request client.replace-pet
+                                                    {:petId 1 :body "x"})
+                                       :body))
+                  (assert.are.equal "null"
+                                    (. (mcp.request client.replace-pet
+                                                    {:petId 1 :body json.null})
+                                       :body))))
+            (it "checks required arguments and parameter values"
+                (fn []
+                  (each [_ [args message] (ipairs [[{:X-Org "o"}
+                                                    "missing required argument: petId"]
+                                                   [{:petId "7" :X-Org "o"}
+                                                    "petId: expected integer"]
+                                                   [{:petId 7
+                                                     :X-Org "o"
+                                                     :fields "a"}
+                                                    "fields: expected array"]])]
+                    (let [(ok err) (pcall mcp.request client.get-pet args)]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find message 1 true))))
+                  (let [(ok err) (pcall mcp.request client.replace-pet
+                                        {:petId 1})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "missing required argument: body" 1
+                                         true)))))
             (it "rejects arguments the tool doesn't take"
                 (fn []
                   (let [(ok err) (pcall mcp.request client.get-pet

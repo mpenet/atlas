@@ -518,6 +518,14 @@
                                                             :output "bearer-token"}}
                                                   {})]
                     (assert.are.equal "Bearer my-token" headers.authorization))))
+            (it "doesn't give the tool atlas's own stdin"
+                (fn []
+                  ;; under atlas mcp, stdin carries the protocol
+                  (let [script "local a = require(\"atlas.auth\"); local h = a[\"get-headers\"](\"p\", {name = \"external-tool\", params = {commandline = \"head -c 6; echo tok\", output = \"bearer-token\"}}, {}); io.write(h.authorization)"
+                        h (io.popen (.. "printf secret | lua -e '" script "'"))
+                        out (h:read :*a)]
+                    (h:close)
+                    (assert.are.equal "Bearer tok" out))))
             (it "bearer-token mode: trims whitespace from command output"
                 (fn []
                   (let [(http) (seq-mock)

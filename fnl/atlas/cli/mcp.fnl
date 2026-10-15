@@ -1,6 +1,15 @@
 ;; ABOUTME: The MCP server of atlas mcp: operations as tools with JSON Schema
 ;; ABOUTME: 2020-12 inputs, and JSON-RPC over stdio for modern and legacy clients.
 (local json (require :atlas.json))
+(local validate (require :atlas.validate))
+
+(fn object? [v]
+  (and (= (type v) :table) (not= v json.null) (not (json.array? v))))
+
+(fn check-arguments [arguments]
+  "Raise unless a tool call's arguments are an object."
+  (when (not (object? arguments))
+    (error "arguments must be an object" 0)))
 
 ;; ---- schemas ----
 
@@ -258,14 +267,28 @@ refs resolved) are inputs-schema."
                    :idempotentHint false
                    :openWorldHint true}}))
 
+(fn argument-errors [op params arguments]
+  "Required arguments missing, and parameter values their schemas refuse."
+  (let [errors []]
+    (each [_ p (ipairs params)]
+      (let [v (. arguments p.arg)]
+        (if (not= nil v)
+            (each [_ e (ipairs (validate.check p.schema v p.arg))]
+              (table.insert errors e))
+            p.required
+            (table.insert errors (.. "missing required argument: " p.arg)))))
+    (when (and op.has-body (?. op.spec :requestBody :required)
+               (= nil arguments.body))
+      (table.insert errors "missing required argument: body"))
+    errors))
+
 (fn request [op arguments ?opts]
-  "The op.invoke request for a tool call's arguments."
-  (when (or (not= (type arguments) :table) (= arguments json.null)
-            (json.array? arguments))
-    (error "arguments must be an object" 0))
-  (let [by-arg (collect [_ p (ipairs (tool-params op (or ?opts {})))]
-                 p.arg
-                 p)
+  "The op.invoke request for a tool call's arguments; raises for arguments
+the tool doesn't take, missing ones, and parameter values their schemas
+refuse."
+  (check-arguments arguments)
+  (let [params (tool-params op (or ?opts {}))
+        by-arg (collect [_ p (ipairs params)] p.arg p)
         req {:path {} :query {} :headers {}}]
     (each [arg v (pairs arguments)]
       (if (and (= arg :body) op.has-body) (set req.body v)
@@ -274,10 +297,18 @@ refs resolved) are inputs-schema."
               :path (tset req.path p.name v)
               :query (tset req.query p.name v)
               :header (tset req.headers p.name v)))))
+    (let [errors (argument-errors op params arguments)]
+      (when (next errors)
+        (error (table.concat errors "\n") 0)))
     {:path req.path
      :query (when (next req.query) req.query)
      :headers (when (next req.headers) req.headers)
-     :body req.body}))
+     ;; a JSON string, number or null is sent as JSON, not as the body's text
+     :body (if (and (not= nil req.body) (not (object? req.body))
+                    (not (json.array? req.body)) op.content-type
+                    (: (op.content-type:lower) :match :json))
+               (json.encode req.body)
+               req.body)}))
 
 ;; ---- protocol ----
 
@@ -300,9 +331,6 @@ refs resolved) are inputs-schema."
 (fn member? [list x]
   (accumulate [found false _ v (ipairs list) &until found]
     (= v x)))
-
-(fn object? [v]
-  (and (= (type v) :table) (not= v json.null) (not (json.array? v))))
 
 (fn valid-id? [id]
   "MCP request ids are strings or integers."
@@ -445,4 +473,10 @@ A batch (an array of messages) gets an array of responses."
           (write-line (valid-utf8 (json.encode response))))))
     (set line (read-line))))
 
-{: json-schema : tool : workflow-tool : request : handler : serve}
+{: json-schema
+ : tool
+ : workflow-tool
+ : request
+ : check-arguments
+ : handler
+ : serve}

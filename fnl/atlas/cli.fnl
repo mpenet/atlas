@@ -611,12 +611,14 @@ else the read-only ones (all with --allow-writes), by name."
   "The tools/call result of op for arguments: the response body, or a tool
 error for arguments the operation can't take and for HTTP errors."
   (let [(ok req) (pcall mcp.request op arguments tool-opts)
-        errors (if ok (request-problems op req opts) [])]
-    (if (not ok) (tool-error req) (next errors)
+        errors (if ok (check-body op req.body) [])]
+    (if (not ok) (tool-error (strip-location (tostring req))) (next errors)
         (tool-error (table.concat errors "\n"))
         (let [(sent resp) (pcall op.invoke req)
               text (when sent (tool-text resp.body))]
-          (if (not sent) (tool-error (.. "request failed: " (tostring resp)))
+          (if (not sent)
+              (tool-error (.. "request failed: "
+                              (strip-location (tostring resp))))
               (>= resp.status 400)
               (tool-error (.. "HTTP " resp.status (if text (.. "\n" text) "")))
               {:content [{:type :text :text (or text (.. "HTTP " resp.status))}]
@@ -655,14 +657,17 @@ p.arazzo, run with the context's profile, else the profile atlas mcp names."
       (let [schema (arazzo.workflow-inputs context.doc wf)]
         [(mcp.workflow-tool wf schema)
          (fn [inputs]
-           (let [errors (if schema (validate.check schema inputs :inputs) [])]
+           (let [(object err) (pcall mcp.check-arguments inputs)
+                 errors (if (not object) [err] schema
+                            (validate.check schema inputs :inputs) (next inputs)
+                            ["the workflow takes no inputs"] [])]
              (if (next errors) (tool-error (table.concat errors "\n"))
                  (let [(ok result) (run wf inputs)]
                    (if ok
                        {:content [{:type :text
                                    :text (json.encode (or result.outputs {}))}]
                         :isError false}
-                       (tool-error (tostring result)))))))]))))
+                       (tool-error (strip-location (tostring result))))))))]))))
 
 (fn run-mcp [p env]
   (when (or p.operation (next p.path-params))
@@ -671,7 +676,11 @@ p.arazzo, run with the context's profile, else the profile atlas mcp names."
         _ (when p.arazzo
             (each [_ entry (ipairs (workflow-tools p env))]
               (table.insert entries entry)))
-        calls (collect [_ [tool call] (ipairs entries)] tool.name call)
+        calls (accumulate [calls {} _ [tool call] (ipairs entries)]
+                (if (. calls tool.name)
+                    (die (.. "two tools would be named " tool.name
+                             ": rename one of the workflows"))
+                    (doto calls (tset tool.name call))))
         handle (mcp.handler {:tools (icollect [_ [tool] (ipairs entries)] tool)
                              :call #((. calls $1) $2)
                              :version atlas.version

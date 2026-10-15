@@ -1774,6 +1774,54 @@
                     (assert.are.equal 2 (length r.requests))
                     ;; a failing workflow is a tool error
                     (assert.is_true (. r.responses 3 :result :isError)))))
+            (it "checks body and parameter values, and hides atlas's internals"
+                (fn []
+                  (let [r (mcp-run ["mcp" "p" "--allow-writes" "--retry=0"]
+                                   [(call 2 "add-pet" {:body "Rex"})
+                                    (call 3 "list-pets" {:status "lost"})
+                                    (call 4 "get-pet" {})
+                                    (call 5 "get-pet" {:id "1"})]
+                                   {"GET https://api.test/pets/1" #(error "connection refused")})
+                        text #(. r.responses $ :result :content 1 :text)]
+                    (assert.are.equal 1 (length r.requests))
+                    (each [i _ (ipairs r.responses)]
+                      (assert.is_true (. r.responses i :result :isError)))
+                    (assert.is_truthy (: (text 1) :find "body: expected object"
+                                         1 true))
+                    (assert.is_truthy (: (text 2) :find "status:" 1 true))
+                    (assert.is_truthy (: (text 3) :find
+                                         "missing required argument: id" 1 true))
+                    (assert.is_nil (: (text 4) :find "%.lua:"))
+                    (assert.is_truthy (: (text 4) :find "connection refused" 1
+                                         true)))))
+            (it "takes only an object as a workflow's arguments"
+                (fn []
+                  (let [r (mcp-run ["mcp" "--arazzo=flows"]
+                                   [(call 2 "workflow.fetchPet" [1])
+                                    (call 3 "workflow.fetchPet" "x")])]
+                    (assert.are.equal 0 (length r.requests))
+                    (each [i _ (ipairs r.responses)]
+                      (assert.is_true (. r.responses i :result :isError))
+                      (assert.are.equal "arguments must be an object"
+                                        (. r.responses i :result :content 1
+                                           :text))))))
+            (it "refuses two workflows that make the same tool name"
+                (fn []
+                  (let [json (require :atlas.json)
+                        file (.. (os.tmpname) ".json")]
+                    (with-open [f (io.open file :w)]
+                      (f:write (json.encode {:arazzo "1.0.0"
+                                             :info {:title "t" :version "1"}
+                                             :sourceDescriptions [{:name "api"
+                                                                   :url "test/fixtures/cli-api.json"}]
+                                             :workflows [{:workflowId "get it"
+                                                          :steps []}
+                                                         {:workflowId "get_it"
+                                                          :steps []}]})))
+                    (let [r (mcp-run ["mcp" (.. "--arazzo=" file)] [list-tools])]
+                      (os.remove file)
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find "workflow.get_it" 1 true))))))
             (it "shows its usage"
                 (fn []
                   (let [r (mcp-run ["mcp"] [])]
