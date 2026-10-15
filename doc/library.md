@@ -160,6 +160,8 @@ The trailing `?opts` table accepts the same `:query`, `:headers` and `:timeout` 
 ```
 
 - JSON responses (`application/json`, `*/*+json`) are decoded into Lua tables, arrays marked as such (see [JSON values](#json-values)); malformed JSON falls back to the raw string.
+- JSON Lines (`application/x-ndjson`, `application/ndjson`, `application/jsonl`) are decoded into an array of the lines' values, blank lines skipped; a line that isn't JSON leaves the whole body a string.
+- YAML responses (`application/yaml`, `application/x-yaml`, `*/yaml`, `*/*+yaml`) are decoded like JSON; malformed YAML stays a string.
 - Other content types (text, HTML, XML, …) are returned as strings, untouched.
 - Responses without a `Content-Type` are decoded when they parse as JSON.
 - An empty body produces `nil` for `:body`.

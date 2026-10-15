@@ -239,6 +239,8 @@ When a GET response is a JSON array and has a `Link: <…>; rel="next"` header, 
 
 ## Responses
 
+JSON, JSON Lines and YAML responses are decoded, so `--select` and every `--output` format work on them; a JSON Lines response is an array of its lines' values. Other content (text, HTML, XML, …) is printed as received.
+
 ### Output formats
 
 | `--output` | Prints |

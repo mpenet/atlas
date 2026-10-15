@@ -4,11 +4,17 @@
 (local tls (require :atlas.tls))
 (local json (require :atlas.json))
 (local util (require :atlas.util))
+(local yaml (require :atlas.yaml))
+
+(fn media-type [content-type]
+  "The type/subtype of a content type, in lower case, without parameters."
+  (when content-type
+    (: (content-type:lower) :match "^%s*([^;%s]*)")))
 
 (fn json-type? [content-type]
-  (let [ct (when content-type (content-type:lower))]
-    (and ct (or (ct:match "^application/json")
-                (ct:match "^[%w%.%-]+/[%w%.%-]+%+json")))))
+  (let [mt (media-type content-type)]
+    (and mt (or (= mt "application/json")
+                (mt:match "^[%w%.%-]+/[%w%.%-]+%+json$")))))
 
 (fn multipart-boundary [parts]
   "A boundary string that does not occur in any part."
@@ -77,13 +83,43 @@ determines one (multipart boundaries)."
                                     (tostring payload)))
           payload))))
 
+(local json-lines-types
+       {"application/x-ndjson" true
+        "application/ndjson" true
+        "application/jsonl" true
+        "application/jsonlines" true
+        "application/x-jsonlines" true})
+
+(fn json-lines-type? [content-type]
+  (. json-lines-types (or (media-type content-type) "")))
+
+(fn yaml-type? [content-type]
+  (let [mt (media-type content-type)]
+    (and mt (or (= mt "application/x-yaml") (mt:match "^[%w%.%-]+/yaml$")
+                (mt:match "^[%w%.%-]+/[%w%.%-]+%+yaml$")))))
+
+(fn decode-json-lines [raw]
+  "An array of the JSON values of raw's non-blank lines."
+  (json.array (icollect [line (raw:gmatch "[^\n]+")]
+                (when (line:match "%S")
+                  ;; CRLF line ends too
+                  (json.decode (line:match "^%s*(.-)%s*$") true)))))
+
 (fn decode-response [status headers raw]
-  "Build a response; JSON content (or untyped content that parses) is decoded."
+  "Build a response; JSON, JSON Lines (as an array) and YAML content, or
+untyped content that parses as JSON, is decoded. Content that doesn't parse
+stays text."
   (let [content-type (util.header headers "content-type")
+        ;; nulls are kept: the body is shown as received
+        decode (if (or (json-type? content-type) (= nil content-type))
+                   #(json.decode $ true)
+                   (json-lines-type? content-type)
+                   decode-json-lines
+                   (yaml-type? content-type)
+                   #(yaml.parse $ true))
         body (when (> (length raw) 0)
-               (if (or (json-type? content-type) (= nil content-type))
-                   ;; nulls are kept: the body is shown as received
-                   (let [(ok val) (pcall json.decode raw true)]
+               (if decode
+                   (let [(ok val) (pcall decode raw)]
                      (if ok val raw))
                    raw))]
     {:status status :headers headers :body body :raw raw}))

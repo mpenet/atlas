@@ -546,3 +546,53 @@
                     (assert.is_false ok)
                     (assert.is_truthy (: (tostring err) :find
                                          "too many redirects" 1 true)))))))
+
+(describe "http.decode-response for YAML and JSON Lines"
+          (fn []
+            (it "decodes YAML content types"
+                (fn []
+                  (each [_ ct (ipairs ["application/yaml"
+                                       "application/x-yaml"
+                                       "text/yaml; charset=utf-8"
+                                       "application/openapi+yaml"])]
+                    (let [r (http.decode-response 200 {:content-type ct}
+                                                  "a: 1\nb: [x, y]\n")]
+                      (assert.are.same {:a 1 :b ["x" "y"]} r.body)
+                      (assert.are.equal "a: 1\nb: [x, y]\n" r.raw)))))
+            (it "keeps malformed YAML as text"
+                (fn []
+                  (assert.are.equal "a: [1"
+                                    (. (http.decode-response 200
+                                                             {:content-type "application/yaml"}
+                                                             "a: [1")
+                                       :body))))
+            (it "decodes JSON Lines as an array"
+                (fn []
+                  (each [_ ct (ipairs ["application/x-ndjson"
+                                       "application/jsonl"
+                                       "application/jsonlines"
+                                       "application/ndjson"])]
+                    (assert.are.same [{:a 1} {:a 2} 3]
+                                     (. (http.decode-response 200
+                                                              {:content-type ct}
+                                                              "{\"a\":1}\n\n{\"a\":2}\r\n3\n")
+                                        :body)))))
+            (it "takes only application/json and +json types for JSON"
+                (fn []
+                  (assert.are.equal "{\"a\":1}"
+                                    (. (http.decode-response 200
+                                                             {:content-type "application/json-seq"}
+                                                             "{\"a\":1}")
+                                       :body))
+                  (assert.are.same {:a 1}
+                                   (. (http.decode-response 200
+                                                            {:content-type "application/json ; charset=utf-8"}
+                                                            "{\"a\":1}")
+                                      :body))))
+            (it "keeps JSON Lines with a bad line as text"
+                (fn []
+                  (assert.are.equal "{\"a\":1}\nnope\n"
+                                    (. (http.decode-response 200
+                                                             {:content-type "application/x-ndjson"}
+                                                             "{\"a\":1}\nnope\n")
+                                       :body))))))
