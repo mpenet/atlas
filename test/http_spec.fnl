@@ -321,6 +321,20 @@
                                               :headers creds})
                       (assert.are.same {:accept "application/json"}
                                        (. seen 2 :headers)))))
+              (it "keeps a query API key on the same origin only"
+                  (fn []
+                    (let [(send seen) (site {"https://a.test/x?k=K&n=1" (moved "/y")
+                                             "https://a.test/y?k=K" (moved "https://b.test/z")
+                                             "https://b.test/z" {:status 200
+                                                                 :headers {}}})
+                          resp (http.follow-redirects send
+                                                      {:method "GET"
+                                                       :url "https://a.test/x"
+                                                       :query {:k "K" :n "1"}
+                                                       :sensitive-query [:k]
+                                                       :headers {}})]
+                      (assert.are.equal 200 resp.status)
+                      (assert.are.equal 3 (length seen)))))
               (it "drops the headers authentication added, whatever their name"
                   (fn []
                     (let [(send seen) (site {"https://a.test/x" (moved "https://b.test/y")

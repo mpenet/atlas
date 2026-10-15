@@ -144,6 +144,18 @@
                                         :body))
                     (f {:method "POST" :url "https://h/o" :headers {}})
                     (assert.are.equal 2 (length seen)))))
+            (it "leaves bodies that only look like an array alone"
+                (fn []
+                  (let [first {:status 200
+                               :headers {:link "<https://h/b>; rel=\"next\""}
+                               :body "[1]\n[2]"
+                               :raw "[1]\n[2]"}
+                        (http seen) (site {"https://h/a" first
+                                           "https://h/b" (page [3])})
+                        f (paginate.wrap http {})
+                        resp (f {:method "GET" :url "https://h/a" :headers {}})]
+                    (assert.are.equal first resp)
+                    (assert.are.equal 1 (length seen)))))
             (it "returns what it has when a later page fails"
                 (fn []
                   (let [(http) (site {"https://h/a" (page [1] "https://h/b")})

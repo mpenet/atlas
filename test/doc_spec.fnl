@@ -127,6 +127,20 @@
                                                                    "null"]}}]})]
                     (assert.is_truthy (text:find "q                string | null"
                                                  1 true)))))
+            (it "takes a required that is not a list"
+                (fn []
+                  (let [text (build "/x" "post"
+                                    {:requestBody {:content {"application/json" {:schema {:type "object"
+                                                                                          :required true
+                                                                                          :properties {:a {:type "string"}}}}}}})]
+                    (assert.is_truthy (text:find "a                string" 1
+                                                 true)))
+                  (let [text (build-workflow {:workflowId "w" :steps []}
+                                             {:type "object"
+                                              :required true
+                                              :properties {:a {:type "string"}}}
+                                             [])]
+                    (assert.is_truthy (text:find "a " 1 true)))))
             (it "shows OpenAPI 3.1 boolean schemas"
                 (fn []
                   (let [text (build "/x" "post"

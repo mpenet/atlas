@@ -179,6 +179,27 @@
                       (each [_ out (ipairs outs)]
                         (assert.is_nil (out:find "\27" 1 true))
                         (assert.is_truthy (out:find "\\x1B" 1 true)))))))
+            (it "escapes control characters in requests, headers and error bodies"
+                (fn []
+                  (let [spec (.. (os.tmpname) ".json")]
+                    (with-open [f (io.open spec :w)]
+                      (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h/a\\u001b]0;T\\u0007\"}],\"paths\":{\"/x\":{\"get\":{\"operationId\":\"getX\",\"responses\":{}}}}}"))
+                    (let [outs (icollect [_ extra (ipairs [["--dry-run"]
+                                                           ["--curl"]])]
+                                 (let [r (atlas-run (doto ["op" spec "get-x"]
+                                                      (table.insert (. extra 1))))]
+                                   (.. r.out r.err)))
+                          url "https://h/a\27]0;T\7/x"
+                          routes {url {:status 400
+                                       :headers {:content-type "text/plain"
+                                                 :x-evil "a\27[2Jb"}
+                                       :body "bad \27[31m"
+                                       :raw "bad \27[31m"}}
+                          v (atlas-run ["op" spec "get-x" "-v"] routes)]
+                      (os.remove spec)
+                      (table.insert outs (.. v.out v.err))
+                      (each [_ out (ipairs outs)]
+                        (assert.is_nil (out:find "\27" 1 true) out))))))
             (it "escapes control characters in errors and warnings"
                 (fn []
                   (let [spec (.. (os.tmpname) ".json")]
@@ -198,6 +219,18 @@
                       (os.remove spec)
                       (assert.is_truthy (r.err:find "warning" 1 true))
                       (assert.is_nil (r.err:find "\27" 1 true))))))
+            (it "rejects a body for an operation that takes none"
+                (fn []
+                  (each [_ extra (ipairs ["-d={}" "--b.z=2"])]
+                    (let [r (atlas-run ["op"
+                                        "p"
+                                        "get-pet"
+                                        "7"
+                                        extra
+                                        "--dry-run"])]
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find "get-pet takes no request body"
+                                                    1 true))))))
             (it "does not run the signing tool for --dry-run"
                 (fn []
                   (let [marker (os.tmpname)]
@@ -266,6 +299,25 @@
                               :schema-cache false})
                     (set io.stderr real-stderr)
                     (assert.are.equal 2 (. requests 1 :timeout)))))
+            (it "keeps profile headers from the documents a foreign spec refers to"
+                (fn []
+                  (let [spec "{\"openapi\":\"3.0.0\",\"info\":{},\"paths\":{\"/x\":{\"get\":{\"operationId\":\"getX\",\"parameters\":[{\"$ref\":\"part.json#/p\"}],\"responses\":{}}}}}"
+                        (transport requests) (routes-transport {"GET https://specs.test/spec.json" {:status 200
+                                                                                                    :headers {}
+                                                                                                    :raw spec}
+                                                                "GET https://specs.test/part.json" {:status 200
+                                                                                                    :headers {}
+                                                                                                    :raw "{\"p\":{\"name\":\"q\",\"in\":\"query\"}}"}})
+                        code (cli.run ["op" "remote" "--list"]
+                                      {: transport
+                                       :config {:profiles {:remote {:schema "https://specs.test/spec.json"
+                                                                    :base-url "https://api.test"
+                                                                    :headers {:x-team "H"}}}}
+                                       :schema-cache false})]
+                    (assert.are.equal 0 code)
+                    (assert.are.equal 2 (length requests))
+                    (each [_ req (ipairs requests)]
+                      (assert.is_nil (. req.headers :x-team))))))
             (it "never sends placeholder credentials for a dry run's spec"
                 (fn []
                   (let [(transport requests) (routes-transport {"GET https://api.test/openapi.json" (respond 401
@@ -396,6 +448,15 @@
                       (assert.is_nil (verbose.err:find "\27" 1 true))
                       (assert.is_nil (steps.out:find "\27" 1 true))
                       (assert.is_truthy (steps.out:find "\\x1B" 1 true))))))
+            (it "lists workflows whose id is not a string"
+                (fn []
+                  (let [file (.. (os.tmpname) ".json")]
+                    (with-open [f (io.open file :w)]
+                      (f:write "{\"arazzo\":\"1.0.0\",\"info\":{},\"workflows\":[{\"workflowId\":5,\"steps\":[]},{\"steps\":[]}]}"))
+                    (let [r (atlas-run ["az" file])]
+                      (os.remove file)
+                      (assert.are.equal 0 r.code)
+                      (assert.is_truthy (r.out:find "5" 1 true))))))
             (it "rejects an unknown profile"
                 (fn []
                   (let [r (atlas-run ["az"
@@ -499,6 +560,61 @@
                                                  "\"s\""]
                                                 "--body must be an object"]])]
                     (let [r (atlas-run args)]
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find msg 1 true) r.err)))))
+            (it "keeps the cached token when signing in again fails"
+                (fn []
+                  (let [auth (require :atlas.auth)
+                        socket (require :socket)
+                        srv (assert (socket.bind "127.0.0.1" 0))
+                        (_ port) (srv:getsockname)]
+                    (srv:close)
+                    (auth.save-token "oc-keep"
+                                     {:access_token "old" :refresh_token "r"})
+                    (let [r (with-config {:profiles {:oc-keep {:auth {:name "oauth-client-credentials"
+                                                                      :params {:token_url (.. "http://127.0.0.1:"
+                                                                                              port
+                                                                                              "/token")
+                                                                               :client_id "c"
+                                                                               :client_secret "s"}}}}}
+                              #(atlas-run ["auth" "oc-keep"]))
+                          kept (auth.load-token "oc-keep")]
+                      (auth.clear-token "oc-keep")
+                      (assert.are.equal 1 r.code)
+                      (assert.are.equal "old" (?. kept :access_token))))))
+            (it "rejects unknown TLS options and non-positive timeouts"
+                (fn []
+                  (each [_ [args msg] (ipairs [[["op"
+                                                 "p"
+                                                 "--list"
+                                                 "--ssl.cert=c.pem"]
+                                                "unknown TLS option: cert (expected cafile, capath, certificate, key or verify)"]
+                                               [["op"
+                                                 "p"
+                                                 "--list"
+                                                 "--timeout=-5"]
+                                                "--timeout must be greater than 0"]
+                                               [["op"
+                                                 "p"
+                                                 "--list"
+                                                 "--timeout=0"]
+                                                "--timeout must be greater than 0"]])]
+                    (let [r (atlas-run args)]
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find msg 1 true) r.err)))))
+            (it "rejects profiles whose settings have the wrong shape"
+                (fn []
+                  (each [_ [profile msg] (ipairs [[{:schema "test/fixtures/cli-api.json"
+                                                    :auth "bearer"}
+                                                   "profile bad: auth must be an object"]
+                                                  [{:schema "test/fixtures/cli-api.json"
+                                                    :headers "x"}
+                                                   "profile bad: headers must be an object"]
+                                                  [{:schema "test/fixtures/cli-api.json"
+                                                    :auth {:params {}}}
+                                                   "profile bad: auth needs a name"]])]
+                    (let [r (with-config {:profiles {:bad profile}}
+                              #(atlas-run ["op" "bad" "list-pets"]))]
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find msg 1 true) r.err)))))
             (it "tells what atlas auth adds besides headers"

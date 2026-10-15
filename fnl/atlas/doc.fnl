@@ -55,13 +55,14 @@ arrays), or \"any\"."
         schema (when media-type (?. content media-type :schema))]
     (when (and (= (type schema) :table) schema.properties)
       (let [required-set {}]
-        (each [_ r (ipairs (or schema.required []))]
+        (each [_ r (ipairs (util.required-names schema))]
           (tset required-set r true))
         {:properties schema.properties :required required-set}))))
 
-(fn render [path method op-spec style]
-  "Help text for an operation; style supplies the usage line, the query
-params heading and an optional body hint, which differ between CLI and library."
+(fn render [path method op-spec style ?name]
+  "Help text for an operation named ?name (by default, after its operationId);
+style supplies the usage line, the query params heading and an optional body
+hint, which differ between CLI and library."
   (let [lines []
         add #(table.insert lines $)
         path-params (template-path-params path op-spec)
@@ -77,8 +78,8 @@ params heading and an optional body hint, which differ between CLI and library."
       (when s (add (.. "\n" s)))
       (when d (add d)))
     (add (.. "\nUsage: "
-             (style.usage (util.operation-name method path op-spec) op-spec
-                          path-params query-params)))
+             (style.usage (or ?name (util.operation-name method path op-spec))
+                          op-spec path-params query-params)))
     (when (> (length path-params) 0)
       (add "\nPath params:")
       (each [_ p (ipairs path-params)]
@@ -139,7 +140,7 @@ params heading and an optional body hint, which differ between CLI and library."
                      (positional-usage name op-spec path-params query-params)))
         :query-heading "Query params (via {:query {...}}):"})
 
-(fn build [path method op-spec]
-  (render path method op-spec library-style))
+(fn build [path method op-spec ?name]
+  (render path method op-spec library-style ?name))
 
 {: build : render : param-extras : type-name}

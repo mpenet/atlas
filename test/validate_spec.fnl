@@ -51,6 +51,18 @@
                     (assert.are.same [] (errors schema (json.array [1 2])))
                     (assert.are.same ["body: {\"a\":2} is not one of {\"a\":1}, [1,2]"]
                                      (errors schema {:a 2})))))
+            (it "lets patternProperties names through additionalProperties false"
+                (fn []
+                  (assert.are.same []
+                                   (errors {:type "object"
+                                            :patternProperties {"^x-" {:type "string"}}
+                                            :additionalProperties false}
+                                           {:x-trace "abc"}))))
+            (it "ignores a required that is not a list"
+                (fn []
+                  (assert.are.same []
+                                   (errors {:type "object" :required true}
+                                           {:x 1}))))
             (it "validates array items with 0-based indexed paths"
                 (fn []
                   (assert.are.same ["body[1].size: required"]

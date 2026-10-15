@@ -68,6 +68,8 @@ multipart operations take JSON or YAML; any other type is sent as-is."
 
 (fn op-request [op p]
   "Build an op.invoke request from parsed CLI args."
+  (when (and (not op.has-body) (or (not= nil p.body) (next p.body-fields)))
+    (error (.. op.name " takes no request body") 0))
   (let [json-op? (and op.content-type (op.content-type:match "json"))
         valid-json? #(pcall json.decode $)
         given (if (not= (type p.body) :string) p.body

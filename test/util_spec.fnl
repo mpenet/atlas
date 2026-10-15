@@ -398,3 +398,11 @@
                 (fn []
                   (assert.are.equal "a\\x1B[31mb\\x1B]52;c;x\\x07\nc\td"
                                     (util.printable "a\27[31mb\27]52;c;x\7\nc\td"))))))
+
+(describe "resolve-reference"
+          (fn []
+            (it "takes network-path references to another host"
+                (fn []
+                  (assert.are.equal "https://cdn.example.org/shared/pet.json"
+                                    (util.resolve-reference "https://specs.example.com/v1/openapi.json"
+                                                            "//cdn.example.org/shared/pet.json"))))))

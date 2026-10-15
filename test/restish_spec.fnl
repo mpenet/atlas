@@ -126,3 +126,24 @@
                                                          #(= $
                                                              "/home/u/.restish/apis.json")))
                   (assert.is_nil (restish.find-config {} "/home/u" #false))))))
+
+(describe "restish.convert with unexpected shapes"
+          (fn []
+            (it "rejects a config that is not an object"
+                (fn []
+                  (let [json (require :atlas.json)
+                        (ok err) (pcall restish.convert (json.array [1 2]))]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "not a Restish configuration" 1 true)))))
+            (it "skips entries that are not what Restish writes"
+                (fn []
+                  (let [json (require :atlas.json)
+                        (profiles warnings) (restish.convert {:apis {:a {:base "https://a"
+                                                                         :profiles {:default {:headers (json.array [5
+                                                                                                                    "x: 1"])}}}
+                                                                     :b 7}})]
+                    (assert.are.same {:x "1"} profiles.a.headers)
+                    (assert.is_nil profiles.b)
+                    (assert.is_truthy (: (table.concat warnings "\n") :find
+                                         "b: not an API definition" 1 true)))))))

@@ -67,7 +67,7 @@ then the body when the operation has one, then an opts table."
                      :__index (fn [op key]
                                 (when (= key :fnl/docstring)
                                   (let [text (doc.build op.path op.method
-                                                        op.spec)]
+                                                        op.spec op.name)]
                                     (rawset op key text)
                                     text)))})
 
@@ -215,7 +215,7 @@ Overrides must name declared variables and respect their enum."
 
 schema — parsed schema table, local file path, or http(s):// URL
 ?opts — {:base-url \"https://...\" :server-index n :server-vars {:name value} :headers {} :http-fn custom-fn
-         :load-schema (fn [location {:ssl :headers}]) to fetch schema documents yourself}
+         :load-schema (fn [location {:ssl :headers :timeout}]) to fetch schema documents yourself}
 base-url defaults to schema.servers[1].url with :server-vars applied"
   (let [source-url (or (when (= (type schema) :string)
                          schema) (?. ?opts :source-url))
@@ -243,10 +243,11 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
         base-url (or (?. ?opts :base-url)
                      (when (and server-url (server-url:match "^https?://"))
                        server-url)
-                     (when (and source-url server-url (server-url:match "^/"))
-                       (let [(origin) (source-url:match "^(https?://[^/]+)")]
-                         (when origin
-                           (.. origin server-url))))
+                     (when (and source-url server-url
+                                (source-url:match "^https?://")
+                                (server-url:match "^/"))
+                       ;; relative to the spec: /path or //host/path
+                       (util.resolve-reference source-url server-url))
                      (error "no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts"))
         client-opts {:base-url base-url
                      :headers (or (?. ?opts :headers) {})

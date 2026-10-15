@@ -68,7 +68,7 @@ Returns a table where each key is a kebab-case `operationId` (`getPetById` → `
 | `:ssl` | table | TLS options (`cafile`, `capath`, `certificate`, `key`, `verify`) — see [SSL / TLS](#ssl--tls) |
 | `:http-fn` | function | Custom HTTP backend — see [HTTP adapter](#http-adapter) |
 | `:source-url` | string | Location of a schema passed as a parsed table, used to resolve relative server URLs and external `$ref`s |
-| `:load-schema` | function | `(fn [location opts])` returning a parsed document; replaces `atlas.load-schema` for the schema and its external `$ref`s. `opts` is `{:ssl :headers}`, or `{:ssl :credentials false}` for a document on another origin than the spec's, which must be fetched without credentials |
+| `:load-schema` | function | `(fn [location opts])` returning a parsed document; replaces `atlas.load-schema` for the schema and its external `$ref`s. `opts` is `{:ssl :headers :timeout}`, or `{:ssl :timeout :credentials false}` for a document on another origin than the spec's, which must be fetched without credentials |
 
 ### Base URL resolution
 
@@ -225,7 +225,7 @@ Fetches and parses a schema. Used internally by `atlas.client` but exposed for c
 (local client (atlas.client schema {:base-url "https://staging.example.com"}))
 ```
 
-`?opts` is `{:ssl {} :headers {}}`: for HTTPS schemas, `:ssl` takes the [TLS options](#ssl--tls), and `:headers` are sent with the fetch request (useful for authenticated schema endpoints).
+`?opts` is `{:ssl {} :headers {} :timeout seconds}`: for HTTPS schemas, `:ssl` takes the [TLS options](#ssl--tls), `:headers` are sent with the fetch request (useful for authenticated schema endpoints), and `:timeout` bounds it.
 
 `atlas.parse-schema` parses schema text you fetched yourself: `(atlas.parse-schema text location)` returns the document, raising when it is not valid JSON or YAML, or not a mapping (an HTML error page, say). `location` names the document in error messages.
 

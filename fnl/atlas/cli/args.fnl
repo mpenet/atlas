@@ -17,6 +17,7 @@
 (local options ;; :names        spellings accepted on the command line
        ;; :key          where the value goes in the parsed table
        ;; :value        nil for switches, else :number, :string, :body or :inputs
+       ;; :positive     a :number that must be greater than 0
        ;; :arg          placeholder for the value in usage (default N or VALUE)
        ;; :shown        how usage displays it, when the default form doesn't fit
        ;; :scope        :op, :az, :auth or :any
@@ -51,6 +52,7 @@
         {:names ["--timeout"]
          :key :timeout
          :value :number
+         :positive true
          :scope :any
          :help "Timeout in seconds"}
         {:names ["--max-pages"]
@@ -202,6 +204,12 @@ returns (kind key value); kind is a value of field-prefixes."
 
 (local short-prefixes {:query "--q." :header "--h." :body "--b." :input "--i."})
 
+(local ssl-options {:cafile true
+                    :capath true
+                    :certificate true
+                    :key true
+                    :verify true})
+
 (fn add-field [r kind k v]
   (when (= k "")
     (error (.. (or (. short-prefixes kind) (.. "--" kind "."))
@@ -224,7 +232,11 @@ returns (kind key value); kind is a value of field-prefixes."
     :body (table.insert r.body-fields [k v])
     :input (table.insert r.input-fields [k v])
     :server (tset r.server-vars k v)
-    :ssl (tset r.ssl k v)))
+    :ssl (if (. ssl-options k)
+             (tset r.ssl k v)
+             (error (.. "unknown TLS option: " k
+                        " (expected cafile, capath, certificate, key or verify)")
+                    0))))
 
 (fn option-value [name opt raw]
   (when (and opt.choices (not (accumulate [ok false _ c (ipairs opt.choices)
@@ -234,7 +246,12 @@ returns (kind key value); kind is a value of field-prefixes."
                ", got '" raw "'") 0))
   (match opt.value
     :number
-    (or (tonumber raw) (error (.. name " expects a number, got '" raw "'") 0))
+    (let [n (or (tonumber raw) (error (.. name " expects a number, got '" raw
+                                          "'")
+                                      0))]
+      (when (and opt.positive (<= n 0))
+        (error (.. name " must be greater than 0") 0))
+      n)
     :body (read-body raw)
     :inputs (decode-structured (read-body raw))
     _ raw))

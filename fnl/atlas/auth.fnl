@@ -64,14 +64,16 @@
 
 ;; ---- HTTP form post ----
 
-(fn post-form [url params ssl]
+(fn post-form [url params net]
+  "POST params as a form; net: {:ssl tls-options :timeout seconds}."
   (let [body (util.form-encode params)]
     (http.request {:method :POST
                    :url url
                    :headers {:content-type "application/x-www-form-urlencoded"
                              :accept "application/json"}
                    :raw-body body
-                   :ssl (or ssl {})})))
+                   :ssl (or (?. net :ssl) {})
+                   :timeout (?. net :timeout)})))
 
 (fn json-body [resp]
   "Response body as a table, null fields left out (a null token or expiry
@@ -108,35 +110,35 @@ means none): decoded from the raw text when there is one."
 
 ;; ---- refresh ----
 
-(fn try-refresh [profile-name params ssl cached]
+(fn try-refresh [profile-name params net cached]
   (let [form {:grant_type "refresh_token"
               :refresh_token cached.refresh_token
               :client_id (expand-env params.client_id)}]
     (when params.client_secret
       (tset form :client_secret (expand-env params.client_secret)))
-    (let [(ok resp) (pcall post-form params.token_url form ssl)]
+    (let [(ok resp) (pcall post-form params.token_url form net)]
       (when (and ok (util.success? resp.status))
         (store-token resp profile-name cached)))))
 
 ;; ---- client credentials ----
 
-(fn client-credentials [profile-name params ssl]
+(fn client-credentials [profile-name params net]
   (let [form {:grant_type "client_credentials"
               :client_id (expand-env params.client_id)
               :client_secret (expand-env (or params.client_secret ""))}]
     (when params.scope (tset form :scope params.scope))
     (when params.audience (tset form :audience params.audience))
-    (store-token (post-form params.token_url form ssl) profile-name)))
+    (store-token (post-form params.token_url form net) profile-name)))
 
 ;; ---- device authorization ----
 
-(fn request-device-code [params ssl]
+(fn request-device-code [params net]
   "Start the device flow; returns the device authorization response body."
   (let [form {:client_id (expand-env params.client_id)}]
     (when params.scope (tset form :scope params.scope))
     (let [resp (post-form (or params.device_authorization_url
                               (error "oauth-device-authorization requires device_authorization_url"))
-                          form ssl)]
+                          form net)]
       (assert (util.success? resp.status)
               (.. "device authorization request failed: HTTP " resp.status))
       (let [body (assert (json-body resp)
@@ -147,7 +149,7 @@ means none): decoded from the raw text when there is one."
                 "device authorization response missing user_code")
         body))))
 
-(fn poll-device-token [profile-name params ssl device]
+(fn poll-device-token [profile-name params net device]
   "Poll the token endpoint until the user approves, honouring slow_down;
 returns the stored token, raising on expiry, denial or timeout."
   (var deadline (+ (os.time) (or device.expires_in 300)))
@@ -159,7 +161,7 @@ returns the stored token, raising on expiry, denial or timeout."
                            {:grant_type "urn:ietf:params:oauth:grant-type:device_code"
                             :device_code device.device_code
                             :client_id (expand-env params.client_id)}
-                           ssl)
+                           net)
           body (when ok (json-body resp))]
       (if (and body (util.success? resp.status))
           (set token (store-token resp profile-name))
@@ -169,15 +171,15 @@ returns the stored token, raising on expiry, denial or timeout."
             "access_denied" (error "device authorization denied by user")))))
   (or token (error "device authorization timed out")))
 
-(fn device-authorization [profile-name params ssl]
-  (let [device (request-device-code params ssl)]
+(fn device-authorization [profile-name params net]
+  (let [device (request-device-code params net)]
     (io.stderr:write (util.printable (.. "Open this URL to authenticate:\n  "
                                          (tostring (or device.verification_uri_complete
                                                        device.verification_uri))
                                          "\nUser code: "
                                          (tostring device.user_code)
                                          "\nWaiting for authorization...\n")))
-    (poll-device-token profile-name params ssl device)))
+    (poll-device-token profile-name params net device)))
 
 ;; ---- authorization code (browser) ----
 
@@ -257,7 +259,7 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
     (when result.failure (error result.failure))
     result.code))
 
-(fn authorization-code [profile-name params ssl ?opts]
+(fn authorization-code [profile-name params net ?opts]
   (let [(srv port) (start-local-server params.redirect_port)
         redirect-host (or params.redirect_host "127.0.0.1")
         redirect-path (or params.redirect_path "/callback")
@@ -283,7 +285,7 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
         (when params.client_secret
           (tset form :client_secret (expand-env params.client_secret)))
         (tset form :code_verifier code-verifier)
-        (store-token (post-form params.token_url form ssl) profile-name)))))
+        (store-token (post-form params.token_url form net) profile-name)))))
 
 ;; ---- external tool ----
 
@@ -332,31 +334,31 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
 
 ;; ---- public API ----
 
-(fn authenticate [profile-name auth-config ssl ?opts]
+(fn authenticate [profile-name auth-config net ?opts]
   "Run the configured OAuth flow and cache the token.
 ?opts: {:open-browser (fn [url])} to replace the system browser launcher."
   (let [params auth-config.params]
     (match auth-config.name
-      "oauth-authorization-code" (authorization-code profile-name params ssl
+      "oauth-authorization-code" (authorization-code profile-name params net
                                                      ?opts)
-      "oauth-client-credentials" (client-credentials profile-name params ssl)
+      "oauth-client-credentials" (client-credentials profile-name params net)
       "oauth-device-authorization" (device-authorization profile-name params
-                                                         ssl)
+                                                         net)
       _ (error (.. "unsupported auth type: " auth-config.name)))))
 
-(fn ensure-token [profile-name auth-config ssl]
+(fn ensure-token [profile-name auth-config net]
   (let [cached (load-token profile-name)]
     (if (token-valid? cached)
         cached.access_token
         (let [data (if (and cached cached.refresh_token)
                        (do
                          (io.stderr:write "Refreshing token...\n")
-                         (or (try-refresh profile-name auth-config.params ssl
+                         (or (try-refresh profile-name auth-config.params net
                                           cached)
                              (do
                                (io.stderr:write "Token refresh failed, re-authenticating...\n")
-                               (authenticate profile-name auth-config ssl))))
-                       (authenticate profile-name auth-config ssl))]
+                               (authenticate profile-name auth-config net))))
+                       (authenticate profile-name auth-config net))]
           data.access_token))))
 
 (fn required-param [auth-config key]
@@ -368,7 +370,7 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
 (fn api-key-in-query? [auth-config]
   (and (= auth-config.name "api-key") (= (?. auth-config :params :in) "query")))
 
-(fn get-headers [profile-name auth-config ssl]
+(fn get-headers [profile-name auth-config net]
   "Returns static headers for any auth type.
   bearer / basic / api-key (header): headers built from params.
   api-key in the query string: returns {} — the parameter is added via wrap-http-fn.
@@ -390,7 +392,7 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
     "external-tool" (if (= (?. auth-config :params :output) "bearer-token")
                         (external-bearer auth-config.params)
                         {})
-    _ {:authorization (.. "Bearer " (ensure-token profile-name auth-config ssl))}))
+    _ {:authorization (.. "Bearer " (ensure-token profile-name auth-config net))}))
 
 (fn header-names [auth-config]
   "Lowercased names of the headers get-headers will supply, without running

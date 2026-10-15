@@ -439,6 +439,22 @@
                   (fn []
                     (assert.are.equal "curl -X POST 'https://h/pets?dry=1' -H 'authorization: Bearer s3cret' -H 'content-type: application/json' --data-raw '{\"name\":\"it'\\''s\"}'"
                                       (cli.curl-command req))))
+              (it "carries the TLS options and the timeout"
+                  (fn []
+                    (assert.are.equal "curl -X GET 'https://h/x' -k --cert 'c.pem' --key 'k.pem' --max-time 5"
+                                      (cli.curl-command {:method "GET"
+                                                         :url "https://h/x"
+                                                         :headers {}
+                                                         :timeout 5
+                                                         :ssl {:verify "none"
+                                                               :certificate "c.pem"
+                                                               :key "k.pem"}}))
+                    (assert.are.equal "curl -X GET 'https://h/x' --cacert 'ca.pem' --capath 'cas'"
+                                      (cli.curl-command {:method "GET"
+                                                         :url "https://h/x"
+                                                         :headers {}
+                                                         :ssl {:cafile "ca.pem"
+                                                               :capath "cas"}}))))
               (it "omits the body when there is none"
                   (fn []
                     (assert.are.equal "curl -X GET 'https://h/x'"
@@ -855,6 +871,25 @@
                     (cli.complete-line "op exo " ctx)
                     (assert.are.equal "S" (. seen 1 1))
                     (assert.are.equal 86400 (. seen 1 2 :cache-ttl)))))
+            (it "gives up on documents a spec refers to after ctx.timeout"
+                (fn []
+                  (let [socket (require :socket)
+                        srv (assert (socket.bind "127.0.0.1" 0))
+                        (_ port) (srv:getsockname)
+                        spec (.. (os.tmpname) ".json")
+                        t0 (socket.gettime)]
+                    (with-open [f (io.open spec :w)]
+                      (f:write (.. "{\"openapi\":\"3.0.0\",\"info\":{},\"paths\":{\"/x\":{\"$ref\":\"http://127.0.0.1:"
+                                   port "/p.json#/x\"}}}")))
+                    (let [atlas (require :atlas)
+                          names (cli.complete-line (.. "op " spec " ")
+                                                   {:config {}
+                                                    :timeout 0.2
+                                                    :load-schema atlas.load-schema})]
+                      (srv:close)
+                      (os.remove spec)
+                      (assert.are.same [] names)
+                      (assert.is_true (< (- (socket.gettime) t0) 5))))))
             (it "takes OpenAPI 3.1 boolean schemas"
                 (fn []
                   (let [ctx {:config {}

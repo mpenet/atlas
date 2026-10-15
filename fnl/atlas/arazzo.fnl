@@ -19,23 +19,32 @@
 
 ;; ---- loading ----
 
-;; where each loaded document came from, to resolve its relative $refs
-(local doc-locations (setmetatable {} {:__mode :k}))
+;; where each loaded document came from and how it was fetched
+;; ({:location :ssl :timeout}), to resolve its relative $refs the same way
+(local doc-sources (setmetatable {} {:__mode :k}))
 
-(fn load-doc [path]
-  "Load and parse an Arazzo document (JSON or YAML) from a local path or http(s):// URL."
-  (let [(ok parsed) (pcall yaml.decode (http-mod.fetch-text path))]
+(fn load-doc [path ?opts]
+  "Load and parse an Arazzo document (JSON or YAML) from a local path or
+http(s):// URL. ?opts: {:ssl :timeout}, also used for the documents it
+refers to."
+  (let [fetch-opts {:ssl (?. ?opts :ssl) :timeout (?. ?opts :timeout)}
+        (ok parsed) (pcall yaml.decode (http-mod.fetch-text path fetch-opts))]
     (assert ok (.. "failed to parse arazzo document: " (tostring parsed)))
     (when (= (type parsed) :table)
-      (tset doc-locations parsed path))
+      (tset doc-sources parsed
+            {:location path :ssl fetch-opts.ssl :timeout fetch-opts.timeout}))
     parsed))
 
 (fn doc-resolver [doc]
   "$ref resolver for doc, references into other files resolved from its
 location (no credentials are sent for them)."
-  (refs.resolver doc
-                 {:base (. doc-locations doc)
-                  :load #(atlas.load-schema $ {:credentials false})}))
+  (let [source (or (. doc-sources doc) {})]
+    (refs.resolver doc
+                   {:base source.location
+                    :load #(atlas.load-schema $
+                                              {:ssl source.ssl
+                                               :timeout source.timeout
+                                               :credentials false})})))
 
 ;; ---- client building ----
 
@@ -515,7 +524,7 @@ order; the CLI accepts these as positional arguments."
   "Load an Arazzo document and execute a workflow.
 ?opts: { clients, http-fn, ssl, headers, timeout, base-url, on-step, max-gotos,
 max-wait (seconds a response's Retry-After may ask, default 300) }"
-  (let [doc (load-doc path)
+  (let [doc (load-doc path ?opts)
         client-opts (collect [k v (pairs (or ?opts {}))]
                       (when (not= k :on-step) (values k v)))
         clients (or (?. ?opts :clients) (build-clients doc client-opts path))]

@@ -211,6 +211,14 @@
                                      out.properties.examples.properties.value)
                     (assert.are.same {:type "integer"}
                                      out.components.schemas.examples.properties.value))))
+            (it "include the value of an Example in another file"
+                (fn []
+                  (let [data {:$ref "#/nowhere"}
+                        out (deref {}
+                                   {:examples {:external {:$ref "example.yaml"}}}
+                                   {:base "api.yaml"
+                                    :load (fn [_] {:value data})})]
+                    (assert.are.same data out.examples.external.value))))
             (it "unless the key names a property or a response"
                 (fn []
                   (let [root {:components {:schemas {:S {:type "string"}}

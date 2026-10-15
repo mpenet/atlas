@@ -81,6 +81,12 @@ that text from a spec can't drive the terminal (escape sequences)."
                          (when (and (not= c "\n") (not= c "\t"))
                            (string.format "\\x%02X" (string.byte c)))))))
 
+(fn required-names [schema]
+  "The property names a schema requires; required: true (a Swagger 2
+leftover) or a non-table schema require none."
+  (let [r (when (= (type schema) :table) schema.required)]
+    (if (= (type r) :table) r [])))
+
 (fn write-private [path text]
   "Write text to path, readable by its owner only (0600); missing parent
 directories are created 0700. Returns true, or nil and an error."
@@ -255,11 +261,13 @@ above the root of an absolute path."
 (fn resolve-reference [base ref]
   "Resolve ref (URL or path) relative to the document located at base."
   (let [(origin base-path) (base:match "^(%a[%w+.-]*://[^/?#]*)([^?#]*)")]
-    (if (ref:match "^%a[%w+.-]*://") ref origin
-        (let [dir (if (= (ref:sub 1 1) "/")
-                      ""
-                      (or (base-path:match "^(.*/)") "/"))]
-          (.. origin (normalize-segments (.. dir ref))))
+    (if (ref:match "^%a[%w+.-]*://") ref
+        ;; a network-path reference keeps only the scheme
+        (and origin (ref:match "^//")) (.. (base:match "^(%a[%w+.-]*:)") ref)
+        origin (let [dir (if (= (ref:sub 1 1) "/")
+                            ""
+                            (or (base-path:match "^(.*/)") "/"))]
+                (.. origin (normalize-segments (.. dir ref))))
         (= (ref:sub 1 1) "/") ref
         (normalize-segments (.. (or (base:match "^(.*/)") "") ref)))))
 
@@ -329,6 +337,7 @@ a,b and objects as k1,v1,k2,v2 (keys sorted), each part url-encoded."
  : shell-quote
  : write-private
  : printable
+ : required-names
  : secret-name?
  : redact-url
  : origin

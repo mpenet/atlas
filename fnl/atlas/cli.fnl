@@ -38,6 +38,7 @@
         : find-profile
         : fetch-schema
         : retry-options
+        : request-timeout
         : load-schema-cached} (require :atlas.cli.settings))
 
 (local {: usage
@@ -159,9 +160,10 @@ profiles are kept. --dry-run prints the converted profiles instead."
         auth-cfg (?. profile :auth)]
     (when (not (and auth-cfg auth-cfg.name (not= auth-cfg.name "")))
       (die (.. "No auth configured for profile: " profile-name)))
-    (let [ssl (merge-ssl profile p.ssl)
+    (let [net {:ssl (merge-ssl profile p.ssl)
+               :timeout (request-timeout profile p config)}
           headers #(let [(ok h) (pcall auth.get-headers profile-name auth-cfg
-                                       ssl)]
+                                       net)]
                      (if ok h (die (tostring h))))]
       (if p.logout
           (do
@@ -181,10 +183,11 @@ profiles are kept. --dry-run prints the converted profiles instead."
                      (not= params.output :bearer-token))
                 (print (.. "signs each request with: "
                            (tostring params.commandline)))))
-          (do
-            (auth.clear-token profile-name)
-            (headers)
-            (print (.. "Authenticated: " profile-name)))))))
+          ;; a new token replaces the cached one only once obtained
+          (let [(ok err) (pcall auth.authenticate profile-name auth-cfg net)]
+            (if ok
+                (print (.. "Authenticated: " profile-name))
+                (die (tostring err))))))))
 
 ;; ---- az ----
 
@@ -303,9 +306,11 @@ say :credentials false (a $ref to another origin); files directly."
         file (if named named.file p.schema)
         profile-name (or p.profile (?. named :profile))
         profile (find-profile env.config profile-name)
-        doc (arazzo.load-doc file)
         _ (when (and profile-name (not profile))
             (die (.. "Profile not found: " profile-name)))
+        doc (arazzo.load-doc file
+                             {:ssl (merge-ssl profile p.ssl)
+                              :timeout (request-timeout profile p env.config)})
         wf (when p.operation (arazzo.find-workflow doc p.operation))]
     (if (not p.operation) (list-arazzo-workflows doc) (not wf)
         (die (.. "Unknown workflow: " p.operation)) p.help
@@ -388,6 +393,14 @@ invalid body unless --no-validate."
           schema (load-op-schema raw-schema profile p opts env)]
       (when (= (type schema) :table)
         (set opts.source-url raw-schema))
+      ;; documents the spec refers to: through the transport, with the same
+      ;; rules for headers and credentials as the spec (a dry run's auth
+      ;; headers are placeholders)
+      (set opts.load-schema
+           (source-schema-loader env
+                                 (when (not (and p.dry-run (not p.curl)))
+                                   opts.auth-headers)
+                                 opts.base-url))
       (if p.servers
           (let [servers (atlas.servers (if (= (type schema) :string)
                                            (atlas.load-schema schema)
@@ -409,7 +422,7 @@ invalid body unless --no-validate."
                          (die (.. "Unknown operation: " p.operation))))]
             (if (or p.list (not op)) (list-ops c) p.help
                 (print (util.printable (cli-help.build-cli op.path op.method
-                                                           op.spec)))
+                                                           op.spec op.name)))
                 (send-op op p opts profile config)))))))
 
 ;; ---- entry points ----

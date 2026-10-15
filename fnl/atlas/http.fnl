@@ -107,9 +107,10 @@ replaced when body encoding chose one."
 
 (fn redirect-target [req resp]
   "The request to send next for a followable redirect, or nil. Only GET and
-HEAD are followed; https never goes to http; when the origin changes,
-credential headers are dropped: those named in req.sensitive-headers (what
-authentication added) and any whose name looks like a credential."
+HEAD are followed; https never goes to http. On the same origin, the query
+parameters authentication added (req.sensitive-query) go along; when the
+origin changes, they and the credential headers are dropped: those named in
+req.sensitive-headers and any whose name looks like a credential."
   (let [location (util.header resp.headers "location")
         method (: (or req.method "GET") :upper)]
     (when (and (. redirect-status resp.status) location
@@ -126,7 +127,15 @@ authentication added) and any whose name looks like a credential."
                         (: (target:lower) :match "^http:")))
           (doto (collect [k v (pairs req)] k v)
             (tset :url target)
-            (tset :query nil)
+            (tset :query (let [kept (collect [_ n (ipairs (or req.sensitive-query
+                                                              []))]
+                                      (when (and same-origin?
+                                                 (not= nil (?. req.query n))
+                                                 (not (target:find (.. "[?&]"
+                                                                       (util.url-encode n)
+                                                                       "="))))
+                                        (values n (. req.query n))))]
+                           (when (next kept) kept)))
             (tset :headers (if same-origin?
                                req.headers
                                (collect [k v (pairs (or req.headers {}))]

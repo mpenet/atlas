@@ -591,8 +591,29 @@
                       (assert.are.equal c.post-a.body-schema
                                         c.post-a.body-schema.properties.next)))))))
 
+(describe "operations whose name was taken"
+          (fn []
+            (it "show their own name in their docstring"
+                (fn []
+                  (let [c (atlas.client (schema {"/a" {:get {:operationId "listPets"
+                                                             :responses {}}}
+                                                 "/b" {:get {:operationId "list_pets"
+                                                             :responses {}}}})
+                                        {:http-fn (mock-http)})]
+                    (assert.is_truthy (: (. c.get-b :fnl/docstring) :find
+                                         "(get-b.invoke" 1 true)))))))
+
 (describe "root-relative server URLs"
           (fn []
+            (it "may name another host (//host/path)"
+                (fn []
+                  (let [c (atlas.client (schema {"/pets" {:get {:operationId "listPets"
+                                                                :responses {}}}}
+                                                "//api.example.com/v1")
+                                        {:source-url "https://specs.example.com/openapi.json"
+                                         :http-fn (mock-http)})]
+                    (assert.are.equal "https://api.example.com/v1/pets"
+                                      (c.list-pets.url-for)))))
             (it "need the spec's origin"
                 (fn []
                   (let [(ok err) (pcall atlas.client

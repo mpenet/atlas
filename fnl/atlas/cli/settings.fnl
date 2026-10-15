@@ -52,11 +52,31 @@ winning."
           (merge-profiles base child))
         p)))
 
+(fn object? [v]
+  (and (= (type v) :table) (not= v json.null) (not (json.array? v))))
+
+;; profile settings that hold JSON objects
+(local object-settings [:auth :headers :query :ssl :tls :server :retry])
+
+(fn check-profile [name profile]
+  "profile, raising when a setting has the wrong shape: a mistyped setting
+would otherwise be ignored, auth included."
+  (when (not (object? profile))
+    (error (.. "profile " name " must be an object") 0))
+  (each [_ k (ipairs object-settings)]
+    (when (not (or (= nil (. profile k)) (object? (. profile k))))
+      (error (.. "profile " name ": " k " must be an object") 0)))
+  (when (and profile.auth (not= (type profile.auth.name) :string))
+    (error (.. "profile " name
+               ": auth needs a name (bearer, basic, api-key, external-tool, oauth-...)")
+           0))
+  profile)
+
 (fn find-profile [config name]
   "Profile name of config with extends resolved, or nil when there is none."
   (let [profiles (or (?. config :profiles) {})]
     (when (and name (. profiles name))
-      (resolve-profile name profiles {}))))
+      (check-profile name (resolve-profile name profiles {})))))
 
 (fn tls->ssl [tls]
   (when tls
@@ -119,12 +139,17 @@ winning. Colour is also off when ?colors (default: colors-wanted?) says so."
                    (not (if (= nil ?colors) (colors-wanted?) ?colors)))
      :verbose (first-set :verbose)}))
 
-(fn lazy-auth-headers [profile-name auth-cfg ssl]
-  "Getter for the profile's auth headers, authenticating on first use only."
+(fn request-timeout [profile p config]
+  "Seconds a request may take: --timeout, then profile, then config."
+  (or p.timeout (?. profile :timeout) (?. config :timeout)))
+
+(fn lazy-auth-headers [profile-name auth-cfg net]
+  "Getter for the profile's auth headers, authenticating on first use only;
+net: {:ssl :timeout} for the token endpoint."
   (var headers nil)
   (fn []
     (when (= nil headers)
-      (let [(ok h) (pcall auth.get-headers profile-name auth-cfg ssl)]
+      (let [(ok h) (pcall auth.get-headers profile-name auth-cfg net)]
         (assert ok (.. "authentication failed: " (tostring h)))
         (set headers (collect [k v (pairs h)] (k:lower) v))))
     headers))
@@ -171,7 +196,11 @@ request signing, logging, and the transport (or dry-run printing)."
                        (if dry-run
                            ;; --dry-run redacts credentials anyway: don't authenticate
                            #(collect [_ n (ipairs auth-names)] n "<auth>")
-                           (lazy-auth-headers profile-name auth-cfg ssl)))
+                           (lazy-auth-headers profile-name auth-cfg
+                                              {: ssl
+                                               :timeout (request-timeout profile
+                                                                         p
+                                                                         config)})))
         transport (if p.curl (printing-transport curl-command) p.dry-run
                       (printing-transport request-text)
                       (or ?transport http-mod.request))
@@ -194,7 +223,7 @@ request signing, logging, and the transport (or dry-run printing)."
      :auth-headers auth-headers
      :auth-header-names auth-names
      :ssl ssl
-     :timeout (or p.timeout (?. profile :timeout) (?. config :timeout))
+     :timeout (request-timeout profile p config)
      :base-url (or p.base-url (?. profile :base-url))
      :server-index (or p.server-index (?. profile :server-index))
      :server-vars (let [vars (collect [k v (pairs (or (?. profile :server) {}))]
@@ -268,6 +297,7 @@ opts: fetch-schema options plus {:ttl seconds :reload bool :cache bool}"
  : retry-options
  : paginate-options
  : client-options
+ : request-timeout
  : display-options
  : fetch-schema
  : load-schema-cached}

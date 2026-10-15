@@ -63,13 +63,16 @@ own scope, :any for the API commands op and az, or one of its :also."
           k)
     (table.sort)))
 
-(fn op-entries [schema ?source-url]
+(fn op-entries [schema ?source-url ?fetch]
   "Operations of a schema keyed by CLI name, built like a real client;
-?source-url locates the documents its refs point to."
+?source-url locates the documents its refs point to, fetched with ?fetch
+options {:ssl :timeout}."
   (let [(ok c) (pcall atlas.client schema
                       {:base-url "http://completion.invalid"
                        :http-fn #nil
-                       :source-url ?source-url})]
+                       :source-url ?source-url
+                       :ssl (?. ?fetch :ssl)
+                       :timeout (?. ?fetch :timeout)})]
     (if ok c {})))
 
 (fn schema-field [schema key]
@@ -151,12 +154,16 @@ operation, or an Arazzo document's workflow and inputs."
           (let [index-flag (accumulate [v nil _ w (ipairs words)]
                              (or (w:match "^%-%-server%-index=(%d+)$") v))
                 index (or (tonumber index-flag) (?. profile :server-index) 1)]
-            (set c.ops (op-entries schema source))
+            (set c.ops
+                 (op-entries schema source
+                             {:ssl (merge-ssl profile nil)
+                              :timeout ctx.timeout}))
             (set c.server (. (atlas.servers schema) index))
             (set c.op (when name (. c.ops name)))))))
     (when (and (= cmd :az) target)
       (let [(ok doc) (pcall ctx.load-doc
-                            (or (?. config :arazzo target :file) target))]
+                            (or (?. config :arazzo target :file) target)
+                            {:timeout ctx.timeout})]
         (when (and ok (= (type doc) :table))
           (set c.doc doc)
           (set c.workflow (arazzo.find-workflow doc name))
@@ -301,10 +308,12 @@ variable assignments (FOO=1 atlas op ...)."
 (fn run-complete [args]
   "Hidden backend for the shell completion scripts:
 atlas __complete [--describe] LINE-UP-TO-CURSOR"
-  (let [describe? (= (. args 2) "--describe")
+  (let [;; a fetch must not keep Tab waiting long
+        timeout 5
+        describe? (= (. args 2) "--describe")
         line (command-args (or (. args (if describe? 3 2)) ""))
         ctx {:config (let [(ok cfg) (pcall load-config)] (if ok cfg {}))
-             ;; the cache as op uses it; a fetch must not keep Tab waiting long
+             ;; the cache as op uses it
              :load-schema (fn [src ?profile]
                             (if (src:match "^https?://")
                                 (load-schema-cached src
@@ -314,9 +323,10 @@ atlas __complete [--describe] LINE-UP-TO-CURSOR"
                                                               3600)
                                                      :ssl (merge-ssl ?profile
                                                                      nil)
-                                                     :timeout 5})
+                                                     :timeout timeout})
                                 (atlas.load-schema src)))
-             :load-doc arazzo.load-doc}]
+             :load-doc arazzo.load-doc
+             : timeout}]
     (each [_ e (ipairs (if line (complete-entries line ctx) []))]
       (print (util.printable (if (and describe? e.help)
                                  (.. e.value "\t"

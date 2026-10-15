@@ -1,6 +1,7 @@
 ;; ABOUTME: Terminal output for the CLI: response rendering and selection, dry-run
 ;; ABOUTME: and curl printing, request logging with redaction, exit codes.
 (local util (require :atlas.util))
+(local tls (require :atlas.tls))
 (local http-mod (require :atlas.http))
 (local json (require :atlas.json))
 (local pretty-mod (require :atlas.pretty))
@@ -29,25 +30,26 @@ headers in the set ?names (lowercase)."
     (icollect [_ k (ipairs names)]
       [k (tostring (. headers k))])))
 
+(fn log [text]
+  "Write a line to stderr, its control characters escaped: the text comes
+from specs and servers."
+  (io.stderr:write (.. (util.printable text) "\n")))
+
 (fn wrap-log-request [http-fn]
   (fn [req]
-    (io.stderr:write (.. "> " (or req.method "?") " "
-                         (util.redact-url (util.append-query (or req.url "?")
-                                                             (or req.query {})
-                                                             req.query-styles)
-                                          req.sensitive-query)
-                         "\n"))
+    (log (.. "> " (or req.method "?") " "
+             (util.redact-url (util.append-query (or req.url "?")
+                                                 (or req.query {})
+                                                 req.query-styles)
+                              req.sensitive-query)))
     (when req.body
-      (io.stderr:write (.. "> body: "
-                           (if (= (type req.body) :table)
-                               (json.encode req.body)
-                               (tostring req.body))
-                           "\n")))
+      (log (.. "> body: " (if (= (type req.body) :table)
+                              (json.encode req.body)
+                              (tostring req.body)))))
     (each [_ [k v] (ipairs (sorted-headers req.headers))]
-      (io.stderr:write (.. "> " k ": "
-                           (tostring (redact-header k v
-                                                    (sensitive-names req.sensitive-headers)))
-                           "\n")))
+      (log (.. "> " k ": "
+               (tostring (redact-header k v
+                                        (sensitive-names req.sensitive-headers))))))
     (http-fn req)))
 
 (fn op? [v]
@@ -132,12 +134,25 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
     (when payload
       (table.insert parts "--data-raw")
       (table.insert parts (util.shell-quote payload)))
+    ;; the TLS options and timeout atlas would use
+    (let [ssl (or req.ssl {})]
+      (when (tls.verify-off? ssl.verify) (table.insert parts "-k"))
+      (each [_ [option flag] (ipairs [[:cafile "--cacert"]
+                                      [:capath "--capath"]
+                                      [:certificate "--cert"]
+                                      [:key "--key"]])]
+        (when (. ssl option)
+          (table.insert parts flag)
+          (table.insert parts (util.shell-quote (. ssl option))))))
+    (when req.timeout
+      (table.insert parts "--max-time")
+      (table.insert parts (tostring req.timeout)))
     (table.concat parts " ")))
 
 (fn printing-transport [render]
   "Transport that prints each request instead of sending it."
   (fn [req]
-    (print (render req))
+    (print (util.printable (render req)))
     {:status 0 :headers {} :dry-run true}))
 
 (fn render [v fmt use-color]
@@ -150,8 +165,10 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
 (fn header-lines [headers ?redact]
   "Headers as sorted \"name: value\" lines; ?redact masks credentials."
   (table.concat (icollect [_ [k v] (ipairs (sorted-headers headers))]
-                  (.. k ": " (if ?redact (tostring (redact-header k v)) v)))
-                "\n"))
+                  (util.printable (.. k ": "
+                                      (if ?redact
+                                          (tostring (redact-header k v))
+                                          v)))) "\n"))
 
 (fn format-output [resp output use-color ?select]
   "Text to print for a successful response, or nil when there is nothing to show."
@@ -194,9 +211,9 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
     (if error?
         (do
           (when (not= nil resp.body)
-            (io.stderr:write (.. (if (= (type resp.body) :string) resp.body
-                                     (render resp.body :json use-color))
-                                 "\n")))
+            (if (= (type resp.body) :string)
+                (log resp.body)
+                (io.stderr:write (.. (render resp.body :json use-color) "\n"))))
           (exit-code resp.status false))
         (let [text (format-output resp output use-color ?select)]
           (if text
@@ -304,13 +321,16 @@ variable shows the value in effect."
   (let [wfs (or doc.workflows [])]
     (when (= (length wfs) 0)
       (print "(no workflows)"))
-    (let [width (accumulate [w 0 _ wf (ipairs wfs)]
-                  (math.max w (length wf.workflowId)))]
-      (each [_ wf (ipairs wfs)]
+    (let [ids (icollect [_ wf (ipairs wfs)]
+                (tostring (or wf.workflowId "(no workflowId)")))
+          width (accumulate [w 0 _ id (ipairs ids)]
+                  (math.max w (length id)))]
+      (each [i wf (ipairs wfs)]
         (print (util.printable (if wf.summary
                                    (string.format (.. "%-" width "s  %s")
-                                                  wf.workflowId wf.summary)
-                                   wf.workflowId)))))))
+                                                  (. ids i)
+                                                  (tostring wf.summary))
+                                   (. ids i))))))))
 
 {: redact-header
  : wrap-log-request

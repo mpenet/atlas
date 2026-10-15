@@ -67,6 +67,20 @@
                       (assert.is_truthy (body:find "client_id=my-client" 1 true))
                       (assert.is_truthy (body:find "client_secret=my-secret" 1
                                                    true))))))
+            (it "sends the token request with the timeout and TLS options"
+                (fn []
+                  (let [(http calls) (seq-mock (ok-resp (json-body {:access_token "t"})))
+                        auth (reload-auth http)
+                        profile (tmp-profile)]
+                    (auth.get-headers profile
+                                      {:name "oauth-client-credentials"
+                                       :params {:token_url "https://auth.example.com/token"
+                                                :client_id "c"
+                                                :client_secret "s"}}
+                                      {:ssl {:verify "none"} :timeout 3})
+                    (clean-token profile)
+                    (assert.are.equal 3 (. calls 1 :timeout))
+                    (assert.are.same {:verify "none"} (. calls 1 :ssl)))))
             (it "requires an access_token in the response"
                 (fn []
                   (let [(http) (seq-mock (ok-resp (json-body {:token_type "bearer"})))

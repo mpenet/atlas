@@ -32,7 +32,27 @@
                 (fn []
                   (let [doc (arazzo.load-doc "test/fixtures/simple.arazzo.json")]
                     (assert.are.equal "1.0.0" doc.arazzo)
-                    (assert.is_not_nil doc.workflows))))))
+                    (assert.is_not_nil doc.workflows))))
+            (it "gives up on documents after the timeout"
+                (fn []
+                  (let [socket (require :socket)
+                        srv (assert (socket.bind "127.0.0.1" 0))
+                        (_ port) (srv:getsockname)
+                        url (.. "http://127.0.0.1:" port)
+                        flow (.. (os.tmpname) ".json")
+                        t0 (socket.gettime)]
+                    (with-open [f (io.open flow :w)]
+                      (f:write (.. "{\"arazzo\":\"1.0.0\",\"info\":{},\"workflows\":[{\"workflowId\":\"w\",\"inputs\":{\"$ref\":\""
+                                   url "/inputs.json\"},\"steps\":[]}]}")))
+                    (let [(ok1) (pcall arazzo.load-doc (.. url "/flow.json")
+                                       {:timeout 0.2})
+                          (ok2) (pcall arazzo.run flow "w" {}
+                                       {:clients {} :timeout 0.2})]
+                      (srv:close)
+                      (os.remove flow)
+                      (assert.is_false ok1)
+                      (assert.is_false ok2)
+                      (assert.is_true (< (- (socket.gettime) t0) 5))))))))
 
 ;; ---- build-clients ----
 

@@ -1,6 +1,7 @@
 ;; ABOUTME: Validates decoded request values against the JSON Schema subset
 ;; ABOUTME: OpenAPI bodies use, returning readable errors with paths.
 (local json (require :atlas.json))
+(local util (require :atlas.util))
 
 (fn integral? [v]
   (and (= (type v) :number) (= v (math.floor v)) (not= v math.huge)
@@ -51,7 +52,7 @@ adds null to a declared type."
 (var check-value nil)
 
 (fn check-object [schema v path errors]
-  (each [_ name (ipairs (or schema.required []))]
+  (each [_ name (ipairs (util.required-names schema))]
     (when (= nil (. v name))
       (table.insert errors (.. path "." name ": required"))))
   (let [names (icollect [k (pairs v)] k)]
@@ -60,7 +61,10 @@ adds null to a declared type."
       (let [prop (?. schema :properties name)
             sub-path (.. path "." (tostring name))]
         (if (not= nil prop) (check-value prop (. v name) sub-path errors)
-            (= false schema.additionalProperties)
+            ;; patternProperties are ECMA regexes, which aren't checked: a
+            ;; name may match one
+            (and (= false schema.additionalProperties)
+                 (= nil schema.patternProperties))
             (table.insert errors (.. sub-path ": not allowed"))
             (= (type schema.additionalProperties) :table)
             (check-value schema.additionalProperties (. v name) sub-path errors))))))

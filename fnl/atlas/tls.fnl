@@ -49,4 +49,4 @@ SSL_CERT_FILE, the system bundle or SSL_CERT_DIR."
             _ (set result.capath (. env :SSL_CERT_DIR)))))
     result))
 
-{: ca-bundle : options}
+{: ca-bundle : options : verify-off?}

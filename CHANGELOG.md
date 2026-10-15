@@ -25,6 +25,9 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - The OAuth callback checks the `state` before anything else: a forged callback without it can no longer pose as the provider's error.
 - `-v` redacts credentials in response headers (`set-cookie`, `...token`) as it does in request headers.
 - Error messages, warnings, Arazzo step ids and the OAuth device prompt escape control characters too: they quote specs and servers.
+- `op` fetches the documents a spec's `$ref`s name like the spec itself: through the same transport (so `-v` shows them), with the profile's headers and credentials only when the spec is on the API's origin; they used to get the profile's headers whatever the origin.
+- `-v`, `--dry-run`, `--curl`, logged response headers and text error bodies escape control characters too.
+- A same-origin redirect keeps a query API key; another origin still never gets it.
 - Headers added by external-tool signing are marked as credentials: logs and dry runs redact them, and they are dropped on a redirect to another origin.
 - The libcurl binding rejects URLs, header names and values and options that contain a NUL byte, rather than cutting them short.
 - A URL whose host part holds a backslash or a control character (such as a NUL in a `$ref`) matches no origin, so credentials never follow it (libcurl reads `http://a\@b/` as host `b`); retried schema fetches and next-page requests keep the marking of credential headers, so a later cross-origin redirect drops them; `$ref` errors redact the document's URL.
@@ -112,6 +115,16 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - Arazzo: `$sourceDescriptions.NAME.ID` keeps a dotted operationId (`storage.buckets.list`) whole; sources without a `type` are loaded as OpenAPI; a replacement target may append to an array with `-`; a response's `Retry-After` (seconds or a date) waits at most `--retry-max-wait` seconds (300 by default).
 - `enum` accepts object and array values equal to one of its entries.
 - `atlas.parse-schema` rejects `null` and arrays; an empty item in a `parameters` list is ignored.
+- An Example pulled in by a `$ref` to a whole file keeps its `value` as data.
+- Help names an operation by the name the client gave it, also when its operationId's name was taken.
+- Validation lets names matching `patternProperties` through `additionalProperties: false`, and ignores `required: true` (a Swagger 2 leftover) instead of crashing; so do help and completion.
+- Network-path references (`//host/path`) in `$ref`s and server URLs keep the spec's scheme only.
+- Pagination leaves alone a body that merely starts with `[` and ends with `]` without being one JSON array.
+- Timeouts and TLS options reach every fetch: Arazzo documents and the documents they refer to, OAuth token requests, and completion's (5 seconds).
+- `atlas auth` keeps the cached token until a new one is obtained.
+- `--curl` includes the TLS options (`-k`, `--cacert`, `--cert`, `--key`) and `--max-time`.
+- A body (`-d`, `--b.`) for an operation that takes none is an error instead of being dropped.
+- Profiles whose `auth`, `headers`, `query`, `ssl`, `tls`, `server` or `retry` is not an object, or whose `auth` has no `name`, are errors instead of being ignored (a string `auth` sent requests unauthenticated); so are unknown `--ssl.` options and a `--timeout` of 0 or less. Malformed Restish configs and workflows without a string `workflowId` give clear messages.
 - Completion lists the operations of specs whose `$ref`s point into other files.
 - `atlas auth` shows a query API key and the signing command, which it printed nothing for; `atlas completion` rejects options.
 - `--timeout` (and a profile's `timeout`) applies to fetching specs and the documents their `$ref`s name: a server that never answers no longer hangs atlas.

@@ -110,7 +110,9 @@ nowhere, or only at each other, raise."
     ;; already cyclic are copied as cycles
     (var copies {})
 
-    (fn resolve-ref [from ref]
+    (fn resolve-ref [from ref ?key ?parent ?grandparent]
+      ;; ?key ?parent ?grandparent: where the $ref is; the target's members
+      ;; are data when either that place or the target's own says so
       ;; follow refs to refs to the value they finally name
       (var (target value key pointer) (ref-target from ref))
       (let [chain [key]]
@@ -132,7 +134,9 @@ nowhere, or only at each other, raise."
                              (tset cache key out)
                              (each [k v (pairs value)]
                                (tset out k
-                                     (if (data? k name parent grandparent) v
+                                     (if (or (data? k name parent grandparent)
+                                             (data? k ?key ?parent ?grandparent))
+                                         v
                                          (deref target v k name parent))))
                              out))]
           (each [_ k (ipairs chain)]
@@ -141,7 +145,7 @@ nowhere, or only at each other, raise."
 
     (set deref (fn [from value ?key ?parent ?grandparent]
                  (match (ref-of value)
-                   ref (resolve-ref from ref)
+                   ref (resolve-ref from ref ?key ?parent ?grandparent)
                    _ (if (or (not= (type value) :table) (= value json.null))
                          value
                          (. copies value)

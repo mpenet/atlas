@@ -16,8 +16,8 @@
         :query-heading "Query params (--q.KEY=VAL):"
         :body-hint "  Use -d JSON, --body=@file, --body=@- for stdin, or --b.KEY=VAL for individual fields"})
 
-(fn build-cli [path method op-spec]
-  (doc.render path method op-spec cli-style))
+(fn build-cli [path method op-spec ?name]
+  (doc.render path method op-spec cli-style ?name))
 
 (fn step-target [step]
   "What a workflow step calls, for display."
@@ -37,7 +37,7 @@
 inputs JSON Schema; positional lists inputs that may be passed positionally."
   (let [lines []
         add #(table.insert lines $)
-        required (collect [_ r (ipairs (or (?. inputs-schema :required) []))]
+        required (collect [_ r (ipairs (util.required-names inputs-schema))]
                    r
                    true)
         props (or (?. inputs-schema :properties) {})

@@ -1,6 +1,8 @@
 ;; ABOUTME: Converts Restish configs (v1 apis.json, v2 restish.json) into atlas
 ;; ABOUTME: profiles, reporting the settings that have no atlas equivalent.
 
+(local json (require :atlas.json))
+
 (local auth-names ;; Restish auth type → atlas auth name, where they differ
        {:http-basic :basic :oauth-device-code :oauth-device-authorization})
 
@@ -14,11 +16,17 @@
           k)
     (table.sort)))
 
+(fn object? [v]
+  (and (= (type v) :table) (not (json.array? v))))
+
 (fn pairs->map [value sep]
-  "v1 maps pass through; v2 lists of \"KEY<sep>VALUE\" become maps."
-  (if (= nil value) nil (= nil (. value 1)) (when (next value) value)
+  "v1 maps pass through; v2 lists of \"KEY<sep>VALUE\" become maps (other
+items are left out)."
+  (if (not= (type value) :table) nil (= nil (. value 1))
+      (when (next value) value)
       (collect [_ item (ipairs value)]
-        (let [(k v) (item:match (.. "^(.-)%s*" sep "%s*(.*)$"))]
+        (let [(k v) (when (= (type item) :string)
+                      (item:match (.. "^(.-)%s*" sep "%s*(.*)$")))]
           (when k (values k v))))))
 
 (fn convert-auth [auth where warn]
@@ -85,6 +93,8 @@
   "(profiles warnings) for a parsed Restish config of either version: atlas
 profiles keyed by name (API name for its default profile, API.PROFILE
 otherwise) and sorted messages about settings that don't carry over."
+  (when (not (object? config))
+    (error "not a Restish configuration: expected an object of APIs" 0))
   (let [apis (or config.apis
                  (collect [k v (pairs config)]
                    (when (not= (k:sub 1 1) "$") (values k v))))
@@ -95,11 +105,15 @@ otherwise) and sorted messages about settings that don't carry over."
                nil)]
     (each [_ api-name (ipairs (sorted-keys apis))]
       (let [api (. apis api-name)]
-        (each [_ key (ipairs unsupported-api-keys)]
+        (when (not (object? api))
+          (warn api-name "not an API definition, skipped"))
+        (each [_ key (ipairs (if (object? api) unsupported-api-keys []))]
           (when (. api key)
             (warn api-name (.. key " are not supported"))))
-        (each [_ profile-name (ipairs (sorted-keys (or api.profiles
-                                                       {:default {}})))]
+        (each [_ profile-name (ipairs (if (object? api)
+                                          (sorted-keys (or api.profiles
+                                                           {:default {}}))
+                                          []))]
           (let [(name profile) (convert-profile config api-name api
                                                 profile-name
                                                 (or (?. api :profiles
