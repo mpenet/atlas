@@ -11,7 +11,7 @@ Point `atlas` at a spec and every operation becomes a command, with its own help
 - **Profiles and authentication.** Bearer, Basic, API keys, OAuth 2.0 (authorization code with PKCE, client credentials, device flow), external signing tools, mutual TLS.
 - **Workflows.** Run multi-step [Arazzo](https://spec.openapis.org/arazzo/latest.html) workflows: chain calls, poll until a job finishes, branch on results.
 - **Safe by default.** Verified TLS, credentials never follow a redirect to another host, secrets redacted from logs and `--dry-run`.
-- **One static binary** for macOS and Linux. Also a [Fennel/Lua library](doc/library.md).
+- **One small static binary** for macOS and Linux, about 2 MB, with no runtime dependencies. Also a [Fennel/Lua library](doc/library.md).
 
 ## Install
 
