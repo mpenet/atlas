@@ -2,6 +2,7 @@
 ;; ABOUTME: each operation is invocable positionally or with a structured request.
 (local util (require :atlas.util))
 (local refs (require :atlas.refs))
+(local json (require :atlas.json))
 
 (local negotiate (require :atlas.negotiate))
 
@@ -18,7 +19,8 @@ names it in errors."
     (assert ok
             (string.format "failed to parse schema from '%s': %s"
                            (util.redact-url location) (tostring parsed)))
-    (assert (= (type parsed) :table)
+    (assert (and (= (type parsed) :table) (not= parsed json.null)
+                 (not (json.array? parsed)))
             (string.format "'%s' is not an OpenAPI document"
                            (util.redact-url location)))
     parsed))

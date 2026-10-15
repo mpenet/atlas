@@ -13,6 +13,7 @@
 (local socket (require :socket))
 
 (local util (require :atlas.util))
+(local retry (require :atlas.retry))
 
 (local refs (require :atlas.refs))
 
@@ -62,7 +63,8 @@ declares; records the variables it used in used."
 Relative source URLs resolve against ?location, the document's own path or URL."
   (let [clients {}
         sources (icollect [_ src (ipairs (or doc.sourceDescriptions []))]
-                  (when (= src.type :openapi) src))]
+                  ;; type is optional: anything but arazzo is an OpenAPI source
+                  (when (not= src.type :arazzo) src))]
     (when (and (?. ?opts :base-url) (> (length sources) 1))
       (error (.. "base-url override is ambiguous: the document has "
                  (length sources) " openapi sources") 0))
@@ -155,6 +157,14 @@ Expression format: '{$sourceDescriptions.NAME.url}#/paths/~1foo/method'"
       (tset result.headers :cookie (table.concat cookies "; ")))
     result))
 
+(fn slot [node k pointer]
+  "The key of node that pointer segment k names: arrays take a 0-based index,
+or - for the end (RFC 6901)."
+  (if (not (json.array? node)) k (= k "-") (+ 1 (length node))
+      (k:match "^%d+$") (+ 1 (tonumber k))
+      (error (.. "replacement target " pointer ": '" k
+                 "' is not an array index") 0)))
+
 (fn set-at-pointer [value pointer new]
   "value with the location named by JSON pointer set to new (objects along the
 way are created)."
@@ -164,12 +174,12 @@ way are created)."
     (assert last (.. "replacement target must be a JSON pointer: " pointer))
     (var node value)
     (each [_ k (ipairs keys)]
-      (let [key (if (json.array? node) (+ 1 (tonumber k)) k)]
+      (let [key (slot node k pointer)]
         ;; null (shared and read-only) is replaced, like any non-object
         (when (or (not= (type (. node key)) :table) (= (. node key) json.null))
           (tset node key {}))
         (set node (. node key))))
-    (tset node (if (json.array? node) (+ 1 (tonumber last)) last) new)
+    (tset node (slot node last pointer) new)
     value))
 
 (fn copy [v]
@@ -338,10 +348,11 @@ already on the stack means a cycle (dependsOn or a step calling itself)."
           (nil message) {:ok false :error message}))))
 
 (fn wait-before-retry [run seconds]
-  "Sleep before retrying: the response's Retry-After (in seconds) overrules
-the action's retryAfter, as the Arazzo spec recommends."
-  (let [header (util.header (?. run.ctx :response :headers) "retry-after")
-        wait (or (tonumber header) seconds)]
+  "Sleep before retrying: the response's Retry-After (seconds or a date, at
+most run.max-wait) overrules the action's retryAfter, as the Arazzo spec
+recommends."
+  (let [asked (retry.retry-after run.ctx.response os.time)
+        wait (if asked (math.min run.max-wait asked) seconds)]
     (when (and wait (> wait 0))
       (socket.sleep wait))))
 
@@ -440,6 +451,7 @@ nil when a failure is left unhandled."
              :wf-params (expand-references doc wf.parameters)
              :on-step opts.on-step
              :max-gotos (or opts.max-gotos 50)
+             :max-wait (or opts.max-wait 300)
              :goto-counts {}
              :retry-counts {}
              :run-sub (fn [sub-id sub-inputs]
@@ -500,7 +512,8 @@ order; the CLI accepts these as positional arguments."
 
 (fn run [path workflow-id inputs ?opts]
   "Load an Arazzo document and execute a workflow.
-?opts: { clients, http-fn, ssl, headers, timeout, base-url, on-step, max-gotos }"
+?opts: { clients, http-fn, ssl, headers, timeout, base-url, on-step, max-gotos,
+max-wait (seconds a response's Retry-After may ask, default 300) }"
   (let [doc (load-doc path)
         client-opts (collect [k v (pairs (or ?opts {}))]
                       (when (not= k :on-step) (values k v)))

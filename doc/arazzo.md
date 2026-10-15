@@ -171,7 +171,7 @@ After a step, `onSuccess` or `onFailure` decide what happens next; the workflow'
 - `goto` continues at `stepId`, or runs `workflowId` and stops. A `goto` to the same step waits `retryAfter` seconds first, which makes polling loops. A workflow aborts after 50 jumps to the same step; raise it with `--max-gotos`.
 - `retry` runs the step again after `retryAfter` seconds, at most `retryLimit` times (default 1). With `workflowId` or `stepId`, that workflow or step runs first (to refresh a token, say).
 
-When the response has a `Retry-After` header in seconds, it overrules `retryAfter`. A request that fails in transport (connection refused, timeout…) is a step failure like any other, so `retry` handles it too. A step that fails with no action to handle it fails the workflow.
+When the response has a `Retry-After` header (seconds or a date), it overrules `retryAfter`, up to `--retry-max-wait` seconds (default 300). A request that fails in transport (connection refused, timeout…) is a step failure like any other, so `retry` handles it too. A step that fails with no action to handle it fails the workflow.
 
 ### Polling
 

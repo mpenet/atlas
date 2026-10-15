@@ -35,8 +35,18 @@ adds null to a declared type."
     (when (and schema.nullable (next types)) (table.insert types :null))
     types))
 
+(fn text [v]
+  "v as written in JSON when it is an object or array, else as is."
+  (if (= (type v) :table) (json.encode v) (tostring v)))
+
 (fn show [v]
-  (if (= (type v) :string) (.. "\"" v "\"") (tostring v)))
+  (if (= (type v) :string) (.. "\"" v "\"") (text v)))
+
+(fn same? [a b]
+  "JSON equality: objects and arrays by content (the encoding is canonical)."
+  (if (and (= (type a) :table) (= (type b) :table))
+      (= (json.encode a) (json.encode b))
+      (= a b)))
 
 (var check-value nil)
 
@@ -113,12 +123,12 @@ adds null to a declared type."
                  (and schema.enum
                       (not (accumulate [found false _ e (ipairs schema.enum)
                                         &until found]
-                             (= e v))))
+                             (same? e v))))
                  (table.insert errors
                                (string.format "%s: %s is not one of %s" path
                                               (show v)
                                               (table.concat (icollect [_ e (ipairs schema.enum)]
-                                                              (tostring e))
+                                                              (text e))
                                                             ", ")))
                  (do
                    (each [_ sub (ipairs (or schema.allOf []))]

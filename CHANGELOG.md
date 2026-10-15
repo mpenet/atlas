@@ -107,6 +107,10 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - Arazzo `operationPath` fragments may be percent-encoded (`~1pets~1%7BpetId%7D`).
 - A timeout under a millisecond no longer means no timeout.
 - `az --profile` with an unknown profile is an error instead of running without it.
+- `$ref` inside a JSON Schema `examples` array is data too, while a property called `value` of a schema called `examples` still resolves; a `$ref` to a JSON `null` gives `null`.
+- Arazzo: `$sourceDescriptions.NAME.ID` keeps a dotted operationId (`storage.buckets.list`) whole; sources without a `type` are loaded as OpenAPI; a replacement target may append to an array with `-`; a response's `Retry-After` (seconds or a date) waits at most `--retry-max-wait` seconds (300 by default).
+- `enum` accepts object and array values equal to one of its entries.
+- `atlas.parse-schema` rejects `null` and arrays; an empty item in a `parameters` list is ignored.
 - Completion lists the operations of specs whose `$ref`s point into other files.
 - `atlas auth` shows a query API key and the signing command, which it printed nothing for; `atlas completion` rejects options.
 - Many more; see the commit history.

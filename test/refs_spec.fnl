@@ -196,6 +196,21 @@
                     (assert.are.same data media.schema.default)
                     (assert.are.same [data] media.schema.enum)
                     (assert.are.same data media.schema.const))))
+            (it "include the values of a JSON Schema examples array"
+                (fn []
+                  (let [data {:$ref "#/nowhere"}
+                        out (deref {} {:schema {:examples [data]}})]
+                    (assert.are.same [data] out.schema.examples))))
+            (it "but not a property named value of a schema named examples"
+                (fn []
+                  (let [root {:components {:schemas {:V {:type "integer"}}}}
+                        out (deref root
+                                   {:properties {:examples {:properties {:value {:$ref "#/components/schemas/V"}}}}
+                                    :components {:schemas {:examples {:properties {:value {:$ref "#/components/schemas/V"}}}}}})]
+                    (assert.are.same {:type "integer"}
+                                     out.properties.examples.properties.value)
+                    (assert.are.same {:type "integer"}
+                                     out.components.schemas.examples.properties.value))))
             (it "unless the key names a property or a response"
                 (fn []
                   (let [root {:components {:schemas {:S {:type "string"}}
@@ -209,3 +224,11 @@
                                      out.schema.properties.example)
                     (assert.are.same {:type "string"}
                                      out.schema.properties.default))))))
+
+(describe "refs to null"
+          (fn []
+            (it "give JSON null itself"
+                (fn []
+                  (let [json (require :atlas.json)
+                        out (deref {:b json.null} {:a {:$ref "#/b"}})]
+                    (assert.are.equal json.null out.a))))))

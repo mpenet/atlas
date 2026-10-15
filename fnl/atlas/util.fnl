@@ -266,14 +266,20 @@ above the root of an absolute path."
 (fn merge-parameters [base override]
   "Concatenate OpenAPI/Arazzo parameter lists; override entries replace base entries
 with the same name and location."
-  (let [param-key (fn [p] (.. (tostring p.in) ":" p.name))
-        replaced (collect [_ p (ipairs (or override []))]
+  (let [param-key (fn [p] (.. (tostring p.in) ":" (tostring p.name)))
+        ;; an empty list item (null) declares nothing
+        declared (fn [params]
+                   (icollect [_ p (ipairs (or params []))]
+                     (when (and (= (type p) :table) (not= p json.null))
+                       p)))
+        override (declared override)
+        replaced (collect [_ p (ipairs override)]
                    (param-key p)
                    true)
-        out (icollect [_ p (ipairs (or base []))]
+        out (icollect [_ p (ipairs (declared base))]
               (when (not (. replaced (param-key p)))
                 p))]
-    (each [_ p (ipairs (or override []))]
+    (each [_ p (ipairs override)]
       (table.insert out p))
     out))
 

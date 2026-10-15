@@ -43,6 +43,14 @@
                                    (errors {:properties {:tier {:enum ["small"
                                                                        "large"]}}}
                                            {:tier "gold"}))))
+            (it "compares object and array enum values by content"
+                (fn []
+                  (let [json (require :atlas.json)
+                        schema {:enum [{:a 1} (json.array [1 2])]}]
+                    (assert.are.same [] (errors schema {:a 1}))
+                    (assert.are.same [] (errors schema (json.array [1 2])))
+                    (assert.are.same ["body: {\"a\":2} is not one of {\"a\":1}, [1,2]"]
+                                     (errors schema {:a 2})))))
             (it "validates array items with 0-based indexed paths"
                 (fn []
                   (assert.are.same ["body[1].size: required"]

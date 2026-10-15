@@ -92,6 +92,12 @@
                   (let [v (expr.eval (ctx) "$sourceDescriptions.myapi.getPet")]
                     (assert.are.equal "myapi" v.__source)
                     (assert.are.equal "getPet" v.__operationId))))
+            (it "keeps dotted operationIds whole in $sourceDescriptions"
+                (fn []
+                  (let [v (expr.eval (ctx)
+                                     "$sourceDescriptions.gcs.storage.buckets.list")]
+                    (assert.are.equal "gcs" v.__source)
+                    (assert.are.equal "storage.buckets.list" v.__operationId))))
             (it "returns expr unchanged when not a $ expression"
                 (fn []
                   (assert.are.equal "hello" (expr.eval (ctx) "hello"))))

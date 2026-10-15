@@ -35,17 +35,28 @@
                   :webhooks true
                   :paths true})
 
-(fn data? [k key parent-key]
-  "Whether member k of the value at key (itself under parent-key) is data:
-an example, a default, an enum, a const or an Example's value."
+;; maps whose values are schemas: a schema there may be called examples
+(local schema-maps {:properties true
+                    :patternProperties true
+                    :dependentSchemas true
+                    :$defs true
+                    :definitions true
+                    :schemas true})
+
+(fn data? [k key parent grandparent]
+  "Whether member k of the value at key (under parent, itself under
+grandparent) is data: an example, a default, an enum, a const, an element of
+a JSON Schema examples array, or an OpenAPI Example's value."
   (or (and (. data-keys k) (not (. name-maps key)))
-      (and (= k :value) (= parent-key :examples))))
+      (and (= (type k) :number) (= key :examples))
+      (and (= k :value) (= parent :examples) (not (. schema-maps grandparent)))))
 
 (fn pointer-keys [pointer]
-  "(last second-to-last) segments of a JSON pointer, unescaped."
+  "The last three segments of a JSON pointer, unescaped, last first."
   (let [segs (icollect [seg (pointer:gmatch "/([^/]*)")]
-               (util.unescape-pointer seg))]
-    (values (. segs (length segs)) (. segs (- (length segs) 1)))))
+               (util.unescape-pointer seg))
+        n (length segs)]
+    (values (. segs n) (. segs (- n 1)) (. segs (- n 2)))))
 
 (fn resolver [root ?opts]
   "Returns (fn [value]) giving value with every $ref replaced by its target.
@@ -112,22 +123,23 @@ nowhere, or only at each other, raise."
                          key) 0))
             (table.insert chain key)))
         (let [cached (. cache key)
-              expanded (if (not= nil cached) cached (not= (type value) :table)
+              expanded (if (not= nil cached) cached
+                           (or (not= (type value) :table) (= value json.null))
                            value ;; registered before it is filled, so recursion
                            ;; comes back to this same table
                            (let [out (setmetatable {} (getmetatable value))
-                                 (name parent) (pointer-keys pointer)]
+                                 (name parent grandparent) (pointer-keys pointer)]
                              (tset cache key out)
                              (each [k v (pairs value)]
                                (tset out k
-                                     (if (data? k name parent) v
-                                         (deref target v k name))))
+                                     (if (data? k name parent grandparent) v
+                                         (deref target v k name parent))))
                              out))]
           (each [_ k (ipairs chain)]
             (tset cache k expanded))
           expanded)))
 
-    (set deref (fn [from value ?key ?parent-key]
+    (set deref (fn [from value ?key ?parent ?grandparent]
                  (match (ref-of value)
                    ref (resolve-ref from ref)
                    _ (if (or (not= (type value) :table) (= value json.null))
@@ -139,8 +151,8 @@ nowhere, or only at each other, raise."
                            (tset copies value out)
                            (each [k v (pairs value)]
                              (tset out k
-                                   (if (data? k ?key ?parent-key) v
-                                       (deref from v k ?key))))
+                                   (if (data? k ?key ?parent ?grandparent) v
+                                       (deref from v k ?key ?parent))))
                            out)))))
     (fn [value]
       (set copies {})

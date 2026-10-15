@@ -68,4 +68,4 @@ opts: {:attempts n :unsafe bool :max-wait seconds :sleep fn :now fn}"
         (let [[ok resp] result]
           (if ok resp (error resp 0)))))))
 
-{: wrap}
+{: wrap : retry-after}

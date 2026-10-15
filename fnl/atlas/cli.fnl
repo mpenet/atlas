@@ -37,6 +37,7 @@
         : colors-wanted?
         : find-profile
         : fetch-schema
+        : retry-options
         : load-schema-cached} (require :atlas.cli.settings))
 
 (local {: usage
@@ -260,6 +261,7 @@ say :credentials false (a $ref to another origin); files directly."
     (set run-opts.on-step
          (when show-progress (progress-reporter output (not no-color))))
     (set run-opts.max-gotos p.max-gotos)
+    (set run-opts.max-wait (. (retry-options profile p env.config) :max-wait))
     (let [t0 (socket.gettime)
           clients (arazzo.build-clients doc run-opts file)
           (ok result) (pcall arazzo.run-workflow doc wf.workflowId inputs

@@ -99,7 +99,8 @@ meant a JSON pointer into it: raise saying so."
                                 4 :output expr))
               ;; a sentinel table so the caller can look up the client
               :sourceDescriptions
-              {:__source (. parts 2) :__operationId (. parts 3)}
+              ;; source names have no dots, operationIds may
+              {:__source (. parts 2) :__operationId (table.concat parts "." 3)}
               _
               (error (.. "unknown runtime expression: " expr) 0)))))))
 

@@ -650,6 +650,22 @@
 
 (describe "schema documents"
           (fn []
+            (it "rejects null and arrays"
+                (fn []
+                  (each [_ text (ipairs ["null" "[1]"])]
+                    (let [(ok err) (pcall atlas.parse-schema text "x.json")]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "is not an OpenAPI document" 1 true))))))
+            (it "skip null parameter entries"
+                (fn []
+                  (let [json (require :atlas.json)
+                        c (atlas.client (atlas.parse-schema "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{\"/a\":{\"parameters\":[null],\"get\":{\"operationId\":\"getA\",\"parameters\":[null,{\"name\":\"q\",\"in\":\"query\"}],\"responses\":{}}}}}"
+                                                            "x.json")
+                                        {:http-fn (mock-http)})]
+                    (assert.are.same ["q"]
+                                     (icollect [_ p (ipairs c.get-a.parameters)]
+                                       p.name)))))
             (it "rejects text that is not a mapping"
                 (fn []
                   (let [path (os.tmpname)]

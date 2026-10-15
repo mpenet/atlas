@@ -105,6 +105,14 @@
                       (os.remove path)
                       (assert.are.equal "https://eu.a.test/x"
                                         (clients.a.ax.url-for))))))
+            (it "loads sources that don't say their type"
+                (fn []
+                  (let [clients (arazzo.build-clients {:sourceDescriptions [{:name "api"
+                                                                             :url "./petstore.yaml"}]
+                                                       :workflows []}
+                                                      {}
+                                                      "test/fixtures/flow.arazzo.json")]
+                    (assert.is_not_nil clients.api))))
             (it "rejects server variables no source declares"
                 (fn []
                   (let [doc {:sourceDescriptions [{:name "a"
@@ -820,7 +828,34 @@
                                           clients {})]
                       (set socket.sleep real-sleep)
                       (assert.is_true ok err))
-                    (assert.are.same [2] slept))))))
+                    (assert.are.same [2] slept))))
+            (it "cap the response's Retry-After at max-wait"
+                (fn []
+                  (let [slept []
+                        socket (require :socket)
+                        real-sleep socket.sleep
+                        run (fn [opts]
+                              (let [n (counter)
+                                    clients {:api (make-client {:op (fn []
+                                                                      (n.inc)
+                                                                      (if (= 1
+                                                                             (n.val))
+                                                                          {:status 503
+                                                                           :headers {:retry-after "1e12"}
+                                                                           :body {}}
+                                                                          (ok-resp {})))})}]
+                                (arazzo.run-workflow (one-step-doc {:operationId "op"
+                                                                    :onFailure [{:name "again"
+                                                                                 :type "retry"
+                                                                                 :retryAfter 2}]})
+                                                     "wf" {} clients opts)))]
+                    (set socket.sleep #(table.insert slept $))
+                    (let [(ok err) (pcall #(do
+                                             (run {})
+                                             (run {:max-wait 10})))]
+                      (set socket.sleep real-sleep)
+                      (assert.is_true ok err))
+                    (assert.are.same [300 10] slept))))))
 
 (describe "request bodies"
           (fn []
@@ -861,7 +896,28 @@
                                                                                       :value "changed"}]}})
                                          "wf" inputs clients {})
                     (assert.are.same {:name "changed"} (. seen 1 :body))
-                    (assert.are.same {:pet {:name "rex"}} inputs))))))
+                    (assert.are.same {:pet {:name "rex"}} inputs))))
+            (it "append to an array with -"
+                (fn []
+                  (let [json (require :atlas.json)
+                        seen []
+                        clients {:api (make-client {:op (fn [req]
+                                                          (table.insert seen
+                                                                        req)
+                                                          (ok-resp {}))})}
+                        run #(arazzo.run-workflow (one-step-doc {:operationId "op"
+                                                                 :requestBody {:payload "$inputs.pet"
+                                                                               :replacements [{:target $1
+                                                                                               :value "b"}]}})
+                                                  "wf"
+                                                  {:pet {:tags (json.array ["a"])}}
+                                                  clients {})]
+                    (run "/tags/-")
+                    (assert.are.same ["a" "b"] (. seen 1 :body :tags))
+                    (let [(ok err) (pcall run "/tags/x")]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "not an array index" 1 true))))))))
 
 (describe "workflow inputs from another file"
           (fn []
