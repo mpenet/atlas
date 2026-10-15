@@ -85,7 +85,7 @@ authorization: Bearer s3cr3t
 
 The methods:
 
-- **A token** (`bearer`), **a username and password** (`basic`), or **an API key** in a header or the query string (`api-key`).
+- **A token** (`bearer`), **a username and password** (`basic`), or **an API key** in a header, the query string or a cookie (`api-key`).
 - **OAuth 2.0, interactive** (`oauth-authorization-code`): the first request opens your browser to sign in, then the token is cached and refreshed. Register `http://127.0.0.1:PORT/callback` with the provider and set `redirect_port` to match.
 - **OAuth 2.0, for services and CI** (`oauth-client-credentials`): a client id and secret, no browser.
 - **OAuth 2.0, without a browser** (`oauth-device-authorization`): atlas prints a code and a URL; approve on any device.

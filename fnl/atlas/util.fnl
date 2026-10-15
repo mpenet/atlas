@@ -147,6 +147,19 @@ URL parsers read differently: such a URL matches no origin."
                (: (tostring s) :gsub "[^%w%-%.%_%~]"
                   (fn [c] (string.format "%%%02X" (string.byte c))))))
 
+(local permanent-mt {:__tostring #$.message})
+
+(fn permanent-error [message]
+  "An error that trying again can't fix (a request that can't be built, an
+authentication failure): retries pass it on at once. It reads as message."
+  (setmetatable {: message :permanent true} permanent-mt))
+
+(fn query-has? [url name]
+  "Whether url's query string already has parameter name."
+  (let [param (.. (url-encode name) "=")]
+    (or (not= nil (url:find (.. "?" param) 1 true))
+        (not= nil (url:find (.. "&" param) 1 true)))))
+
 (fn percent-decode [s]
   "s with %XX escapes decoded; + is left as is (URI syntax)."
   (pick-values 1 (s:gsub "%%(%x%x)" (fn [h] (string.char (tonumber h 16))))))
@@ -369,6 +382,8 @@ a,b and objects as k1,v1,k2,v2 (keys sorted), each part url-encoded."
  : required-names
  : json-content?
  : terminal?
+ : query-has?
+ : permanent-error
  : secret-name?
  : redact-url
  : origin

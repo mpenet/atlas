@@ -147,7 +147,12 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - A required query parameter that the profile's `query` or a query API key provides is not reported missing.
 - An authentication failure while sending (a signing tool or a query key's `env:` variable) is not retried; the OAuth device flow stops on a token error other than `authorization_pending`/`slow_down`, with the provider's description, instead of polling until it times out.
 - `--curl` refuses a body with control characters (CR line ends, binary) instead of printing a command that sends something else.
-- A profile missing a parameter its auth method needs (`token_url`, `commandline`…) is reported as such.
+- A profile missing a parameter its auth method needs (`token_url`, `commandline`…) is reported as such when authenticating; it can still be listed, shown, completed and logged out of.
+- `api-key` auth takes `"in": "cookie"`; a location other than `header`, `query` or `cookie` is an error instead of being sent as a header.
+- `profile import-restish` uses Restish's callback (`redirect_url`, else `http://localhost:8484/`) for authorization-code logins, and warns about a basic login without password, `auth_method` and `redirect_scheme`; external-tool `"omitbody": "false"` keeps the body.
+- The OAuth device flow keeps polling when a provider answers "pending" with HTTP 200.
+- A query API key whose name holds `-`, `[` or spaces is no longer added twice (or crashing) on a redirect.
+- A request atlas can't build (a line break in a header, nested query values) fails at once instead of being retried.
 - Completion expands `~/` in spec and workflow paths.
 - A document that isn't an OpenAPI spec (an API's JSON answer, a config file) is reported as such instead of giving an empty listing.
 - Pagination works over a custom `http-fn` that returns only the decoded `:body`.

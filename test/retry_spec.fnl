@@ -91,3 +91,21 @@
                         f (retry.wrap http {:attempts 0 :sleep (sleeper)})]
                     (f {:method "GET"})
                     (assert.are.equal 1 (length calls)))))))
+
+(describe "retry.wrap and requests that can't be sent"
+          (fn []
+            (it "doesn't retry a request atlas refuses to build"
+                (fn []
+                  (let [http (require :atlas.http)
+                        sleeps []
+                        f (retry.wrap http.request
+                                      {:attempts 3
+                                       :sleep #(table.insert sleeps $)})
+                        (ok err) (pcall f
+                                        {:method "GET"
+                                         :url "http://127.0.0.1:1/x"
+                                         :headers {:x-a "a\nb"}})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "line break" 1
+                                         true))
+                    (assert.are.same [] sleeps))))))

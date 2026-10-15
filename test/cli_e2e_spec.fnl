@@ -853,15 +853,26 @@
                       (assert.is_truthy (r.err:find msg 1 true) r.err)
                       (assert.is_truthy (: (.. listed.out listed.err) :find msg
                                            1 true))))))
+            (it "lists, shows and logs out of a profile whose auth is incomplete"
+                (fn []
+                  (with-config {:profiles {:nopw {:schema "test/fixtures/cli-api.json"
+                                                  :auth {:name "basic"
+                                                         :params {:username "me"}}}}}
+                    #(each [_ args (ipairs [["op" "nopw" "--list"]
+                                            ["op" "nopw" "list-pets" "--help"]
+                                            ["profile" "show" "nopw"]
+                                            ["auth" "nopw" "--logout"]])]
+                       (assert.are.equal 0 (. (atlas-run args) :code)
+                                         (table.concat args " "))))))
             (it "names the auth parameters a profile is missing"
                 (fn []
                   (each [_ [auth msg] (ipairs [[{:name "oauth-client-credentials"
                                                  :params {:client_id "c"}}
-                                                "profile bad: oauth-client-credentials auth needs params.token_url"]
+                                                "oauth-client-credentials auth requires params.token_url"]
                                                [{:name "oauth-client-credentials"}
-                                                "profile bad: oauth-client-credentials auth needs params.token_url"]
+                                                "oauth-client-credentials auth requires params.token_url"]
                                                [{:name "external-tool"}
-                                                "profile bad: external-tool auth needs params.commandline"]])]
+                                                "external-tool auth requires params.commandline"]])]
                     (let [r (with-config {:profiles {:bad {:schema "test/fixtures/cli-api.json"
                                                            : auth}}}
                               #(atlas-run ["auth" "bad"]))]

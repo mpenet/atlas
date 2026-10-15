@@ -344,6 +344,25 @@
                                                        :query-styles {:filter {:json true}}
                                                        :headers {}})]
                       (assert.are.equal 200 resp.status))))
+              (it "doesn't add a query key the redirect URL already has, whatever its name"
+                  (fn []
+                    (each [_ name (ipairs ["api-key" "key[0]" "api key"])]
+                      (let [util (require :atlas.util)
+                            enc (util.url-encode name)
+                            (send seen) (site {(.. "https://a.test/items?" enc
+                                                    "=K") (moved (.. "/items/?"
+                                                                                                                                                    enc
+                                                                                                                                                    "=K"))
+                                               (.. "https://a.test/items/?"
+                                                    enc "=K") {:status 200
+                                                                                                                                           :headers {}}})
+                            resp (http.follow-redirects send
+                                                        {:method "GET"
+                                                         :url "https://a.test/items"
+                                                         :query {name "K"}
+                                                         :sensitive-query [name]
+                                                         :headers {}})]
+                        (assert.are.equal 200 resp.status name)))))
               (it "keeps a query API key on the same origin only"
                   (fn []
                     (let [(send seen) (site {"https://a.test/x?k=K&n=1" (moved "/y")

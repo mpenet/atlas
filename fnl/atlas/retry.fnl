@@ -57,11 +57,10 @@ opts: {:attempts n :unsafe bool :max-wait seconds :sleep fn :now fn}"
         (var result nil)
         (while (= result nil)
           (let [(ok resp) (pcall http-fn req)
-                ;; network errors are transient, authentication failures
-                ;; aren't
+                ;; network errors are transient; requests that can't be
+                ;; built and authentication failures aren't
                 transient? (if ok (. retryable-status resp.status)
-                               (not (and (= (type resp) :table)
-                                         resp.auth-failure)))]
+                               (not (and (= (type resp) :table) resp.permanent)))]
             (if (and retry? transient? (< attempt attempts))
                 (do
                   (set attempt (+ attempt 1))

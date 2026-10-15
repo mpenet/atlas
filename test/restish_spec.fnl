@@ -147,3 +147,40 @@
                     (assert.is_nil profiles.b)
                     (assert.is_truthy (: (table.concat warnings "\n") :find
                                          "b: not an API definition" 1 true)))))))
+
+(describe "restish.convert auth details"
+          (fn []
+            (let [convert #(restish.convert {:apis {:a {:base "https://a"
+                                                        :profiles {:default {:auth $}}}}})]
+              (it "uses Restish's redirect address for authorization code logins"
+                  (fn []
+                    (let [profiles (convert {:type "oauth-authorization-code"
+                                             :params {:client_id "c"
+                                                      :authorize_url "https://i/a"
+                                                      :token_url "https://i/t"}})]
+                      (assert.are.same {:client_id "c"
+                                        :authorize_url "https://i/a"
+                                        :token_url "https://i/t"
+                                        :redirect_host "localhost"
+                                        :redirect_port 8484
+                                        :redirect_path "/"}
+                                       profiles.a.auth.params))
+                    (let [profiles (convert {:type "oauth-authorization-code"
+                                             :params {:client_id "c"
+                                                      :redirect_url "http://127.0.0.1:9000/cb"}})]
+                      (assert.are.same {:client_id "c"
+                                        :redirect_host "127.0.0.1"
+                                        :redirect_port 9000
+                                        :redirect_path "/cb"}
+                                       profiles.a.auth.params))))
+              (it "warns about settings atlas can't apply"
+                  (fn []
+                    (let [(_ warnings) (convert {:type "http-basic"
+                                                 :params {:username "me"}})]
+                      (assert.is_truthy (: (table.concat warnings "\n") :find
+                                           "no password" 1 true)))
+                    (let [(_ warnings) (convert {:type "oauth-authorization-code"
+                                                 :params {:client_id "c"
+                                                          :auth_method "header"}})]
+                      (assert.is_truthy (: (table.concat warnings "\n") :find
+                                           "auth_method" 1 true))))))))

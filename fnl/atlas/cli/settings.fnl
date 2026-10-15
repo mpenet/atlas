@@ -76,18 +76,6 @@ winning."
       (error (.. "config: arazzo " name ": inputs must be an object") 0)))
   config)
 
-;; the parameters each authentication method can't do without
-(local auth-required-params
-       {:bearer [:token]
-        :basic [:username :password]
-        :api-key [:name :value]
-        :external-tool [:commandline]
-        :oauth-client-credentials [:token_url :client_id]
-        :oauth-authorization-code [:authorize_url :token_url :client_id]
-        :oauth-device-authorization [:device_authorization_url
-                                     :token_url
-                                     :client_id]})
-
 (fn check-profile [name profile]
   "profile, raising when a setting has the wrong shape: a mistyped setting
 would otherwise be ignored, auth included."
@@ -104,11 +92,7 @@ would otherwise be ignored, auth included."
            0))
   (when profile.auth
     (when (not (or (= nil profile.auth.params) (object? profile.auth.params)))
-      (error (.. "profile " name ": auth params must be an object") 0))
-    (each [_ k (ipairs (or (. auth-required-params profile.auth.name) []))]
-      (when (let [v (?. profile.auth :params k)] (or (= nil v) (= "" v)))
-        (error (.. "profile " name ": " profile.auth.name " auth needs params."
-                   k) 0))))
+      (error (.. "profile " name ": auth params must be an object") 0)))
   profile)
 
 (fn find-profile [config name]

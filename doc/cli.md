@@ -351,7 +351,7 @@ Sends `Authorization: Bearer <token>`.
 {"name": "api-key", "params": {"name": "X-API-Key", "in": "header", "value": "env:API_KEY"}}
 ```
 
-With `"in": "query"`, the key is sent as a query parameter instead.
+With `"in": "query"`, the key is sent as a query parameter instead, and with `"in": "cookie"` as a cookie; `header` is the default.
 
 ### `oauth-authorization-code`
 

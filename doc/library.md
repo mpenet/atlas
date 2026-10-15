@@ -245,14 +245,19 @@ The function receives a single table and must return a `{:status :headers :body}
 (fn my-fn [req]
   ;; req fields:
   ;;   :method  — "GET", "POST", etc.
-  ;;   :url     — full URL with no query string
-  ;;   :query   — table of query params (or nil)
+  ;;   :url     — full URL; it may already carry a query string (next pages)
+  ;;   :query   — table of query params (or nil), to add to :url
+  ;;   :query-styles — how to serialize each query param ({:style :explode :json});
+  ;;              (atlas.util.append-query url query query-styles) does it
+  ;;   :raw-body — the body already encoded, when set (multipart, signing)
   ;;   :headers — table of request headers
   ;;   :body    — body value (table or string, or nil); encode it yourself if needed
   ;;   :timeout — timeout in seconds (or nil)
   ;;   :ssl     — TLS options table (or nil)
   {:status 200 :headers {} :body {:ok true}})
 ```
+
+A response may also carry `:raw`, the body's text; pagination merges pages from it when present, from `:body` otherwise.
 
 The default `atlas.http.request` function handles query-string encoding, content-type aware body encoding, timeouts and TLS options — your replacement must handle all of these itself.
 

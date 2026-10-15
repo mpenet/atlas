@@ -187,8 +187,10 @@ profiles are kept. --dry-run prints the converted profiles instead."
                   (if ok (print (.. "query: " kv)) (die (tostring kv))))
                 (and (= auth-cfg.name :external-tool)
                      (not= params.output :bearer-token))
-                (print (.. "signs each request with: "
-                           (tostring params.commandline)))))
+                (let [(ok command) (pcall auth.required-param auth-cfg
+                                          :commandline)]
+                  (if ok (print (.. "signs each request with: " command))
+                      (die (tostring command))))))
           ;; a new token replaces the cached one only once obtained
           (let [(ok err) (pcall auth.authenticate profile-name auth-cfg net)]
             (if ok

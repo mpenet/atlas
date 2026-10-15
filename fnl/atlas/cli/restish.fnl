@@ -38,6 +38,36 @@ items are left out)."
         (when params.issuer_url
           (warn where
                 "uses issuer_url (OIDC discovery); set authorize_url and token_url"))
+        (when (and (= kind :http-basic) (= nil params.password))
+          (warn where
+                "http-basic has no password (Restish asks for it); set params.password"))
+        (when params.auth_method
+          (warn where
+                "auth_method is not supported; the client secret goes in the form body"))
+        (when (= kind :oauth-authorization-code)
+          ;; the callback Restish registers: redirect_url, else
+          ;; http://localhost:8484/
+          (let [url params.redirect_url
+                (host port path) (when url
+                                   (url:match "^http://([^:/]+):?(%d*)(/?[^?#]*)"))]
+            (when (and url (not host))
+              (warn where
+                    (.. "redirect_url " url
+                        " is not an http:// address; set redirect_host, redirect_port and redirect_path")))
+            (when (and params.redirect_scheme
+                       (not= params.redirect_scheme :http))
+              (warn where
+                    (.. "redirect_scheme " (tostring params.redirect_scheme)
+                        " is not supported; the callback is plain http")))
+            (set params.redirect_url nil)
+            (set params.redirect_scheme nil)
+            (set params.redirect_host (or host "localhost"))
+            (set params.redirect_port
+                 (or (tonumber port) (when (not host) 8484)))
+            (set params.redirect_path
+                 (if (not host) "/"
+                     (= path "") "/"
+                     path))))
         {:name (or (. auth-names kind) kind)
          :params (when (next params) params)}))))
 

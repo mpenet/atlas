@@ -144,9 +144,7 @@ req.sensitive-headers and any whose name looks like a credential."
                                                               []))]
                                       (when (and same-origin?
                                                  (not= nil (?. req.query n))
-                                                 (not (target:find (.. "[?&]"
-                                                                       (util.url-encode n)
-                                                                       "="))))
+                                                 (not (util.query-has? target n)))
                                         (values n (. req.query n))))]
                            (when (next kept) kept)))
             (tset :headers (if same-origin?
@@ -210,7 +208,9 @@ lines, plus the TLS settings."
 
 (fn send [req]
   "One HTTP exchange; redirects are followed by request, not by the transport."
-  (let [(url payload headers) (encode-request req)
+  (let [(ok url payload headers) (pcall encode-request req)
+        _ (when (not ok)
+            (error (util.permanent-error (tostring url))))
         (status head body) (curl.perform (transfer req url payload headers
                                                    (tls.options req.ssl)))]
     (assert status (string.format "%s %s failed: %s" req.method

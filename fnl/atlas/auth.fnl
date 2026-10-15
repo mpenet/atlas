@@ -23,6 +23,30 @@
             (error (.. "environment variable not set: " var-name))))
       s))
 
+(fn required-param [auth-config key]
+  (let [v (?. auth-config :params key)]
+    (assert (and v (not= v ""))
+            (string.format "%s auth requires params.%s" auth-config.name key))
+    (expand-env v)))
+
+;; the parameters each authentication method can't do without
+(local required-params
+       {:bearer [:token]
+        :basic [:username :password]
+        :api-key [:name :value]
+        :external-tool [:commandline]
+        :oauth-client-credentials [:token_url :client_id]
+        :oauth-authorization-code [:authorize_url :token_url :client_id]
+        :oauth-device-authorization [:device_authorization_url
+                                     :token_url
+                                     :client_id]})
+
+(fn check-params [auth-config]
+  "Raise naming the first parameter auth-config's method needs and lacks;
+checked when authenticating, so a profile can be listed or shown anyway."
+  (each [_ k (ipairs (or (. required-params auth-config.name) []))]
+    (required-param auth-config k)))
+
 (fn random-string [n]
   "n characters from [A-Za-z0-9] read from /dev/urandom, without modulo bias."
   (let [chars "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -169,7 +193,8 @@ returns the stored token, raising on expiry, denial or timeout."
                             :client_id (expand-env params.client_id)}
                            net)
           body (when ok (json-body resp))]
-      (if (and body (util.success? resp.status))
+      ;; some providers answer pending with 200 and an error field
+      (if (and body (util.success? resp.status) (= nil body.error))
           (set token (store-token resp profile-name params))
           ;; keep polling while the user hasn't answered (or the network
           ;; failed); any other error is final
@@ -343,7 +368,10 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
     {:authorization (.. "Bearer " out)}))
 
 (fn external-signing-headers [params req]
-  (let [body (when (not params.omitbody)
+  ;; Restish configs hold strings: "false" keeps the body
+  (let [omit? (or (= params.omitbody true)
+                  (= (: (tostring params.omitbody) :lower) "true"))
+        body (when (not omit?)
                (or req.raw-body (when (= (type req.body) :string) req.body)
                    (when req.body
                      (let [(ok s) (pcall json.encode req.body)]
@@ -366,6 +394,7 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
 (fn authenticate [profile-name auth-config net ?opts]
   "Run the configured OAuth flow and cache the token.
 ?opts: {:open-browser (fn [url])} to replace the system browser launcher."
+  (check-params auth-config)
   (let [params auth-config.params]
     (match auth-config.name
       "oauth-authorization-code" (authorization-code profile-name params net
@@ -395,11 +424,13 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
                        (authenticate profile-name auth-config net))]
           data.access_token))))
 
-(fn required-param [auth-config key]
-  (let [v (?. auth-config :params key)]
-    (assert (and v (not= v ""))
-            (string.format "%s auth requires params.%s" auth-config.name key))
-    (expand-env v)))
+(fn api-key-location [auth-config]
+  "Where an api-key goes: header (the default), query or cookie."
+  (let [in (or (?. auth-config :params :in) :header)]
+    (assert (or (= in :header) (= in :query) (= in :cookie))
+            (.. "api-key params.in must be header, query or cookie, not '"
+                (tostring in) "'"))
+    in))
 
 (fn api-key-in-query? [auth-config]
   (and (= auth-config.name "api-key") (= (?. auth-config :params :in) "query")))
@@ -411,6 +442,7 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
   For external-tool with output=bearer-token: runs command once, returns Authorization header.
   For external-tool signing mode: returns {} — per-request headers come via wrap-http-fn.
   OAuth types: returns {:authorization 'Bearer <token>'}."
+  (check-params auth-config)
   (match auth-config.name
     "bearer" {:authorization (.. "Bearer " (required-param auth-config :token))}
     "basic" {:authorization (.. "Basic "
@@ -419,9 +451,11 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
                                                    ":"
                                                    (required-param auth-config
                                                                    :password))))}
-    "api-key" (if (api-key-in-query? auth-config)
-                  {}
-                  {(: (required-param auth-config :name) :lower) (required-param auth-config
+    "api-key" (match (api-key-location auth-config)
+                :query {}
+                :cookie {:cookie (.. (required-param auth-config :name) "="
+                                     (required-param auth-config :value))}
+                _ {(: (required-param auth-config :name) :lower) (required-param auth-config
                                                                                  :value)})
     "external-tool" (if (= (?. auth-config :params :output) "bearer-token")
                         (external-bearer auth-config.params)
@@ -432,14 +466,14 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
   "Lowercased names of the headers get-headers will supply, without running
 any auth flow; signing tools and query api-keys supply none up front."
   (match auth-config.name
-    "api-key" (if (api-key-in-query? auth-config) []
-                  [(: (or (?. auth-config :params :name) "") :lower)])
+    "api-key" (match (?. auth-config :params :in)
+                :query []
+                :cookie [:cookie]
+                _ [(: (or (?. auth-config :params :name) "") :lower)])
     "external-tool" (if (= (?. auth-config :params :output) "bearer-token")
                         ["authorization"]
                         [])
     _ ["authorization"]))
-
-(local auth-failure-mt {:__tostring #$.message})
 
 (fn authenticating [f ...]
   "f's result; an error it raises becomes an authentication failure, which
@@ -447,8 +481,7 @@ retries leave alone (retry.fnl): it doesn't go away by trying again."
   (let [(ok a b) (pcall f ...)]
     (if ok
         (values a b)
-        (error (setmetatable {:message (tostring a) :auth-failure true}
-                             auth-failure-mt)))))
+        (error (util.permanent-error (tostring a))))))
 
 (fn wrap-api-key-query [auth-config base-fn]
   (fn [req]
@@ -458,10 +491,7 @@ retries leave alone (retry.fnl): it doesn't go away by trying again."
                                                 (required-param auth-config
                                                                 :value)))]
       ;; next-page URLs from pagination may already carry the key
-      (let [in-url? (let [url (or req.url "")
-                          param (.. (util.url-encode name) "=")]
-                      (or (not= nil (url:find (.. "?" param) 1 true))
-                          (not= nil (url:find (.. "&" param) 1 true))))
+      (let [in-url? (util.query-has? (or req.url "") name)
             out (collect [k v (pairs req)] k v)]
         (when (not in-url?)
           (set out.query (doto (collect [k v (pairs (or req.query {}))]
@@ -495,7 +525,9 @@ retries leave alone (retry.fnl): it doesn't go away by trying again."
             (tset req :raw-body payload)
             (tset req :headers headers)
             (tset req :body nil)))
-        (let [extra (authenticating external-signing-headers params req)]
+        (let [extra (authenticating #(do
+                                       (check-params auth-config)
+                                       (external-signing-headers params req)))]
           (when extra
             ;; what the tool adds is a credential, whatever its name
             (set req.sensitive-headers

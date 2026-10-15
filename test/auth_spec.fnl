@@ -335,6 +335,30 @@
                     (assert.are.equal 2 (length sleep-calls))
                     (assert.are.equal 5 (. sleep-calls 1))
                     (assert.are.equal 10 (. sleep-calls 2)))))
+            (it "keeps polling when pending comes as HTTP 200"
+                (fn []
+                  (let [sock (mock-socket)
+                        (http calls) (seq-mock (ok-resp (json-body {:device_code "dc"
+                                                                    :user_code "X"
+                                                                    :verification_uri "https://x.com"
+                                                                    :expires_in 300
+                                                                    :interval 5}))
+                                               (ok-resp (json-body {:error "authorization_pending"}))
+                                               (ok-resp (json-body {:access_token "tok"})))
+                        auth (reload-auth http sock)
+                        profile (tmp-profile)
+                        orig-stderr io.stderr]
+                    (set io.stderr {:write (fn [_ _] nil)})
+                    (let [(ok err) (pcall auth.authenticate profile
+                                          {:name "oauth-device-authorization"
+                                           :params {:device_authorization_url "https://a.com/d"
+                                                    :token_url "https://a.com/t"
+                                                    :client_id "c"}}
+                                          {})]
+                      (set io.stderr orig-stderr)
+                      (clean-token profile)
+                      (assert.is_true ok err)
+                      (assert.are.equal 3 (length calls))))))
             (it "stops on any other token error, with its description"
                 (fn []
                   (let [sock (mock-socket)
@@ -566,6 +590,30 @@
                       (assert.is_truthy (: (tostring err) :find
                                            "external auth command" 1 true))
                       (assert.are.equal 0 (length calls))))))
+            (it "omits the body only when omitbody is true or \"true\""
+                (fn []
+                  (each [_ [omitbody expected] (ipairs [["false" "{\"n\":1}"]
+                                                        ["true" ""]
+                                                        ["TRUE" ""]
+                                                        [true ""]])]
+                    (let [(http) (seq-mock (ok-resp {}))
+                          auth (reload-auth http)
+                          input (os.tmpname)
+                          wrapped (auth.wrap-http-fn {:name "external-tool"
+                                                      :params {:commandline (.. "cat > "
+                                                                                input
+                                                                                "; echo '{}'")
+                                                               : omitbody}}
+                                                     http.request)]
+                      (wrapped {:method "POST"
+                                :url "https://api.example.com/items"
+                                :headers {:content-type "application/json"}
+                                :body {:n 1}})
+                      (let [signed (with-open [f (io.open input)]
+                                     (json.decode (f:read :*a)))]
+                        (os.remove input)
+                        (assert.are.equal expected signed.body
+                                          (tostring omitbody)))))))
             (it "marks the headers the tool adds as sensitive"
                 (fn []
                   (let [(http calls) (seq-mock (ok-resp {}))
@@ -908,3 +956,27 @@
                     (assert.are.same []
                                      (auth.header-names {:name "external-tool"
                                                          :params {}})))))))
+
+(describe "api-key locations"
+          (fn []
+            (it "sends a cookie for in: cookie"
+                (fn []
+                  (let [auth (reload-auth (pick-values 1 (seq-mock)))
+                        cfg {:name "api-key"
+                             :params {:in "cookie" :name "session" :value "s3"}}]
+                    (assert.are.same {:cookie "session=s3"}
+                                     (auth.get-headers "p" cfg {}))
+                    (assert.are.same ["cookie"] (auth.header-names cfg)))))
+            (it "rejects other locations"
+                (fn []
+                  (let [auth (reload-auth (pick-values 1 (seq-mock)))
+                        (ok err) (pcall auth.get-headers "p"
+                                        {:name "api-key"
+                                         :params {:in "Query"
+                                                  :name "k"
+                                                  :value "v"}}
+                                        {})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "api-key params.in must be header, query or cookie"
+                                         1 true)))))))
