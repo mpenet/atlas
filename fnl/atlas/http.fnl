@@ -89,6 +89,18 @@ which would let a value inject extra headers."
   (when (: (tostring value) :find "[\r\n%z]")
     (error (string.format "header '%s' contains a line break or NUL" name) 0)))
 
+(fn header-value [name v]
+  "A header's value as text: arrays in the simple style (a,b), as OpenAPI
+serializes header parameters; objects can't be sent."
+  (if (not= (type v) :table) v (json.array? v)
+      (table.concat (icollect [_ x (ipairs v)]
+                      (if (= (type x) :table)
+                          (error (.. "header " name
+                                     ": nested objects and arrays can't be sent")
+                                 0)
+                          (tostring x))) ",")
+      (error (.. "header " name ": objects can't be sent in a header") 0)))
+
 (fn encode-request [req]
   "Wire form of a request: (url payload headers), with the content type
 replaced when body encoding chose one."
@@ -96,7 +108,7 @@ replaced when body encoding chose one."
         headers (collect [k v (pairs (or req.headers {}))]
                   (when (or (= nil content-type)
                             (not= (k:lower) "content-type"))
-                    (values k v)))]
+                    (values k (header-value k v))))]
     (when content-type
       (tset headers :content-type content-type))
     (each [k v (pairs headers)]
@@ -234,6 +246,7 @@ lines, plus the TLS settings."
  : transfer
  : follow-redirects
  : encode-request
+ : header-value
  : fetch-text
  : encode-body
  : decode-response}

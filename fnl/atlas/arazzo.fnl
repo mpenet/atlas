@@ -162,7 +162,11 @@ Expression format: '{$sourceDescriptions.NAME.url}#/paths/~1foo/method'"
           :path (tset result.path p.name v)
           :query (tset result.query p.name v)
           :header (tset result.headers (p.name:lower) v)
-          :cookie (table.insert cookies (.. p.name "=" (tostring v))))))
+          :cookie (table.insert cookies
+                                (.. p.name "="
+                                    (tostring (http-mod.header-value (.. "cookie "
+                                                                         p.name)
+                                                                     v)))))))
     (when (next cookies)
       (tset result.headers :cookie (table.concat cookies "; ")))
     result))

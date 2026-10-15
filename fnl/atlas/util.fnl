@@ -280,10 +280,14 @@ above the root of an absolute path."
     (if (ref:match "^%a[%w+.-]*://") ref
         ;; a network-path reference keeps only the scheme
         (and origin (ref:match "^//")) (.. (base:match "^(%a[%w+.-]*:)") ref)
-        origin (let [dir (if (= (ref:sub 1 1) "/")
-                            ""
-                            (or (base-path:match "^(.*/)") "/"))]
-                (.. origin (normalize-segments (.. dir ref))))
+        origin
+        (let [dir (if (= (ref:sub 1 1) "/")
+                      ""
+                      (or (base-path:match "^(.*/)") "/"))
+              ;; only the path has dot segments; query and fragment
+              ;; are kept as they are
+              (ref-path rest) (ref:match "^([^?#]*)(.*)$")]
+          (.. origin (normalize-segments (.. dir ref-path)) rest))
         (= (ref:sub 1 1) "/") ref
         (normalize-segments (.. (or (base:match "^(.*/)") "") ref)))))
 

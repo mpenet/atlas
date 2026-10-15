@@ -235,15 +235,41 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
                               :load #(load $
                                            (ref-load-opts load-opts source-url
                                                           $))})
-        servers (or schema.servers [])
+        ;; no servers means one at /, the spec's own host (OpenAPI)
+        servers (if (and (= (type schema.servers) :table)
+                         (not= nil (. schema.servers 1)))
+                    schema.servers
+                    [{:url "/"}])
         index (or (?. ?opts :server-index) 1)
         server (when (and (not (?. ?opts :base-url)) (> (length servers) 0))
                  (assert (. servers index)
                          (string.format "server index %s out of range (schema has %d servers)"
                                         (tostring index) (length servers)))
                  (. servers index))
+        entries (schema-operations schema deref)
+        ;; the server of an operation that declares its own (or whose path
+        ;; item does): the one at the client's index, else its first
+        own-server (fn [path-item op-spec]
+                     (let [list (or (?. op-spec :servers)
+                                    (?. path-item :servers))]
+                       (when (and (= (type list) :table) (. list 1))
+                         (or (. list index) (. list 1)))))
+        server-vars (or (?. ?opts :server-vars) {})
+        ;; each server takes the variables it declares; a variable no server
+        ;; in use declares is an error
+        vars-for #(collect [k v (pairs server-vars)]
+                    (when (?. $ :variables k) (values k v)))
+        _ (when (and server (not (?. ?opts :base-url)))
+            (let [in-use (doto (icollect [_ e (ipairs entries)]
+                                 (own-server e.path-item e.op-spec))
+                           (table.insert server))]
+              (each [k (pairs server-vars)]
+                (when (not (accumulate [found false _ s (ipairs in-use)
+                                        &until found]
+                             (not= nil (?. s :variables k))))
+                  (expand-server-url server server-vars)))))
         server-url (when (and server (not (?. ?opts :base-url)))
-                     (expand-server-url server (or (?. ?opts :server-vars) {})))
+                     (expand-server-url server (vars-for server)))
         base-url (or (?. ?opts :base-url)
                      (when (and server-url (server-url:match "^https?://"))
                        server-url)
@@ -259,20 +285,13 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
                      :ssl (?. ?opts :ssl)
                      :timeout (?. ?opts :timeout)}
         client {}
-        entries (schema-operations schema deref)
         ;; servers of the operation, else of its path item, replace the
         ;; client's unless :base-url was given
         operation-opts (fn [path-item op-spec]
                          (let [own (when (not (?. ?opts :base-url))
-                                     (or (?. op-spec :servers 1)
-                                         (?. path-item :servers 1)))]
+                                     (own-server path-item op-spec))]
                            (if (not own) client-opts
-                               (let [vars (collect [k v (pairs (or (?. ?opts
-                                                                       :server-vars)
-                                                                   {}))]
-                                            (when (?. own :variables k)
-                                              (values k v)))
-                                     url (expand-server-url own vars)]
+                               (let [url (expand-server-url own (vars-for own))]
                                  (doto (collect [k v (pairs client-opts)] k v)
                                    (tset :base-url
                                          (if (url:match "^https?://") url

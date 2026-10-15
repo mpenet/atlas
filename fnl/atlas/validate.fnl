@@ -53,7 +53,11 @@ adds null to a declared type."
 
 (fn check-object [schema v path errors]
   (each [_ name (ipairs (util.required-names schema))]
-    (when (= nil (. v name))
+    ;; a required readOnly property is required in responses only, and
+    ;; requests are what is checked
+    (when (and (= nil (. v name))
+               (not (let [prop (?. schema :properties name)]
+                      (and (= (type prop) :table) prop.readOnly))))
       (table.insert errors (.. path "." name ": required"))))
   (let [names (icollect [k (pairs v)] k)]
     (table.sort names #(< (tostring $1) (tostring $2)))

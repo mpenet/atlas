@@ -671,9 +671,14 @@
                                                                       :value "s1"}
                                                                      {:in "cookie"
                                                                       :name "t"
-                                                                      :value 2}]})
+                                                                      :value 2}
+                                                                     {:in "cookie"
+                                                                      :name "ids"
+                                                                      :value [1
+                                                                              2]}]})
                                          "wf" {} clients {})
-                    (assert.are.same {:x-req "a" :cookie "sid=s1; t=2"}
+                    (assert.are.same {:x-req "a"
+                                      :cookie "sid=s1; t=2; ids=1,2"}
                                      (. seen 1 :headers)))))
             (it "fails a step whose operation does not exist"
                 (fn []

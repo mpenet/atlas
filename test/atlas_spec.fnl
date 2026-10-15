@@ -622,6 +622,30 @@
                                         (c.list-files.url-for))
                       (assert.are.equal "https://api.example.com/x"
                                         (c.get-x.url-for)))))
+              (it "follow the server index and take their own variables"
+                  (fn []
+                    (let [doc {:openapi "3.0.0"
+                               :info {}
+                               :servers [{:url "https://api.example.com"}
+                                         {:url "https://sandbox.example.com"}]
+                               :paths {"/up" {:servers [{:url "https://upload.example.com"}
+                                                        {:url "https://{region}.upload-sandbox.example.com"
+                                                         :variables {:region {:default "us"}}}]
+                                              :post {:operationId "up"
+                                                     :responses {}}}
+                                       "/x" {:get {:operationId "getX"
+                                                   :responses {}}}}}
+                          c (atlas.client doc
+                                          {:http-fn (mock-http)
+                                           :server-index 2
+                                           :server-vars {:region "eu"}})]
+                      (assert.are.equal "https://eu.upload-sandbox.example.com/up"
+                                        (c.up.url-for))
+                      (assert.are.equal "https://sandbox.example.com/x"
+                                        (c.get-x.url-for))
+                      (assert.has.error #(atlas.client doc
+                                                       {:http-fn (mock-http)
+                                                        :server-vars {:nope "x"}})))))
               (it "but not an explicit base-url"
                   (fn []
                     (let [c (atlas.client doc
@@ -655,6 +679,17 @@
 
 (describe "root-relative server URLs"
           (fn []
+            (it "default to / when the spec declares no servers"
+                (fn []
+                  (each [_ servers (ipairs [:absent []])]
+                    (let [doc (schema {"/items/{id}" {:get {:operationId "readItem"
+                                                            :responses {}}}})]
+                      (set doc.servers (when (not= servers :absent) servers))
+                      (let [c (atlas.client doc
+                                            {:source-url "http://localhost:8000/openapi.json"
+                                             :http-fn (mock-http)})]
+                        (assert.are.equal "http://localhost:8000/items/1"
+                                          (c.read-item.url-for {:path {:id 1}})))))))
             (it "may name another host (//host/path)"
                 (fn []
                   (let [c (atlas.client (schema {"/pets" {:get {:operationId "listPets"

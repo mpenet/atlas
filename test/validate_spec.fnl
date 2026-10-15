@@ -58,6 +58,15 @@
                                             :patternProperties {"^x-" {:type "string"}}
                                             :additionalProperties false}
                                            {:x-trace "abc"}))))
+            (it "doesn't require readOnly properties in requests"
+                (fn []
+                  (assert.are.same []
+                                   (errors {:type "object"
+                                            :required ["id" "name"]
+                                            :properties {:id {:type "integer"
+                                                              :readOnly true}
+                                                         :name {:type "string"}}}
+                                           {:name "Rex"}))))
             (it "ignores a required that is not a list"
                 (fn []
                   (assert.are.same []

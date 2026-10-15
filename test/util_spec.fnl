@@ -401,6 +401,14 @@
 
 (describe "resolve-reference"
           (fn []
+            (it "leaves the query and fragment as they are"
+                (fn []
+                  (assert.are.equal "https://api.example.com/v1/items?cursor=ab//cd=="
+                                    (util.resolve-reference "https://api.example.com/v1/items?page=1"
+                                                            "/v1/items?cursor=ab//cd=="))
+                  (assert.are.equal "https://api.example.com/v1/items?cursor=a/./b#x/../y"
+                                    (util.resolve-reference "https://api.example.com/v1/items"
+                                                            "items?cursor=a/./b#x/../y"))))
             (it "takes network-path references to another host"
                 (fn []
                   (assert.are.equal "https://cdn.example.org/shared/pet.json"

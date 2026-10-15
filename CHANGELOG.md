@@ -123,6 +123,11 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - An operationId with no ASCII letters or digits is named after its method and path instead of the empty name.
 - Media types are matched whatever their case (`Application/JSON`).
 - Arazzo: a misspelled part of an expression (`$response.bdy`, `$response.body.status`, `$steps.s.output`) is an error instead of `null` or the whole body.
+- A spec without `servers` has one at `/`, as OpenAPI says: a spec served by the API itself (FastAPI's `/openapi.json`) works without `--base-url`.
+- Validation doesn't require `readOnly` properties in request bodies.
+- Header and cookie values that are arrays are sent in the simple style (`a,b`); objects are an error instead of `table: 0x…`.
+- Servers declared by an operation follow `:server-index`/`--server-index`, and `:server-vars` may set their variables.
+- Relative URLs (next-page links, `$ref`s) keep their query and fragment as written.
 - Help names an operation by the name the client gave it, also when its operationId's name was taken.
 - Validation lets names matching `patternProperties` through `additionalProperties: false`, and ignores `required: true` (a Swagger 2 leftover) instead of crashing; so do help and completion.
 - Network-path references (`//host/path`) in `$ref`s and server URLs keep the spec's scheme only.

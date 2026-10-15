@@ -426,6 +426,16 @@
 
 (describe "header safety"
           (fn []
+            (it "writes array values in the simple style and rejects objects"
+                (fn []
+                  (let [(_ _ headers) (http.encode-request {:method "GET"
+                                                            :url "https://x/y"
+                                                            :headers {:x-ids ["a"
+                                                                              "b"]}})]
+                    (assert.are.equal "a,b" (. headers :x-ids)))
+                  (assert.has.error #(http.encode-request {:method "GET"
+                                                           :url "https://x/y"
+                                                           :headers {:x-o {:a 1}}}))))
             (it "rejects line breaks in header values"
                 (fn []
                   (let [(ok err) (pcall http.encode-request
