@@ -177,20 +177,41 @@ net: {:ssl :timeout} for the token endpoint."
         (set headers (collect [k v (pairs h)] (k:lower) v))))
     headers))
 
+(fn header-key [headers name]
+  "The key of headers that holds header name (names ignore case), or nil."
+  (accumulate [found nil k (pairs headers) &until found]
+    (when (= (k:lower) (name:lower)) k)))
+
+(fn add-cookie [headers cookie]
+  "Add cookie (\"name=value\") to the request's Cookie header, unless one of
+that name is already there."
+  (let [key (header-key headers :cookie)
+        name (cookie:match "^([^=]+)=")
+        present (when key (. headers key))]
+    (if (not present) (tset headers :cookie cookie)
+        (not (accumulate [found false part (present:gmatch "[^;]+") &until found]
+               (= (part:match "^%s*([^=]+)=") name))) (tset headers key
+                                                                    (.. present
+                                                                        "; "
+                                                                        cookie)))))
+
 (fn with-auth-headers [auth-headers names base-fn]
   "Adds auth headers to each request; headers already set explicitly win, and
-when they cover every auth header (names), auth doesn't run at all."
+when they cover every auth header (names), auth doesn't run at all. A cookie
+joins the request's other cookies."
   (fn [req]
     (let [headers (collect [k v (pairs (or req.headers {}))]
                     k
                     v)
+          ;; an unrelated cookie doesn't stand for the one auth adds
           covered (and (next names)
                        (accumulate [all true _ n (ipairs names) &until (not all)]
-                         (not= nil (util.header headers n))))]
+                         (and (not= n :cookie)
+                              (not= nil (util.header headers n)))))]
       (when (not covered)
         (each [k v (pairs (auth-headers))]
-          (when (= nil (util.header headers k))
-            (tset headers k v))))
+          (if (= (k:lower) :cookie) (add-cookie headers v)
+              (= nil (util.header headers k)) (tset headers k v))))
       (base-fn (doto (collect [k v (pairs req)] k v)
                  (tset :headers headers)
                  ;; redirects to another origin must drop them

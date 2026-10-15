@@ -140,12 +140,17 @@ used only with the auth settings that obtained it."
 
 ;; ---- refresh ----
 
+(fn client-form [params fields]
+  "fields with the client's id and, when it has one, its secret."
+  (doto fields
+    (tset :client_id (expand-env params.client_id))
+    (tset :client_secret
+          (when params.client_secret (expand-env params.client_secret)))))
+
 (fn try-refresh [profile-name params net cached]
-  (let [form {:grant_type "refresh_token"
-              :refresh_token cached.refresh_token
-              :client_id (expand-env params.client_id)}]
-    (when params.client_secret
-      (tset form :client_secret (expand-env params.client_secret)))
+  (let [form (client-form params
+                          {:grant_type "refresh_token"
+                           :refresh_token cached.refresh_token})]
     (let [(ok resp) (pcall post-form params.token_url form net)]
       (when (and ok (util.success? resp.status))
         (store-token resp profile-name params cached)))))
@@ -164,7 +169,7 @@ used only with the auth settings that obtained it."
 
 (fn request-device-code [params net]
   "Start the device flow; returns the device authorization response body."
-  (let [form {:client_id (expand-env params.client_id)}]
+  (let [form (client-form params {})]
     (when params.scope (tset form :scope params.scope))
     (let [resp (post-form (or params.device_authorization_url
                               (error "oauth-device-authorization requires device_authorization_url"))
@@ -188,9 +193,9 @@ returns the stored token, raising on expiry, denial or timeout."
   (while (and (not token) (< (os.time) deadline))
     (socket.sleep interval)
     (let [(ok resp) (pcall post-form params.token_url
-                           {:grant_type "urn:ietf:params:oauth:grant-type:device_code"
-                            :device_code device.device_code
-                            :client_id (expand-env params.client_id)}
+                           (client-form params
+                                        {:grant_type "urn:ietf:params:oauth:grant-type:device_code"
+                                         :device_code device.device_code})
                            net)
           body (when ok (json-body resp))]
       ;; some providers answer pending with 200 and an error field
@@ -328,13 +333,11 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
       (io.stderr:write (.. "If browser does not open, visit:\n" auth-url "\n"))
       ((or (?. ?opts :open-browser) open-browser) auth-url)
       (let [code (wait-for-callback srv state redirect-path)
-            form {:grant_type "authorization_code"
-                  :code code
-                  :redirect_uri redirect-uri
-                  :client_id (expand-env params.client_id)}]
-        (when params.client_secret
-          (tset form :client_secret (expand-env params.client_secret)))
-        (tset form :code_verifier code-verifier)
+            form (client-form params
+                              {:grant_type "authorization_code"
+                               : code
+                               :redirect_uri redirect-uri
+                               :code_verifier code-verifier})]
         (store-token (post-form params.token_url form net) profile-name params)))))
 
 ;; ---- external tool ----
@@ -475,9 +478,10 @@ any auth flow; signing tools and query api-keys supply none up front."
                         [])
     _ ["authorization"]))
 
-(fn authenticating [f ...]
-  "f's result; an error it raises becomes an authentication failure, which
-retries leave alone (retry.fnl): it doesn't go away by trying again."
+(fn as-permanent [f ...]
+  "f's result; an error it raises (an authentication failure, a request that
+can't be built) becomes permanent, which retries leave alone (retry.fnl): it
+doesn't go away by trying again."
   (let [(ok a b) (pcall f ...)]
     (if ok
         (values a b)
@@ -486,10 +490,9 @@ retries leave alone (retry.fnl): it doesn't go away by trying again."
 (fn wrap-api-key-query [auth-config base-fn]
   (fn [req]
     ;; read when a request is sent (env: values may be unset until then)
-    (let [(name value) (authenticating #(values (required-param auth-config
-                                                                :name)
-                                                (required-param auth-config
-                                                                :value)))]
+    (let [(name value) (as-permanent #(values (required-param auth-config :name)
+                                              (required-param auth-config
+                                                              :value)))]
       ;; next-page URLs from pagination may already carry the key
       (let [in-url? (util.query-has? (or req.url "") name)
             out (collect [k v (pairs req)] k v)]
@@ -515,19 +518,24 @@ retries leave alone (retry.fnl): it doesn't go away by trying again."
         (tset req :headers (collect [k v (pairs (or req.headers {}))]
                              k
                              v))
-        ;; sign the URL that goes on the wire, query string included
-        (when req.query
-          (tset req :url (util.append-query req.url req.query req.query-styles))
-          (tset req :query nil))
-        ;; pre-encode body so signing and wire use identical bytes
-        (when (and req.body (not req.raw-body))
-          (let [(_ payload headers) (http.encode-request req)]
-            (tset req :raw-body payload)
-            (tset req :headers headers)
-            (tset req :body nil)))
-        (let [extra (authenticating #(do
-                                       (check-params auth-config)
-                                       (external-signing-headers params req)))]
+        (as-permanent #(do
+                         ;; sign the URL that goes on the wire, query string
+                         ;; included
+                         (when req.query
+                           (tset req :url
+                                 (util.append-query req.url req.query
+                                                    req.query-styles))
+                           (tset req :query nil))
+                         ;; pre-encode body so signing and wire use identical
+                         ;; bytes
+                         (when (and req.body (not req.raw-body))
+                           (let [(_ payload headers) (http.encode-request req)]
+                             (tset req :raw-body payload)
+                             (tset req :headers headers)
+                             (tset req :body nil)))))
+        (let [extra (as-permanent #(do
+                                     (check-params auth-config)
+                                     (external-signing-headers params req)))]
           (when extra
             ;; what the tool adds is a credential, whatever its name
             (set req.sensitive-headers

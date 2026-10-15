@@ -864,6 +864,30 @@
                                             ["auth" "nopw" "--logout"]])]
                        (assert.are.equal 0 (. (atlas-run args) :code)
                                          (table.concat args " "))))))
+            (it "adds a cookie API key to the cookies already sent"
+                (fn []
+                  (let [cfg {:profiles {:ck {:schema "test/fixtures/cli-api.json"
+                                             :headers {:Cookie "theme=dark"}
+                                             :auth {:name "api-key"
+                                                    :params {:in "cookie"
+                                                             :name "sid"
+                                                             :value "S"}}}}}
+                        routes {"GET https://api.test/pets" (respond 200 [])}
+                        r (with-config cfg
+                            #(atlas-run ["op" "ck" "list-pets"] routes))
+                        mine (with-config cfg
+                               #(atlas-run ["op"
+                                            "ck"
+                                            "list-pets"
+                                            "--h.cookie=sid=MINE"]
+                                           routes))
+                        cookie (fn [run]
+                                 (let [util (require :atlas.util)]
+                                   (util.header (. run.requests 1 :headers)
+                                                "cookie")))]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "theme=dark; sid=S" (cookie r))
+                    (assert.are.equal "sid=MINE" (cookie mine)))))
             (it "names the auth parameters a profile is missing"
                 (fn []
                   (each [_ [auth msg] (ipairs [[{:name "oauth-client-credentials"

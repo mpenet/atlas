@@ -61,13 +61,16 @@ items are left out)."
                         " is not supported; the callback is plain http")))
             (set params.redirect_url nil)
             (set params.redirect_scheme nil)
-            (set params.redirect_host (or host "localhost"))
-            (set params.redirect_port
-                 (or (tonumber port) (when (not host) 8484)))
-            (set params.redirect_path
-                 (if (not host) "/"
-                     (= path "") "/"
-                     path))))
+            ;; from redirect_url, else the profile's own settings, else
+            ;; Restish's defaults
+            (let [own-path (or path params.redirect_path "/")]
+              (set params.redirect_host
+                   (or host params.redirect_host "localhost"))
+              (set params.redirect_port
+                   (if host (or (tonumber port) 80)
+                       (or (tonumber params.redirect_port) 8484)))
+              (set params.redirect_path
+                   (if (= (own-path:sub 1 1) "/") own-path (.. "/" own-path))))))
         {:name (or (. auth-names kind) kind)
          :params (when (next params) params)}))))
 

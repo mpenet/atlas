@@ -173,6 +173,21 @@
                                         :redirect_port 9000
                                         :redirect_path "/cb"}
                                        profiles.a.auth.params))))
+              (it "keeps a profile's own redirect port and path"
+                  (fn []
+                    (let [profiles (convert {:type "oauth-authorization-code"
+                                             :params {:client_id "c"
+                                                      :redirect_port "9000"
+                                                      :redirect_path "cb"}})]
+                      (assert.are.same {:client_id "c"
+                                        :redirect_host "localhost"
+                                        :redirect_port 9000
+                                        :redirect_path "/cb"}
+                                       profiles.a.auth.params))
+                    (let [profiles (convert {:type "oauth-authorization-code"
+                                             :params {:client_id "c"
+                                                      :redirect_url "http://localhost/cb"}})]
+                      (assert.are.equal 80 profiles.a.auth.params.redirect_port))))
               (it "warns about settings atlas can't apply"
                   (fn []
                     (let [(_ warnings) (convert {:type "http-basic"

@@ -372,7 +372,7 @@ For services and CI: `token_url`, `client_id`, `client_secret`, and optionally `
 
 ### `oauth-device-authorization`
 
-For machines without a browser: prints a code and a URL on stderr, then waits while you approve on another device. Params: `device_authorization_url`, `token_url`, `client_id`, and optionally `scope`.
+For machines without a browser: prints a code and a URL on stderr, then waits while you approve on another device. Params: `device_authorization_url`, `token_url`, `client_id`, and optionally `client_secret` and `scope`.
 
 OAuth tokens are cached in `~/.cache/atlas/tokens/<profile>.json` (mode 0600; `$XDG_CACHE_HOME` replaces `~/.cache` when set) and refreshed when they expire. `atlas auth <profile>` signs in again; `atlas auth <profile> --logout` deletes the token.
 

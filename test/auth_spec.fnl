@@ -335,6 +335,31 @@
                     (assert.are.equal 2 (length sleep-calls))
                     (assert.are.equal 5 (. sleep-calls 1))
                     (assert.are.equal 10 (. sleep-calls 2)))))
+            (it "sends the client secret when there is one"
+                (fn []
+                  (let [sock (mock-socket)
+                        (http calls) (seq-mock (ok-resp (json-body {:device_code "dc"
+                                                                    :user_code "X"
+                                                                    :verification_uri "https://x.com"
+                                                                    :expires_in 300
+                                                                    :interval 5}))
+                                               (ok-resp (json-body {:access_token "tok"})))
+                        auth (reload-auth http sock)
+                        profile (tmp-profile)
+                        orig-stderr io.stderr]
+                    (set io.stderr {:write (fn [_ _] nil)})
+                    (auth.authenticate profile
+                                       {:name "oauth-device-authorization"
+                                        :params {:device_authorization_url "https://a.com/d"
+                                                 :token_url "https://a.com/t"
+                                                 :client_id "c"
+                                                 :client_secret "S3"}}
+                                       {})
+                    (set io.stderr orig-stderr)
+                    (clean-token profile)
+                    (each [_ call (ipairs calls)]
+                      (assert.is_truthy (call.raw-body:find "client_secret=S3"
+                                                            1 true))))))
             (it "keeps polling when pending comes as HTTP 200"
                 (fn []
                   (let [sock (mock-socket)
@@ -614,6 +639,21 @@
                         (os.remove input)
                         (assert.are.equal expected signed.body
                                           (tostring omitbody)))))))
+            (it "fails at once, without retries, on a request it can't build"
+                (fn []
+                  (let [(http calls) (seq-mock (ok-resp {}))
+                        auth (reload-auth http)
+                        wrapped (auth.wrap-http-fn {:name "external-tool"
+                                                    :params {:commandline "echo '{}'"}}
+                                                   http.request)
+                        (ok err) (pcall wrapped
+                                        {:method "POST"
+                                         :url "https://api.example.com/items"
+                                         :headers {:x-a "a\nb"}
+                                         :body {:n 1}})]
+                    (assert.is_false ok)
+                    (assert.is_true (?. err :permanent))
+                    (assert.are.equal 0 (length calls)))))
             (it "marks the headers the tool adds as sensitive"
                 (fn []
                   (let [(http calls) (seq-mock (ok-resp {}))
