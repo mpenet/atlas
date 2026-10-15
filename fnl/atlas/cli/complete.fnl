@@ -32,8 +32,9 @@
 
 (fn applies? [o scope]
   "Whether option o applies to a command of scope, as parsing decides: its
-own scope, :any for the API commands op and az, or one of its :also."
-  (or (= o.scope scope) (and (= o.scope :any) (or (= scope :op) (= scope :az)))
+own scope, :any for the API commands op, az and http, or one of its :also."
+  (or (= o.scope scope)
+      (and (= o.scope :any) (or (= scope :op) (= scope :az) (= scope :http)))
       (accumulate [ok false _ s (ipairs (or o.also [])) &until ok]
         (= s scope))))
 
@@ -48,12 +49,15 @@ own scope, :any for the API commands op and az, or one of its :also."
   (print "Commands:")
   (print "  op  <profile-or-schema> [operation] [path-params...]  Run an API operation")
   (print "  az  <name-or-file> [workflow-id] [path-params...]     Run an Arazzo workflow")
+  (print "  http [METHOD] <url-or-path> [--profile NAME]          Send a request without a spec")
   (print "  profile <list|show> [name]                            Manage profiles")
   (print "  profile import-restish [FILE] [--dry-run]             Add profiles from a Restish config")
   (print "  auth    <profile> [--logout]                          Authenticate a profile")
   (print "  completion <fish|bash|zsh>                            Print shell completion")
   (print "  --version                                             Print the version")
-  (each [_ [title scope] (ipairs [["Options (op):" :op] ["Options (az):" :az]])]
+  (each [_ [title scope] (ipairs [["Options (op):" :op]
+                                  ["Options (az):" :az]
+                                  ["Options (http):" :http]])]
     (print "")
     (print title)
     (each [_ o (ipairs (scope-options scope))]
@@ -189,10 +193,17 @@ operation, or an Arazzo document's workflow and inputs."
         n (length positional)
         profiles (icollect [_ p (ipairs (sorted-keys config.profiles))]
                    {:value p})]
-    (if (= nil cmd) (icollect [_ c (ipairs [:auth :az :completion :op :profile])]
+    (if (= nil cmd) (icollect [_ c (ipairs [:auth
+                                            :az
+                                            :completion
+                                            :http
+                                            :op
+                                            :profile])]
                       {:value c})
         (and (or (= cmd :op) (= cmd :auth)) (= n 1)) profiles
-        (and (= cmd :profile) (= n 1))
+        (and (= cmd :http) (= n 1))
+        (icollect [_ m (ipairs [:DELETE :GET :HEAD :OPTIONS :PATCH :POST :PUT])]
+          {:value m}) (and (= cmd :profile) (= n 1))
         [{:value :import-restish} {:value :list} {:value :show}]
         (and (= cmd :profile) (= n 2) (= target :show)) profiles
         (and (= cmd :completion) (= n 1))
@@ -219,6 +230,7 @@ operation, or an Arazzo document's workflow and inputs."
                                   :op :op
                                   :az :az
                                   :arazzo :az
+                                  :http :http
                                   :auth :auth
                                   :profile :profile
                                   _ :none)

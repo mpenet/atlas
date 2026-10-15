@@ -1062,7 +1062,7 @@
                 (fn []
                   (let [r (atlas-run ["profile" "list" "--timeout" "3"])]
                     (assert.are.equal 1 r.code)
-                    (assert.are.equal "--timeout doesn't apply to profile (it is for op and az)\n"
+                    (assert.are.equal "--timeout doesn't apply to profile (it is for op, az and http)\n"
                                       r.err))
                   (let [r (atlas-run ["profile" "list" "--dry-run"])]
                     (assert.are.equal 1 r.code)
@@ -1408,3 +1408,157 @@
                                         {})]
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find "nope/restish.json" 1 true))))))))
+
+(describe "atlas http"
+          (fn []
+            (it "sends a request with the profile's headers and auth"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "GET"
+                                      "https://api.test/pets/7"
+                                      "--profile=p"
+                                      "--no-color"]
+                                     {"GET https://api.test/pets/7" (respond 200
+                                                                             {:name "Rex"})})]
+                    (assert.are.equal 0 r.code)
+                    (assert.is_truthy (r.out:find "\"name\": \"Rex\"" 1 true))
+                    (assert.are.equal "Bearer t0k"
+                                      (. r.requests 1 :headers :authorization))
+                    (assert.are.equal "o1" (. r.requests 1 :headers :x-org)))))
+            (it "defaults to GET and resolves paths against the profile's API"
+                (fn []
+                  (let [r (atlas-run ["http" "/pets/7" "--profile=p"]
+                                     {"GET https://api.test/pets/7" (respond 200
+                                                                             {})})]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "GET" (. r.requests 1 :method))
+                    (assert.are.equal "https://api.test/pets/7"
+                                      (. r.requests 1 :url)))))
+            (it "resolves paths against --base-url"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "delete"
+                                      "pets/7"
+                                      "--base-url=https://h.test/v1/"]
+                                     {"DELETE https://h.test/v1/pets/7" (respond 204
+                                                                                 nil)})]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "DELETE" (. r.requests 1 :method)))))
+            (it "refuses to send a profile's credentials to another origin"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "GET"
+                                      "https://evil.test/pets"
+                                      "--profile=p"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "https://api.test" 1 true))
+                    (assert.are.equal 0 (length r.requests)))))
+            (it "sends no credentials without a profile"
+                (fn []
+                  (let [r (atlas-run ["http" "https://other.test/x"]
+                                     {"GET https://other.test/x" (respond 200
+                                                                          {})})]
+                    (assert.are.equal 0 r.code)
+                    (assert.is_nil (. r.requests 1 :headers :authorization)))))
+            (it "needs a base URL for a path"
+                (fn []
+                  (let [r (atlas-run ["http" "GET" "/pets"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "--profile or --base-url" 1
+                                                  true)))))
+            (it "sends a JSON body as given"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "POST"
+                                      "https://h.test/pets"
+                                      "-d"
+                                      "{\"size\": 1.50}"]
+                                     {"POST https://h.test/pets" (respond 201
+                                                                          {})})
+                        req (. r.requests 1)]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "{\"size\": 1.50}" req.body)
+                    (assert.are.equal "application/json"
+                                      (. req.headers :content-type)))))
+            (it "builds a JSON body from fields"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "POST"
+                                      "https://h.test/pets"
+                                      "-d"
+                                      "name: Rex"
+                                      "--b.size=2"
+                                      "--b.tag.color=red"]
+                                     {"POST https://h.test/pets" (respond 201
+                                                                          {})})
+                        req (. r.requests 1)]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.same {:name "Rex" :size 2 :tag {:color "red"}}
+                                     req.body)
+                    (assert.are.equal "application/json"
+                                      (. req.headers :content-type)))))
+            (it "sends other bodies as-is, with the given content type"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "PUT"
+                                      "https://h.test/note"
+                                      "-d"
+                                      "hello"
+                                      "--h.Content-Type=text/plain"]
+                                     {"PUT https://h.test/note" (respond 204
+                                                                         nil)})
+                        req (. r.requests 1)]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "hello" req.body)
+                    (assert.are.equal "text/plain"
+                                      (. req.headers :content-type)))))
+            (it "adds query parameters to the URL's own"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "https://h.test/pets?limit=1"
+                                      "--q.status=sold"]
+                                     {"GET https://h.test/pets?limit=1&status=sold" (respond 200
+                                                                                             [])})]
+                    (assert.are.equal 0 r.code))))
+            (it "prints the request with redacted credentials for --dry-run"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "GET"
+                                      "/pets"
+                                      "--profile=p"
+                                      "--dry-run"])]
+                    (assert.are.equal 0 r.code)
+                    (assert.is_truthy (r.out:find "GET https://api.test/pets" 1
+                                                  true))
+                    (assert.is_nil (r.out:find "t0k" 1 true))
+                    (assert.are.equal 0 (length r.requests)))))
+            (it "maps HTTP errors to exit codes"
+                (fn []
+                  (assert.are.equal 4
+                                    (. (atlas-run ["http"
+                                                   "https://h.test/none"])
+                                       :code))))
+            (it "refuses options that need a spec, and extra arguments"
+                (fn []
+                  (let [r (atlas-run ["http" "GET" "https://h.test/" "--list"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "doesn't apply to http" 1
+                                                  true)))
+                  (let [r (atlas-run ["http" "GET" "https://h.test/" "extra"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "Usage: atlas http" 1 true)))
+                  (let [r (atlas-run ["http"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "Usage: atlas http" 1 true)))))
+            (it "prints usage for --help without sending"
+                (fn []
+                  (let [r (atlas-run ["http" "GET" "https://h.test/" "--help"])]
+                    (assert.are.equal 0 r.code)
+                    (assert.is_truthy (r.out:find "Options (http):" 1 true))
+                    (assert.are.equal 0 (length r.requests)))))
+            (it "fails on a profile it doesn't know"
+                (fn []
+                  (let [r (atlas-run ["http" "/x" "--profile=nope"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "Profile not found: nope" 1
+                                                  true)))))))

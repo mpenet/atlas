@@ -1,5 +1,5 @@
-;; ABOUTME: The atlas command line: dispatches the op, az, auth, profile and
-;; ABOUTME: completion subcommands; run returns the process exit code.
+;; ABOUTME: The atlas command line: dispatches the op, az, http, auth, profile
+;; ABOUTME: and completion subcommands; run returns the process exit code.
 (local atlas (require :atlas))
 (local arazzo (require :atlas.arazzo))
 (local auth (require :atlas.auth))
@@ -454,6 +454,92 @@ invalid body unless --no-validate."
                                                            op.spec op.name)))
                 (send-op op p opts profile config)))))))
 
+;; ---- http ----
+
+(local http-usage "Usage: atlas http [METHOD] <URL-or-path> [options]")
+
+(fn profile-base-url [profile-name profile p opts env]
+  "Where a profile's API is: --base-url or its base-url, else its spec's
+server."
+  (or opts.base-url (let [raw-schema (or profile.schema
+                                         (die (.. "profile " profile-name
+                                                  " has no base-url or schema")))
+                          verbose (. (display-options profile p env.config)
+                                     :verbose)
+                          schema (load-op-schema raw-schema profile p opts env
+                                                 verbose)
+                          (ok url) (pcall atlas.base-url
+                                          (if (= (type schema) :string)
+                                              (atlas.load-schema schema)
+                                              schema)
+                                          {:server-index opts.server-index
+                                           :server-vars opts.server-vars
+                                           :source-url (when (= (type schema)
+                                                                :table)
+                                                         raw-schema)})]
+                      (if ok url (die (tostring url))))))
+
+(fn http-url [target base profile-name]
+  "The URL of target: absolute, or a path under base. A profile's
+credentials only go to its own origin."
+  (if (target:match "^%a[%w+.-]*://")
+      (do
+        (when (not (util.origin target))
+          (die (.. "not an http(s) URL: " target)))
+        (when (and profile-name (not= (util.origin target) (util.origin base)))
+          (die (.. target " is not on the API of profile " profile-name " ("
+                   (util.origin base) "): its credentials are only sent there")))
+        target)
+      base
+      (.. (pick-values 1 (base:gsub "/+$" "")) "/"
+          (pick-values 1 (target:gsub "^/+" "")))
+      (die (.. "a path needs --profile or --base-url: " target))))
+
+(fn http-body [p]
+  "(body json) from -d and --b. fields: fields build a JSON object (on -d's
+JSON or YAML one); otherwise -d is sent as given, as JSON when it is JSON."
+  (if (next p.body-fields)
+      (values (build-body p.body-fields nil
+                          (when p.body (decode-structured p.body)))
+              true)
+      (values p.body (and (= (type p.body) :string) (pcall json.decode p.body)))))
+
+(fn run-http [p env]
+  (when (or (not p.schema) (next p.path-params))
+    (die http-usage))
+  (let [config env.config
+        (method target) (if p.operation
+                            (values (p.schema:upper) p.operation)
+                            (values "GET" p.schema))
+        profile (find-profile config p.profile)
+        _ (when (and p.profile (not profile))
+            (die (.. "Profile not found: " p.profile)))
+        opts (client-options p.profile profile p config env.transport)
+        base (if profile
+                 (profile-base-url p.profile profile p opts env)
+                 opts.base-url)
+        url (http-url target base p.profile)
+        (body json-body) (http-body p)
+        headers (collect [k v (pairs opts.headers)] k v)
+        {: output : no-color : verbose} (display-options profile p config)]
+    (each [k v (pairs p.headers)]
+      (tset headers (k:lower) v))
+    (when (and json-body (= nil (. headers :content-type)))
+      (tset headers :content-type "application/json"))
+    (let [t0 (socket.gettime)
+          (ok resp) (pcall opts.http-fn
+                           {: method
+                            : url
+                            :query (when (next p.query) p.query)
+                            : headers
+                            : body
+                            :ssl opts.ssl
+                            :timeout opts.timeout})]
+      (if ok
+          (print-resp resp output no-color verbose p.select
+                      (- (socket.gettime) t0) p.ignore-status)
+          (die (.. "request failed: " (tostring resp)))))))
+
 ;; ---- entry points ----
 
 (fn dispatch [args env]
@@ -470,13 +556,14 @@ invalid body unless --no-validate."
                         :bash (completion-bash)
                         :zsh (completion-zsh)
                         _ (die "Usage: atlas completion <fish|bash|zsh>"))
-          (where (or :profile :auth) p.help) (usage)
+          (where (or :profile :auth :http) p.help) (usage)
           :profile (run-profile p.schema p.operation p env)
           :auth (run-auth p.schema p env.config)
           (where (or :az :arazzo)) (run-arazzo p env)
           :op (run-op p env)
+          :http (run-http p env)
           _ (die (.. "Unknown command: " (tostring p.cmd)
-                     "\nUsage: atlas <op|az|profile|auth|completion> ..."))))))
+                     "\nUsage: atlas <op|az|http|profile|auth|completion> ..."))))))
 
 (fn run [args ?env]
   "Run atlas with args and return the exit code.

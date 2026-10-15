@@ -2,6 +2,13 @@
 
 All notable changes to atlas. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `atlas http [METHOD] URL-or-path`: a request without a spec, with a profile's headers, authentication and TLS settings, retries, pagination, `-v`, `--dry-run`/`--curl` and the usual output and exit codes. A path is appended to the profile's API URL; a profile's credentials are only sent to its API's origin.
+- `atlas.base-url`: the URL a client of a schema sends requests to.
+
 ## [1.0.0-beta4] - 2026-10-15
 
 ### Changed

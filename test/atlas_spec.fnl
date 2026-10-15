@@ -844,3 +844,35 @@
                       (assert.are.equal 1 (length calls))
                       (assert.is_nil (. c.add-pet :cli/help)))
                     (set doc.build real-build))))))
+
+(describe "base-url"
+          (fn []
+            (it "is the chosen server's URL with its variables"
+                (fn []
+                  (assert.are.equal "https://root.internal.test/api"
+                                    (atlas.base-url multi-server-schema))
+                  (assert.are.equal "https://pproot.service.test/api"
+                                    (atlas.base-url multi-server-schema
+                                                    {:server-index 2
+                                                     :server-vars {:env "pp"}}))))
+            (it "prefers :base-url"
+                (fn []
+                  (assert.are.equal "https://o.test"
+                                    (atlas.base-url multi-server-schema
+                                                    {:base-url "https://o.test"}))))
+            (it "resolves a relative server against the spec's location"
+                (fn []
+                  (assert.are.equal "https://specs.test/v2"
+                                    (atlas.base-url {:openapi "3.0.0"
+                                                     :servers [{:url "/v2"}]}
+                                                    {:source-url "https://specs.test/openapi.json"}))
+                  (assert.are.equal "https://specs.test/"
+                                    (atlas.base-url {:openapi "3.0.0"}
+                                                    {:source-url "https://specs.test/openapi.json"}))))
+            (it "rejects unknown server variables"
+                (fn []
+                  (let [(ok err) (pcall atlas.base-url multi-server-schema
+                                        {:server-vars {:nope "x"}})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "unknown server variable 'nope'" 1 true)))))))

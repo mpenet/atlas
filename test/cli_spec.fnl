@@ -840,8 +840,21 @@
           (fn []
             (it "completes subcommands"
                 (fn []
-                  (assert.are.same ["auth" "az" "completion" "op" "profile"]
+                  (assert.are.same ["auth"
+                                    "az"
+                                    "completion"
+                                    "http"
+                                    "op"
+                                    "profile"]
                                    (complete ""))))
+            (it "completes http methods and http's options"
+                (fn []
+                  (assert.are.same ["PATCH" "POST" "PUT"] (complete "http P"))
+                  (assert.are.same ["--profile="]
+                                   (complete "http GET /x --prof"))
+                  (assert.are.same ["--q."] (complete "http GET /x --q"))
+                  (assert.are.same [] (complete "http GET /x --li"))
+                  (assert.are.same [] (complete "http GET /x --no-val"))))
             (it "filters by the current word"
                 (fn []
                   (assert.are.same ["auth" "az"] (complete "a"))

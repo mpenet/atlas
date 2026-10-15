@@ -216,6 +216,43 @@ Overrides must name declared variables and respect their enum."
                   name
                   {:default v.default :enum v.enum :description v.description})}))
 
+(fn pick-server [schema index]
+  "The schema's server at index; no servers means one at /, the spec's own
+host (OpenAPI)."
+  (let [servers (if (and (= (type schema.servers) :table)
+                         (not= nil (. schema.servers 1)))
+                    schema.servers
+                    [{:url "/"}])]
+    (assert (and (. servers index) ;; the default server at / is no choice
+                 (or (= index 1) (not= nil (?. schema :servers 1))))
+            (string.format "server index %s out of range (schema has %d servers)"
+                           (tostring index) (length (or schema.servers []))))
+    (. servers index)))
+
+(fn resolve-server-url [server-url source-url]
+  "An expanded server URL as an absolute one: relative ones are relative to
+the spec's location."
+  (or (when (server-url:match "^https?://")
+        server-url)
+      (when (and source-url (source-url:match "^https?://")
+                 (server-url:match "^/"))
+        ;; /path or //host/path
+        (util.resolve-reference source-url server-url))
+      (error "no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts")))
+
+(fn base-url [schema ?opts]
+  "The URL a client of schema sends requests to: ?opts.base-url, else the
+server at ?opts.server-index (default 1) with ?opts.server-vars applied,
+relative to ?opts.source-url, the spec's location.
+?opts — {:base-url :server-index :server-vars :source-url}"
+  (or (?. ?opts :base-url)
+      (resolve-server-url (expand-server-url (pick-server schema
+                                                          (or (?. ?opts
+                                                                  :server-index)
+                                                              1))
+                                             (or (?. ?opts :server-vars) {}))
+                          (?. ?opts :source-url))))
+
 (fn client [schema ?opts]
   "Build an API client from an OpenAPI 3.x schema.
 
@@ -244,20 +281,9 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
                               :load #(load $
                                            (ref-load-opts load-opts source-url
                                                           $))})
-        ;; no servers means one at /, the spec's own host (OpenAPI)
-        servers (if (and (= (type schema.servers) :table)
-                         (not= nil (. schema.servers 1)))
-                    schema.servers
-                    [{:url "/"}])
         index (or (?. ?opts :server-index) 1)
-        server (when (and (not (?. ?opts :base-url)) (> (length servers) 0))
-                 (assert (and (. servers index)
-                              ;; the default server at / is no choice
-                              (or (= index 1) (not= nil (?. schema :servers 1))))
-                         (string.format "server index %s out of range (schema has %d servers)"
-                                        (tostring index)
-                                        (length (or schema.servers []))))
-                 (. servers index))
+        server (when (not (?. ?opts :base-url))
+                 (pick-server schema index))
         entries (schema-operations schema deref)
         ;; the server of an operation that declares its own (or whose path
         ;; item does): the one at the client's index, else its first
@@ -283,14 +309,7 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
         server-url (when (and server (not (?. ?opts :base-url)))
                      (expand-server-url server (vars-for server)))
         base-url (or (?. ?opts :base-url)
-                     (when (and server-url (server-url:match "^https?://"))
-                       server-url)
-                     (when (and source-url server-url
-                                (source-url:match "^https?://")
-                                (server-url:match "^/"))
-                       ;; relative to the spec: /path or //host/path
-                       (util.resolve-reference source-url server-url))
-                     (error "no base-url: schema servers URL is missing or unresolvable, pass :base-url in opts"))
+                     (resolve-server-url server-url source-url))
         client-opts {:base-url base-url
                      :headers (or (?. ?opts :headers) {})
                      :http-fn (or (?. ?opts :http-fn) http.request)
@@ -338,4 +357,5 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
  :load-schema load-schema
  :parse-schema parse-schema
  :servers servers
- :server-url expand-server-url}
+ :server-url expand-server-url
+ :base-url base-url}

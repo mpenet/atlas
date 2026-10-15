@@ -214,6 +214,15 @@ Lists a parsed schema's servers and their variables, e.g. to offer a choice befo
 
 A server's URL with its variables replaced by the given values or their defaults. Raises an error for a variable the server doesn't declare or a value outside its `enum`.
 
+## `atlas.base-url`
+
+```fennel
+(atlas.base-url schema {:server-index 1 :server-vars {:zone "de-fra-1"}})
+;; => "https://api-de-fra-1.exoscale.com/v2"
+```
+
+The URL a client built with the same options sends requests to: `:base-url` if given, else the chosen server's URL with its variables, made absolute against `:source-url` (the spec's location) when the server is relative. Operations that declare their own servers can still go elsewhere.
+
 ## `atlas.load-schema`
 
 ```fennel

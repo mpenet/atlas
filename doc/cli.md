@@ -72,6 +72,7 @@ luarocks installs the Lua dependencies (lunajson, luasocket, lyaml) and compiles
 ```
 atlas op <profile-or-schema> [operation] [path-params...] [options]
 atlas az <name-or-file> [workflow-id] [path-params...] [options]
+atlas http [METHOD] <url-or-path> [options]
 atlas profile list
 atlas profile show <name>
 atlas profile import-restish [file] [--dry-run]
@@ -84,6 +85,7 @@ atlas --version
 |---------|-------------|
 | `op` | Call an operation. The first argument is a profile name, or a spec's URL or file path (JSON or YAML). Without an operation, lists the operations. |
 | `az` | Run an [Arazzo workflow](arazzo.md) (`arazzo` is an alias). Without a workflow id, lists the workflows. |
+| `http` | Sends a request to any URL, without a spec; see [Requests without a spec](#requests-without-a-spec-http). |
 | `profile list` | Profiles with the schema each one uses, inherited ones included. |
 | `profile show` | A profile as atlas uses it, `extends` resolved. |
 | `profile import-restish` | Adds the APIs of a Restish configuration as profiles; see [Moving from Restish](guide.md#moving-from-restish). |
@@ -142,6 +144,21 @@ Options go anywhere after the command. `--name=value` and `--name value` are equ
 | `--max-gotos=N` | Most jumps to a single step before the workflow aborts (default 50) |
 
 `--dry-run` and `--curl` are refused: later steps depend on real responses. Use `-v` to log every request.
+
+### Requests without a spec (`http`)
+
+```sh
+atlas http https://api.example.com/health
+atlas http GET /zones --profile exo
+atlas http POST /instances --profile exo --b.name=web1 --b.disk.size=10
+atlas http DELETE https://api.example.com/items/7 --profile ex -v
+```
+
+The method defaults to `GET`. A path (`/zones`) is appended to the API's URL: `--base-url`, else the profile's `base-url`, else its spec's server (with `--server-index` and `--server.`). A full URL is sent as is; with `--profile`, it must be on the profile's API origin. atlas refuses to send the profile's credentials anywhere else.
+
+`http` goes through the same profile headers and query, authentication, retries, pagination, redirects, output and exit codes as `op`. It skips the spec-driven parts: operation names, parameter and body checks, and `--help` per operation. Its body is sent as given: `-d` with JSON is sent as JSON, with `Content-Type: application/json`; anything else goes as is, with the content type you set with `--h.Content-Type=…`. `--b.` fields build a JSON object, on top of `-d`'s JSON or YAML object if one is given.
+
+`http` takes `--profile=NAME` and the `op` options above except `--list`, `--servers`, `--no-validate`, `--reload` and `--cache-ttl`.
 
 ### Others
 

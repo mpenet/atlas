@@ -20,7 +20,7 @@
        ;; :positive     a :number that must be greater than 0
        ;; :arg          placeholder for the value in usage (default N or VALUE)
        ;; :shown        how usage displays it, when the default form doesn't fit
-       ;; :scope        :op, :az, :auth or :any
+       ;; :scope        :op, :az, :auth or :any (op, az and http)
        ;; :also         other commands that take it
        ;; :explained    commands that refuse it with an explanation: parsed,
        ;;               but never offered
@@ -44,10 +44,12 @@
         {:family "--q."
          :shown "--query.KEY=VAL"
          :scope :op
+         :also [:http]
          :help "Query parameter; repeat for a list (short: --q.KEY=VAL)"}
         {:family "--h."
          :shown "--header.KEY=VAL"
          :scope :op
+         :also [:http]
          :help "Request header (short: --h.KEY=VAL)"}
         {:names ["--timeout"]
          :key :timeout
@@ -60,10 +62,12 @@
          :key :max-pages
          :value :number
          :scope :op
+         :also [:http]
          :help "Max pages to follow via Link rel=next (default: 25)"}
         {:names ["--no-paginate"]
          :key :no-paginate
          :scope :op
+         :also [:http]
          :help "Return only the first page"}
         {:names ["--retry"]
          :key :retry
@@ -115,6 +119,7 @@
          :value :string
          :arg "PATH"
          :scope :op
+         :also [:http]
          :help "Select nested value (e.g. .items[0].name, .items[].{id,name})"}
         {:names ["--no-color"]
          :key :no-color
@@ -132,19 +137,23 @@
         {:names ["--ignore-status"]
          :key :ignore-status
          :scope :op
+         :also [:http]
          :help "Treat HTTP error responses as output; exit 0"}
         {:names ["--no-validate"]
          :key :no-validate
-         :scope :any
+         :scope :op
+         :also [:az]
          :help "Send even if required params are missing or the body or inputs are invalid"}
         {:names ["--dry-run"]
          :key :dry-run
          :scope :op
+         :also [:http]
          :explained [:az :profile]
          :help "Print the request instead of sending it"}
         {:names ["--curl"]
          :key :curl
          :scope :op
+         :also [:http]
          :explained [:az]
          :help "Print an equivalent curl command instead of sending"}
         {:names ["--cache-ttl"]
@@ -157,6 +166,7 @@
          :value :string
          :arg "NAME"
          :scope :az
+         :also [:http]
          :help "Profile for auth, TLS and headers"}
         {:names ["-i"]
          :value :input
@@ -269,6 +279,7 @@ returns (kind key value); kind is a value of field-prefixes."
     commands))
 
 (local command-scopes {:op :op
+                       :http :http
                        :az :az
                        :arazzo :az
                        :auth :auth
@@ -289,13 +300,14 @@ returns (kind key value); kind is a value of field-prefixes."
   (let [scope (. command-scopes (or cmd ""))]
     (when scope
       (each [_ [name opt-scope also] (ipairs used)]
-        ;; :any is any API command: op and az
+        ;; :any is any API command: op, az and http
         (when (not (or (= opt-scope scope)
-                       (and (= opt-scope :any) (or (= scope :op) (= scope :az)))
+                       (and (= opt-scope :any)
+                            (or (= scope :op) (= scope :az) (= scope :http)))
                        (accumulate [ok false _ s (ipairs (or also [])) &until ok]
                          (= s scope))))
           (error (.. name " doesn't apply to " cmd " (it is for "
-                     (if (= opt-scope :any) "op and az" opt-scope) ")")
+                     (if (= opt-scope :any) "op, az and http" opt-scope) ")")
                  0))))))
 
 (fn parse-args [args]

@@ -9,6 +9,7 @@ Point `atlas` at a spec and every operation becomes a command, with its own help
 - **Every operation, at your fingertips.** Path parameters as arguments, `--q.` / `--h.` / `--b.` for query, headers and body fields, typed from the spec.
 - **Output you can use.** Pretty JSON or YAML, `--select` to pick what you need, exit codes that tell 4xx from 5xx.
 - **Profiles and authentication.** Bearer, Basic, API keys, OAuth 2.0 (authorization code with PKCE, client credentials, device flow), external signing tools, mutual TLS.
+- **Any URL, too.** `atlas http GET /zones --profile exo` sends a request without a spec, with the profile's authentication; a profile's credentials only go to its own API.
 - **Workflows.** Run multi-step [Arazzo](https://spec.openapis.org/arazzo/latest.html) workflows: chain calls, poll until a job finishes, branch on results.
 - **Safe by default.** Verified TLS, credentials never follow a redirect to another host, secrets redacted from logs and `--dry-run`.
 - **One small static binary** for macOS and Linux, about 2 MB, with no runtime dependencies. Also a [Fennel/Lua library](doc/library.md).
@@ -207,7 +208,7 @@ Completion knows profiles, operations, their parameters and body fields, allowed
 
 ## Coming from Restish
 
-`atlas profile import-restish` turns your Restish configuration into atlas profiles. `--dry-run` shows what it would add. See [Moving from Restish](doc/guide.md#moving-from-restish).
+`atlas profile import-restish` turns your Restish configuration into atlas profiles. `--dry-run` shows what it would add. `atlas http` takes the place of `restish get URL` and friends for calls without a spec. See [Moving from Restish](doc/guide.md#moving-from-restish).
 
 ## Documentation
 
