@@ -38,13 +38,25 @@ meant a JSON pointer into it: raise saying so."
                             (table.concat parts "/" (+ from 1))) 0))
     (with-pointer value expr)))
 
+(fn unknown [expr]
+  (error (.. "unknown runtime expression: " expr) 0))
+
 (fn message-value [msg parts expr]
-  "Resolve body or header access on a request/response; parts = [body|header name]."
-  (match (. parts 1)
-    :body (with-pointer (?. msg :body) expr)
-    :header (util.header (?. msg :headers) (or (. parts 2) ""))
-    :query (?. msg :query (. parts 2))
-    :path (?. msg :path (. parts 2))))
+  "Resolve body, header, query or path access on a request/response;
+parts = [body] or [header|query|path name...]."
+  (let [name (when (. parts 2) (table.concat parts "." 2))]
+    (match (. parts 1)
+      ;; only a #/pointer may follow body
+      (where :body (= nil name))
+      (with-pointer (?. msg :body) expr)
+      (where :header name)
+      (util.header (?. msg :headers) name)
+      (where :query name)
+      (?. msg :query name)
+      (where :path name)
+      (?. msg :path name)
+      _
+      (unknown expr))))
 
 (fn find-in [ctx resolve find-body]
   "$find(array-expr, match-field, match-value[, return-field])"
@@ -92,17 +104,19 @@ meant a JSON pointer into it: raise saying so."
                   :outputs (named (?. step :outputs) parts 4 :output expr)
                   :response (message-value (?. step :response) (rest-from 4)
                                            expr)
-                  :request (message-value (?. step :request) (rest-from 4) expr)))
+                  :request (message-value (?. step :request) (rest-from 4) expr)
+                  _ (unknown expr)))
               :workflows
               (match (. parts 3)
                 :outputs (named (?. ctx :workflows (. parts 2) :outputs) parts
-                                4 :output expr))
+                                4 :output expr)
+                _ (unknown expr))
               ;; a sentinel table so the caller can look up the client
               :sourceDescriptions
               ;; source names have no dots, operationIds may
               {:__source (. parts 2) :__operationId (table.concat parts "." 3)}
               _
-              (error (.. "unknown runtime expression: " expr) 0)))))))
+              (unknown expr)))))))
 
 ;; ---- template substitution ----
 

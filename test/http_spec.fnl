@@ -31,6 +31,16 @@
 
 (describe "http.decode-response"
           (fn []
+            (it "matches media types whatever their case"
+                (fn []
+                  (assert.are.same {:a 1}
+                                   (. (http.decode-response 200
+                                                            {:content-type "Application/JSON"}
+                                                            "{\"a\":1}")
+                                      :body))
+                  (assert.are.equal "a=1"
+                                    (http.encode-body {:headers {:content-type "Application/X-WWW-Form-Urlencoded"}
+                                                       :body {:a 1}}))))
             (it "decodes JSON content types"
                 (fn []
                   (let [r (http.decode-response 200

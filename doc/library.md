@@ -74,8 +74,10 @@ Returns a table where each key is a kebab-case `operationId` (`getPetById` → `
 
 1. `:base-url` in opts — always wins
 2. `servers[1].url` from the schema, if it is an absolute `https?://` URL
-3. If `servers[1].url` is a root-relative path (e.g. `/api/v1`) and the schema was loaded from a URL, the origin of that URL is prepended
+3. If `servers[1].url` is relative to the host (`/api/v1`, or `//api.example.com/v1`) and the schema was loaded from a URL, it is resolved against that URL
 4. If none of these produce an absolute URL, `atlas.client` raises an error — pass `:base-url` explicitly
+
+An operation, or its path item, that declares its own `servers` uses the first of them instead (a relative one resolved against the client's base URL), unless `:base-url` was given.
 
 Server URL variables (`{variable}`) take their value from `:server-vars`, falling back to the `default` in `servers[1].variables`:
 

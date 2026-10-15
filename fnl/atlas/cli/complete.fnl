@@ -242,29 +242,30 @@ operation, or an Arazzo document's workflow and inputs."
   (print "  local line=\"${COMP_LINE:0:COMP_POINT}\"")
   ;; the word being completed, from the line: bash 3.2 and later versions
   ;; split COMP_WORDS differently
-  (print "  local cur=\"${line##* }\"")
+  (print "  local word=\"${line##* }\"")
+  ;; readline replaces only what follows the word's last = or : (word break
+  ;; characters): replies leave that part out
+  (print "  local prefix=\"${word%\"${word##*[=:]}\"}\"")
   ;; candidates come from the spec: read them as data, one per line, and
   ;; never pass them to compgen -W, which would expand $(...) in them
-  (print "  local c cands=()")
+  (print "  local c q cands=()")
   (print "  while IFS= read -r c; do cands+=(\"$c\"); done < <(atlas __complete \"$line\" 2>/dev/null)")
-  (print "  # readline replaces only what follows '=': complete that part")
-  (print "  if [[ \"$cur\" == *=* ]]; then")
-  (print "    cur=\"${cur#*=}\"")
-  (print "    local stripped")
-  (print "    stripped=()")
-  (print "    for c in \"${cands[@]}\"; do stripped+=(\"${c#*=}\"); done")
-  (print "    cands=(\"${stripped[@]}\")")
-  (print "  fi")
   (print "  COMPREPLY=()")
-  ;; bash inserts replies as they are: quote them, so that spaces and shell
-  ;; syntax in spec values stay part of one argument
-  (print "  local q")
   (print "  for c in \"${cands[@]}\"; do")
-  (print "    printf -v q '%q' \"$c\"")
+  ;; bash inserts replies as they are: quote them, so that spaces and shell
+  ;; syntax in spec values stay part of one argument; the word may already
+  ;; be typed quoted
+  (print "    if [[ \"$c\" == \"$word\"* ]]; then")
+  (print "      printf -v q '%q' \"${c:${#prefix}}\"")
+  (print "    else")
+  (print "      printf -v q '%q' \"$c\"")
+  (print "      [[ \"$q\" == \"$word\"* ]] || continue")
+  (print "      q=\"${q:${#prefix}}\"")
+  (print "    fi")
   ;; nospace for all (bash 3.2 has no compopt): a complete word gets its
   ;; space here, a name waiting for =VALUE or .FIELD doesn't
   (print "    [[ \"$q\" != *[=.] ]] && q=\"$q \"")
-  (print "    [[ \"$c\" == \"$cur\"* || \"$q\" == \"$cur\"* ]] && COMPREPLY+=(\"$q\")")
+  (print "    COMPREPLY+=(\"$q\")")
   (print "  done")
   (print "}")
   (print "complete -o nospace -F _atlas_complete atlas"))

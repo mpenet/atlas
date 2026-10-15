@@ -213,7 +213,10 @@ over an array, {a,b} to keep fields. nil when the path doesn't match."
           (when (not= nil resp.body)
             (if (= (type resp.body) :string)
                 (log resp.body)
-                (io.stderr:write (.. (render resp.body :json use-color) "\n"))))
+                ;; coloured when stderr, not just stdout, is a terminal
+                (io.stderr:write (.. (render resp.body :json
+                                             (and use-color (util.terminal? 2)))
+                                     "\n"))))
           (exit-code resp.status false))
         (let [text (format-output resp output use-color ?select)]
           (if text

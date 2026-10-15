@@ -219,6 +219,67 @@
                       (os.remove spec)
                       (assert.is_truthy (r.err:find "warning" 1 true))
                       (assert.is_nil (r.err:find "\27" 1 true))))))
+            (it "sends --q. values of JSON query parameters as given"
+                (fn []
+                  (let [spec (.. (os.tmpname) ".json")]
+                    (with-open [f (io.open spec :w)]
+                      (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{\"/s\":{\"get\":{\"operationId\":\"search\",\"parameters\":[{\"name\":\"filter\",\"in\":\"query\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\"}}}}],\"responses\":{}}}}}"))
+                    (let [r (atlas-run ["op"
+                                        spec
+                                        "search"
+                                        "--q.filter={\"a\":1}"
+                                        "--dry-run"])]
+                      (os.remove spec)
+                      (assert.is_truthy (r.out:find "GET https://h/s?filter=%7B%22a%22%3A1%7D"
+                                                    1 true)
+                                        r.out)))))
+            (it "reads a query API key only when a request is sent"
+                (fn []
+                  (with-config {:profiles {:q {:schema "test/fixtures/cli-api.json"
+                                               :auth {:name "api-key"
+                                                      :params {:in "query"
+                                                               :name "apikey"
+                                                               :value "env:ATLAS_TEST_UNSET_KEY"}}}}}
+                    #(do
+                       (assert.are.equal 0
+                                         (. (atlas-run ["op" "q" "--list"])
+                                            :code))
+                       (assert.are.equal 0
+                                         (. (atlas-run ["op"
+                                                        "q"
+                                                        "list-pets"
+                                                        "--help"])
+                                            :code))
+                       (let [r (atlas-run ["op" "q" "list-pets" "--dry-run"])]
+                         (assert.are.equal 0 r.code)
+                         (assert.is_truthy (r.out:find "apikey=<redacted>" 1
+                                                       true)
+                                           r.out))
+                       (let [r (atlas-run ["op" "q" "list-pets"])]
+                         (assert.are.equal 1 r.code)
+                         (assert.is_truthy (r.err:find "ATLAS_TEST_UNSET_KEY" 1
+                                                       true)))))))
+            (it "rejects body fields on top of an array body"
+                (fn []
+                  (let [r (atlas-run ["op"
+                                      "p"
+                                      "add-pet"
+                                      "-d"
+                                      "[1]"
+                                      "--b.x=1"
+                                      "--no-validate"
+                                      "--dry-run"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "require --body to be a JSON object"
+                                                  1 true)))))
+            (it "explains a profile without a schema"
+                (fn []
+                  (let [r (with-config {:profiles {:noschema {:base-url "https://api.test"}}}
+                            #(atlas-run ["op" "noschema" "list-pets"]))]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "profile noschema has no schema"
+                                                  1 true)
+                                      r.err))))
             (it "rejects a body for an operation that takes none"
                 (fn []
                   (each [_ extra (ipairs ["-d={}" "--b.z=2"])]
@@ -333,6 +394,49 @@
                     (set io.stderr real-stderr)
                     (each [_ req (ipairs requests)]
                       (assert.is_nil (. req.headers :authorization))))))
+            (it "logs the fetches of a spec and its documents under -v"
+                (fn []
+                  (let [spec "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://specs.test\"}],\"paths\":{\"/x\":{\"get\":{\"operationId\":\"getX\",\"parameters\":[{\"$ref\":\"part.json#/p\"}],\"responses\":{}}}}}"
+                        (transport) (routes-transport {"GET https://specs.test/spec.json" {:status 200
+                                                                                           :headers {}
+                                                                                           :raw spec}
+                                                       "GET https://specs.test/part.json" {:status 200
+                                                                                           :headers {}
+                                                                                           :raw "{\"p\":{\"name\":\"q\",\"in\":\"query\"}}"}})
+                        err []
+                        real-stderr io.stderr]
+                    (set io.stderr {:write (fn [_ s] (table.insert err s))})
+                    (cli.run ["op"
+                              "https://specs.test/spec.json"
+                              "--list"
+                              "-v"]
+                             {: transport :config {} :schema-cache false})
+                    (set io.stderr real-stderr)
+                    (let [text (table.concat err)]
+                      (assert.is_truthy (text:find "> GET https://specs.test/spec.json"
+                                                   1 true))
+                      (assert.is_truthy (text:find "> GET https://specs.test/part.json"
+                                                   1 true))))))
+            (it "fetches a spec protected by a query API key after a 401"
+                (fn []
+                  (let [schema-text (with-open [f (io.open "test/fixtures/cli-api.json")]
+                                      (f:read :*a))
+                        (transport requests) (routes-transport {"GET https://api.test/openapi.json" (respond 401
+                                                                                                             {})
+                                                                "GET https://api.test/openapi.json?k=K" {:status 200
+                                                                                                         :headers {}
+                                                                                                         :raw schema-text}})
+                        code (cli.run ["op" "remote" "--list"]
+                                      {: transport
+                                       :config {:profiles {:remote {:schema "https://api.test/openapi.json"
+                                                                    :auth {:name "api-key"
+                                                                           :params {:in "query"
+                                                                                    :name "k"
+                                                                                    :value "K"}}}}}
+                                       :schema-cache false})]
+                    (assert.are.equal 0 code)
+                    (assert.are.equal 2 (length requests))
+                    (assert.is_nil (?. requests 1 :query :k)))))
             (it "keeps profile headers and credentials from a spec on another origin"
                 (fn []
                   (let [(transport requests) (routes-transport {"GET https://specs.test/openapi.json" (respond 401

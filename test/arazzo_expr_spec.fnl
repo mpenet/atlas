@@ -568,6 +568,26 @@
                     (assert.has.error #(expr.eval-criterion ctx
                                                             {:condition "$statuscode == 200"})
                                       "unknown runtime expression: $statuscode")))
+              (it "reject misspelled parts instead of reading nil or too much"
+                  (fn []
+                    (let [c (doto (collect [k v (pairs ctx)] k v)
+                              (tset :response
+                                    {:status 200
+                                     :headers {}
+                                     :body {:status "ok"}})
+                              (tset :steps {:s1 {:outputs {:id 1}}}))]
+                      (each [_ e (ipairs ["$response.bdy#/status"
+                                          "$response.body.status"
+                                          "$response.header"
+                                          "$steps.s1.output.id"
+                                          "$workflows.w.output.x"])]
+                        (let [(ok err) (pcall expr.eval c e)]
+                          (assert.is_false ok e)
+                          (assert.is_truthy (: (tostring err) :find
+                                               (.. "unknown runtime expression: "
+                                                   e)
+                                               1 true)
+                                            (tostring err)))))))
               (it "leave payload text that merely starts with $ as it is"
                   (fn []
                     (assert.are.same {:price "$5" :code 200}

@@ -603,6 +603,56 @@
                     (assert.is_truthy (: (. c.get-b :fnl/docstring) :find
                                          "(get-b.invoke" 1 true)))))))
 
+(describe "servers of path items and operations"
+          (fn []
+            (let [doc (schema {"/upload" {:servers [{:url "https://{region}.uploads.example.com"
+                                                     :variables {:region {:default "eu"}}}]
+                                          :post {:operationId "upload"
+                                                 :responses {}}}
+                               "/files" {:get {:operationId "listFiles"
+                                               :servers [{:url "/files-api"}]
+                                               :responses {}}}
+                               "/x" {:get {:operationId "getX" :responses {}}}})]
+              (it "override the client's"
+                  (fn []
+                    (let [c (atlas.client doc {:http-fn (mock-http)})]
+                      (assert.are.equal "https://eu.uploads.example.com/upload"
+                                        (c.upload.url-for))
+                      (assert.are.equal "https://api.example.com/files-api/files"
+                                        (c.list-files.url-for))
+                      (assert.are.equal "https://api.example.com/x"
+                                        (c.get-x.url-for)))))
+              (it "but not an explicit base-url"
+                  (fn []
+                    (let [c (atlas.client doc
+                                          {:http-fn (mock-http)
+                                           :base-url "http://localhost:8080"})]
+                      (assert.are.equal "http://localhost:8080/upload"
+                                        (c.upload.url-for))))))))
+
+(describe "operationIds without ASCII letters or digits"
+          (fn []
+            (it "are named after their method and path"
+                (fn []
+                  (let [c (atlas.client (schema {"/a" {:get {:operationId "获取用户"
+                                                             :responses {}}}})
+                                        {:http-fn (mock-http)})]
+                    (assert.is_nil (. c ""))
+                    (assert.are.equal "/a" (. c :get-a :path)))))))
+
+(describe "query parameters with content"
+          (fn []
+            (it "are sent as JSON text"
+                (fn []
+                  (let [c (atlas.client (schema {"/search" {:get {:operationId "search"
+                                                                  :parameters [{:name "filter"
+                                                                                :in "query"
+                                                                                :content {"application/json" {:schema {:type "object"}}}}]
+                                                                  :responses {}}}})
+                                        {:http-fn (mock-http)})]
+                    (assert.are.equal "https://api.example.com/search?filter=%7B%22owner%22%3A%22me%22%7D"
+                                      (c.search.url-for {:query {:filter {:owner "me"}}})))))))
+
 (describe "root-relative server URLs"
           (fn []
             (it "may name another host (//host/path)"

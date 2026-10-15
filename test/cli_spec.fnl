@@ -238,6 +238,14 @@
                     (assert.are.equal 5 code)
                     (assert.are.equal "" out)
                     (assert.are.equal "HTTP 503\n{\n  \"e\": 1\n}\n" err))))
+            (it "colours an error body only when stderr is a terminal"
+                (fn []
+                  ;; the tests' stderr is not a terminal
+                  (let [(_ _ err) (capture #(cli.print-resp {:status 400
+                                                             :headers {}
+                                                             :body {:e 1}}
+                                                            :json false))]
+                    (assert.is_nil (err:find "\27[" 1 true)))))
             (it "prints a text error body as it is"
                 (fn []
                   (let [(code _ err) (capture #(cli.print-resp {:status 404
@@ -1305,55 +1313,68 @@
                                                              :url "https://h/x"})))]
                     (assert.are.equal "> GET https://h/x\n" err))))))
 
+(fn bash-complete [shell line candidates]
+  "COMPREPLY of the bash completion script for line, when atlas __complete
+answers candidates; one reply per line, each followed by |."
+  (let [(_ script) (capture cli.completion-bash)
+        script-file (os.tmpname)
+        sh-quote #(.. "'" (pick-values 1 ($:gsub "'" "'\\''")) "'")]
+    (with-open [f (io.open script-file :w)]
+      (f:write script "\n")
+      (f:write (.. "atlas() { printf '%s\\n' "
+                   (table.concat (icollect [_ c (ipairs candidates)]
+                                   (sh-quote c))
+                                 " ") "; }\n"))
+      (f:write (.. "COMP_LINE=" (sh-quote line) "; COMP_POINT=${#COMP_LINE}\n"))
+      (f:write "_atlas_complete\nprintf '%s|\\n' \"${COMPREPLY[@]}\"\n"))
+    (let [p (io.popen (.. "cd /tmp && " shell " " script-file))
+          out (p:read :*a)]
+      (p:close)
+      (os.remove script-file)
+      out)))
+
 (describe "bash completion script"
           (fn []
             (it "treats candidates from the spec as data, and inserts them quoted"
                 (fn []
-                  (let [(_ script) (capture cli.completion-bash)
-                        marker (os.tmpname)
-                        script-file (os.tmpname)
-                        ;; bash 4 and later split words at =, bash 3.2 doesn't
-                        word-splits ["COMP_WORDS=(atlas op x y --q.s =); COMP_CWORD=5"
-                                     "COMP_WORDS=(atlas op x y --q.s=); COMP_CWORD=4"]]
+                  (let [marker (os.tmpname)]
                     (os.remove marker)
                     (each [_ shell (ipairs ["bash" "/bin/bash"])]
-                      (each [_ words (ipairs word-splits)]
-                        (with-open [f (io.open script-file :w)]
-                          (f:write script "\n")
-                          ;; candidates as a malicious spec could make them
-                          (f:write (.. "atlas() { printf '%s\\n' '$(touch "
-                                       marker ")' '*' 'in progress' 'ok'; }\n"))
-                          (f:write "COMP_LINE='atlas op x y --q.s='; COMP_POINT=${#COMP_LINE}\n")
-                          (f:write (.. words "\n"))
-                          (f:write "_atlas_complete\nprintf '%s|\\n' \"${COMPREPLY[@]}\"\n"))
-                        (let [p (io.popen (.. "cd /tmp && " shell " "
-                                              script-file))
-                              out (p:read :*a)]
-                          (p:close)
-                          (let [ran (io.open marker)]
-                            (when ran (ran:close) (os.remove marker))
-                            (assert.is_nil ran))
-                          ;; quoted as the shell inserts them on the line, a
-                          ;; space after each complete word
-                          (assert.are.equal (.. "\\$\\(touch\\ " marker
-                                                "\\) |\n\\* |\nin\\ progress |\nok |\n")
-                                            out))))
-                    (os.remove script-file))))
+                      ;; candidates as a malicious spec could make them
+                      (let [out (bash-complete shell "atlas op x y --q.s="
+                                               [(.. "--q.s=$(touch " marker ")")
+                                                "--q.s=*"
+                                                "--q.s=in progress"
+                                                "--q.s=ok"])]
+                        (let [ran (io.open marker)]
+                          (when ran (ran:close) (os.remove marker))
+                          (assert.is_nil ran))
+                        ;; what readline puts after the =: quoted, a space
+                        ;; after each complete word
+                        (assert.are.equal (.. "\\$\\(touch\\ " marker
+                                              "\\) |\n\\* |\nin\\ progress |\nok |\n")
+                                          out))))))
+            (it "replaces only what follows the last = or : of the word"
+                (fn []
+                  (each [_ shell (ipairs ["bash" "/bin/bash"])]
+                    (assert.are.equal "fra-1 |\n"
+                                      (bash-complete shell
+                                                     "atlas op x y --q.zone=de:f"
+                                                     ["--q.zone=de:fra-1"
+                                                      "--q.zone=eu"]))
+                    (assert.are.equal "v1 |\n"
+                                      (bash-complete shell
+                                                     "atlas op x y --q.zone=k="
+                                                     ["--q.zone=k=v1"]))
+                    (assert.are.equal "//x.example/a |\n"
+                                      (bash-complete shell
+                                                     "atlas op x y --q.u=https:"
+                                                     ["--q.u=https://x.example/a"])))))
             (it "adds no space after a name waiting for its value"
                 (fn []
-                  (let [(_ script) (capture cli.completion-bash)
-                        script-file (os.tmpname)]
-                    (with-open [f (io.open script-file :w)]
-                      (f:write script "\n")
-                      (f:write "atlas() { printf '%s\\n' '--q.status=' '--q.sort='; }\n")
-                      (f:write "COMP_LINE='atlas op x y --q.st'; COMP_POINT=${#COMP_LINE}\n")
-                      (f:write "COMP_WORDS=(atlas op x y --q.st); COMP_CWORD=4\n")
-                      (f:write "_atlas_complete\nprintf '%s|\\n' \"${COMPREPLY[@]}\"\n"))
-                    (let [p (io.popen (.. "cd /tmp && bash " script-file))
-                          out (p:read :*a)]
-                      (p:close)
-                      (os.remove script-file)
-                      (assert.are.equal "--q.status=|\n" out)))))))
+                  (assert.are.equal "--q.status=|\n"
+                                    (bash-complete "bash" "atlas op x y --q.st"
+                                                   ["--q.status=" "--q.sort="]))))))
 
 (describe "zsh completion script"
           (fn []

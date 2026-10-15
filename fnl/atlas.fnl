@@ -89,7 +89,11 @@ then the body when the operation has one, then an opts table."
         ;; how each declared query parameter is serialized
         query-styles (collect [_ p (ipairs (or op-spec.parameters []))]
                        (when (= p.in :query)
-                         (values p.name {:style p.style :explode p.explode})))
+                         (values p.name
+                                 {:style p.style
+                                  :explode p.explode
+                                  ;; declared with content instead of schema
+                                  :json (util.json-content? p)})))
         url-for (fn [?req]
                   "Full request URL for {:path {name v} :query {}}."
                   (let [req (or ?req {})]
@@ -256,15 +260,34 @@ base-url defaults to schema.servers[1].url with :server-vars applied"
                      :timeout (?. ?opts :timeout)}
         client {}
         entries (schema-operations schema deref)
+        ;; servers of the operation, else of its path item, replace the
+        ;; client's unless :base-url was given
+        operation-opts (fn [path-item op-spec]
+                         (let [own (when (not (?. ?opts :base-url))
+                                     (or (?. op-spec :servers 1)
+                                         (?. path-item :servers 1)))]
+                           (if (not own) client-opts
+                               (let [vars (collect [k v (pairs (or (?. ?opts
+                                                                       :server-vars)
+                                                                   {}))]
+                                            (when (?. own :variables k)
+                                              (values k v)))
+                                     url (expand-server-url own vars)]
+                                 (doto (collect [k v (pairs client-opts)] k v)
+                                   (tset :base-url
+                                         (if (url:match "^https?://") url
+                                             (util.resolve-reference base-url
+                                                                     url))))))))
         add (fn [name {: path : path-item : method : op-spec}]
               (tset client name
-                    (make-operation client-opts name path path-item method
-                                    op-spec)))
+                    (make-operation (operation-opts path-item op-spec) name
+                                    path path-item method op-spec)))
         unnamed (icollect [_ entry (ipairs entries)]
                   (let [name (when entry.op-spec.operationId
                                (util.operation-name entry.method entry.path
                                                     entry.op-spec))]
-                    (if (and name (= nil (. client name)))
+                    ;; an operationId of other scripts gives no name
+                    (if (and name (not= name "") (= nil (. client name)))
                         (add name entry)
                         entry)))]
     ;; operations without an operationId, or whose name was taken, are named

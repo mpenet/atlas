@@ -122,7 +122,7 @@ or empty (https://no-color.org)."
     (and (or (= nil no-color) (= no-color ""))
          (if ?terminal?
              (?terminal?)
-             (= true (os.execute "test -t 1"))))))
+             (util.terminal? 1)))))
 
 (fn display-options [profile p config ?colors]
   "Output settings: command line, then profile, then config, the first set
@@ -205,11 +205,18 @@ request signing, logging, and the transport (or dry-run printing)."
                       (printing-transport request-text)
                       (or ?transport http-mod.request))
         logged (if verbose (wrap-log-request transport) transport)
-        ;; nor run a signing tool
-        signed (or (when (and auth-cfg
+        ;; nor run a signing tool or read a query key
+        wrapper-cfg (if (and dry-run auth-cfg (auth.api-key-in-query? auth-cfg))
+                        (doto (collect [k v (pairs auth-cfg)] k v)
+                          (tset :params
+                                (doto (collect [k v (pairs auth-cfg.params)] k
+                                        v)
+                                  (tset :value "<auth>"))))
+                        auth-cfg)
+        signed (or (when (and wrapper-cfg
                               (not (and dry-run
-                                        (= auth-cfg.name "external-tool"))))
-                     (auth.wrap-http-fn auth-cfg logged))
+                                        (= wrapper-cfg.name "external-tool"))))
+                     (auth.wrap-http-fn wrapper-cfg logged))
                    logged)
         retrying (retry.wrap signed (retry-options profile p config))
         pagination (paginate-options profile p config)
@@ -221,6 +228,9 @@ request signing, logging, and the transport (or dry-run printing)."
                 (k:lower)
                 v)
      :auth-headers auth-headers
+     ;; the authentication that isn't headers, for spec fetches
+     :authorize (when (and auth-cfg (not p.dry-run))
+                  #(or (auth.wrap-http-fn auth-cfg $) $))
      :auth-header-names auth-names
      :ssl ssl
      :timeout (request-timeout profile p config)
@@ -243,33 +253,39 @@ request signing, logging, and the transport (or dry-run printing)."
   "Fetch and parse a schema URL through opts.transport. Credentials are only
 sent after the server answers 401/403, so help and listings don't trigger
 authentication; headers and credentials are not sent at all when the schema
-is on another origin than the API's :base-url.
-opts: {:transport :headers :ssl :timeout :auth-headers :base-url}"
+is on another origin than the API's :base-url. :authorize wraps a transport
+with the authentication that isn't headers (a query key, request signing).
+opts: {:transport :headers :ssl :timeout :auth-headers :authorize :base-url}"
   (let [opts (if (and opts.base-url
                       (not= (util.origin url) (util.origin opts.base-url)))
                  {:transport opts.transport
                   :ssl opts.ssl
                   :timeout opts.timeout}
                  opts)
-        send #(opts.transport {:method "GET"
-                               : url
-                               :headers $1
-                               :ssl opts.ssl
-                               :timeout opts.timeout
-                               :sensitive-headers $2})
-        first (send (or opts.headers {}))
-        resp (if (and opts.auth-headers
+        send #($1 {:method "GET"
+                   : url
+                   :headers $2
+                   :ssl opts.ssl
+                   :timeout opts.timeout
+                   :sensitive-headers $3})
+        first (send opts.transport (or opts.headers {}))
+        resp (if (and (or opts.auth-headers opts.authorize)
                       (or (= first.status 401) (= first.status 403)))
                  (let [headers (collect [k v (pairs (or opts.headers {}))]
                                  k
                                  v)
                        added []]
-                   (each [k v (pairs (opts.auth-headers))]
+                   (each [k v (pairs (if opts.auth-headers
+                                         (opts.auth-headers)
+                                         {}))]
                      (when (= nil (util.header headers k))
                        (tset headers k v)
                        (table.insert added k)))
                    ;; a redirect to another origin must drop them
-                   (send headers added))
+                   (send (if opts.authorize
+                             (opts.authorize opts.transport)
+                             opts.transport) headers
+                         added))
                  first)]
     (assert (util.success? resp.status)
             (string.format "HTTP %s fetching schema from %s" resp.status

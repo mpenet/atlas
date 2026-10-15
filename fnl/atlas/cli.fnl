@@ -26,7 +26,8 @@
         : exit-status
         : format-servers
         : print-arazzo-result
-        : list-arazzo-workflows} (require :atlas.cli.output))
+        : list-arazzo-workflows
+        : wrap-log-request} (require :atlas.cli.output))
 
 (local {: config-path
         : load-config
@@ -245,20 +246,28 @@ positional path params, --inputs, --body, then --i./-i/--b. fields."
     (when (and (next errors) (not p.no-validate))
       (die (.. (table.concat errors "\n") "\n(use --no-validate to run anyway)")))))
 
-(fn source-schema-loader [env auth-headers base-url]
+(fn schema-transport [env verbose]
+  "Transport for fetching specs: logged like requests under -v."
+  (let [transport (or env.transport http-mod.request)]
+    (if verbose (wrap-log-request transport) transport)))
+
+(fn source-schema-loader [env client-opts verbose]
   "Loader for source schemas: URLs through the transport, getting credentials
-only after answering 401/403, and never for a document whose loader options
-say :credentials false (a $ref to another origin); files directly."
+(client-opts :auth-headers and :authorize) only after answering 401/403, and
+never for a document whose loader options say :credentials false (a $ref to
+another origin); files directly."
   (fn [location opts]
     (if (location:match "^https?://")
         (fetch-schema location
-                      {:transport (or env.transport http-mod.request)
+                      {:transport (schema-transport env verbose)
                        :headers opts.headers
                        :ssl opts.ssl
                        :timeout opts.timeout
-                       : base-url
+                       :base-url client-opts.base-url
                        :auth-headers (when (not= false opts.credentials)
-                                       auth-headers)})
+                                       client-opts.auth-headers)
+                       :authorize (when (not= false opts.credentials)
+                                    client-opts.authorize)})
         (atlas.load-schema location opts))))
 
 (fn execute-workflow [doc file wf inputs p profile-name profile env]
@@ -269,13 +278,15 @@ say :credentials false (a $ref to another origin); files directly."
         {: output : no-color : verbose} (display-options profile p env.config)
         mode (or p.arazzo-output (if verbose :progress :final))
         show-progress (or (= mode :progress) (= mode :full))
-        paint #(pretty-mod.paint $1 $2 (not no-color))
+        ;; progress goes to stderr
+        stderr-color (and (not no-color) (util.terminal? 2))
+        paint #(pretty-mod.paint $1 $2 stderr-color)
         run-opts (client-options profile-name profile p env.config
                                  env.transport)]
-    (set run-opts.load-schema
-         (source-schema-loader env run-opts.auth-headers run-opts.base-url))
+    (set run-opts.load-schema (source-schema-loader env run-opts verbose))
     (set run-opts.on-step
-         (when show-progress (progress-reporter output (not no-color))))
+         (when show-progress
+           (progress-reporter output stderr-color)))
     (set run-opts.max-gotos p.max-gotos)
     (set run-opts.max-wait (. (retry-options profile p env.config) :max-wait))
     (let [t0 (socket.gettime)
@@ -324,16 +335,17 @@ say :credentials false (a $ref to another origin); files directly."
 
 ;; ---- op ----
 
-(fn load-op-schema [raw-schema profile p opts env]
+(fn load-op-schema [raw-schema profile p opts env verbose]
   "Parsed schema for op: URLs through the cache and the transport, files
 parsed by atlas.client."
   (if (and (= (type raw-schema) :string) (raw-schema:match "^https?://"))
       (load-schema-cached raw-schema
-                          {:transport (or env.transport http-mod.request)
+                          {:transport (schema-transport env verbose)
                            :headers opts.headers
                            ;; a dry run's auth headers are placeholders
                            :auth-headers (when (not (and p.dry-run (not p.curl)))
                                            opts.auth-headers)
+                           :authorize opts.authorize
                            :base-url opts.base-url
                            :ssl opts.ssl
                            :timeout opts.timeout
@@ -388,9 +400,13 @@ invalid body unless --no-validate."
                           "Configured profiles" (or config.profiles {})
                           #(or $.schema "(no schema)")))
     (let [profile (find-profile config p.schema)
-          raw-schema (or (?. profile :schema) p.schema)
+          raw-schema (if (not profile) p.schema
+                         (or profile.schema
+                             (die (.. "profile " p.schema
+                                      " has no schema: set \"schema\" to the spec's URL or path"))))
           opts (client-options p.schema profile p config env.transport)
-          schema (load-op-schema raw-schema profile p opts env)]
+          verbose (. (display-options profile p config) :verbose)
+          schema (load-op-schema raw-schema profile p opts env verbose)]
       (when (= (type schema) :table)
         (set opts.source-url raw-schema))
       ;; documents the spec refers to: through the transport, with the same
@@ -398,9 +414,12 @@ invalid body unless --no-validate."
       ;; headers are placeholders)
       (set opts.load-schema
            (source-schema-loader env
-                                 (when (not (and p.dry-run (not p.curl)))
-                                   opts.auth-headers)
-                                 opts.base-url))
+                                 {:auth-headers (when (not (and p.dry-run
+                                                                (not p.curl)))
+                                                  opts.auth-headers)
+                                  :authorize opts.authorize
+                                  :base-url opts.base-url}
+                                 verbose))
       (if p.servers
           (let [servers (atlas.servers (if (= (type schema) :string)
                                            (atlas.load-schema schema)

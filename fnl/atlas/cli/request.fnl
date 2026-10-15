@@ -28,9 +28,10 @@
 (fn decode-body [raw content-type]
   "Decode a raw body for an operation's content type: JSON, form and
 multipart operations take JSON or YAML; any other type is sent as-is."
-  (if (or (= nil content-type) (content-type:match "json")
-          (content-type:match "^application/x%-www%-form%-urlencoded")
-          (content-type:match "^multipart/form%-data"))
+  (if (or (= nil content-type) (: (content-type:lower) :match "json")
+          (: (content-type:lower) :match
+             "^application/x%-www%-form%-urlencoded")
+          (: (content-type:lower) :match "^multipart/form%-data"))
       (decode-structured raw)
       raw))
 
@@ -46,7 +47,8 @@ multipart operations take JSON or YAML; any other type is sent as-is."
 (fn build-body [fields ?schema ?base]
   "Apply [KEY.PATH VAL] fields onto ?base, coercing each value by ?schema."
   (assert (or (= ?base nil)
-              (and (= (type ?base) :table) (not= ?base json.null)))
+              (and (= (type ?base) :table) (not= ?base json.null)
+                   (not (json.array? ?base))))
           "--body.KEY=VAL fields require --body to be a JSON object")
   (let [body (or ?base {})]
     (each [_ [path v] (ipairs fields)]
@@ -66,11 +68,24 @@ multipart operations take JSON or YAML; any other type is sent as-is."
         {:filename (path:match "[^/]+$") :content (read-file path)})
       value))
 
+(fn decode-json-params [op query]
+  "query with the values of parameters declared with JSON content decoded
+from the JSON text given on the command line, so it isn't encoded twice."
+  (collect [name v (pairs query)]
+    (let [json? (accumulate [found false _ param (ipairs (or op.parameters []))
+                             &until found]
+                  (and (= param.in :query) (= param.name name)
+                       (util.json-content? param)))
+          (ok decoded) (if (and json? (= (type v) :string))
+                           (pcall json.decode v)
+                           false)]
+      (values name (if ok decoded v)))))
+
 (fn op-request [op p]
   "Build an op.invoke request from parsed CLI args."
   (when (and (not op.has-body) (or (not= nil p.body) (next p.body-fields)))
     (error (.. op.name " takes no request body") 0))
-  (let [json-op? (and op.content-type (op.content-type:match "json"))
+  (let [json-op? (and op.content-type (: (op.content-type:lower) :match "json"))
         valid-json? #(pcall json.decode $)
         given (if (not= (type p.body) :string) p.body
                   ;; valid JSON goes out byte-for-byte: scalars, null and
@@ -89,7 +104,7 @@ multipart operations take JSON or YAML; any other type is sent as-is."
                        b))
                  given)]
     {:path (collect [i name (ipairs op.path-params)] name (. p.path-params i))
-     :query (when (next p.query) p.query)
+     :query (when (next p.query) (decode-json-params op p.query))
      :headers (when (next p.headers) p.headers)
      :body (when op.has-body body)}))
 

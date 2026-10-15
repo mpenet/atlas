@@ -28,6 +28,7 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - `op` fetches the documents a spec's `$ref`s name like the spec itself: through the same transport (so `-v` shows them), with the profile's headers and credentials only when the spec is on the API's origin; they used to get the profile's headers whatever the origin.
 - `-v`, `--dry-run`, `--curl`, logged response headers and text error bodies escape control characters too.
 - A same-origin redirect keeps a query API key; another origin still never gets it.
+- A query API key is read when a request is sent, so an unset `env:` variable no longer breaks `--list`, `--help`, `--servers` or `--dry-run`; a spec answering 401 is fetched again with the query key or signature, as with header credentials; `-v` logs spec fetches too.
 - Headers added by external-tool signing are marked as credentials: logs and dry runs redact them, and they are dropped on a redirect to another origin.
 - The libcurl binding rejects URLs, header names and values and options that contain a NUL byte, rather than cutting them short.
 - A URL whose host part holds a backslash or a control character (such as a NUL in a `$ref`) matches no origin, so credentials never follow it (libcurl reads `http://a\@b/` as host `b`); retried schema fetches and next-page requests keep the marking of credential headers, so a later cross-origin redirect drops them; `$ref` errors redact the document's URL.
@@ -116,6 +117,12 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - `enum` accepts object and array values equal to one of its entries.
 - `atlas.parse-schema` rejects `null` and arrays; an empty item in a `parameters` list is ignored.
 - An Example pulled in by a `$ref` to a whole file keeps its `value` as data.
+- Nested objects and arrays in query, form and path values are an error instead of being sent as `table: 0x…`.
+- `servers` declared on a path item or an operation are used for it, unless `:base-url` is given.
+- Query parameters declared with JSON `content` are sent as JSON text (`--q.filter='{"a":1}'` in the CLI).
+- An operationId with no ASCII letters or digits is named after its method and path instead of the empty name.
+- Media types are matched whatever their case (`Application/JSON`).
+- Arazzo: a misspelled part of an expression (`$response.bdy`, `$response.body.status`, `$steps.s.output`) is an error instead of `null` or the whole body.
 - Help names an operation by the name the client gave it, also when its operationId's name was taken.
 - Validation lets names matching `patternProperties` through `additionalProperties: false`, and ignores `required: true` (a Swagger 2 leftover) instead of crashing; so do help and completion.
 - Network-path references (`//host/path`) in `$ref`s and server URLs keep the spec's scheme only.
@@ -124,6 +131,8 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 - `atlas auth` keeps the cached token until a new one is obtained.
 - `--curl` includes the TLS options (`-k`, `--cacert`, `--cert`, `--key`) and `--max-time`.
 - A body (`-d`, `--b.`) for an operation that takes none is an error instead of being dropped.
+- Bash completion inserts values containing `:` or `=` correctly (`de:fra-1`, URLs).
+- A profile without `schema` is reported as such instead of being read as a file path; `--b.` fields on an array `-d` body are an error; colours go to stderr only when it is a terminal.
 - Profiles whose `auth`, `headers`, `query`, `ssl`, `tls`, `server` or `retry` is not an object, or whose `auth` has no `name`, are errors instead of being ignored (a string `auth` sent requests unauthenticated); so are unknown `--ssl.` options and a `--timeout` of 0 or less. Malformed Restish configs and workflows without a string `workflowId` give clear messages.
 - Completion lists the operations of specs whose `$ref`s point into other files.
 - `atlas auth` shows a query API key and the signing command, which it printed nothing for; `atlas completion` rejects options.

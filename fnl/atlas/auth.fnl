@@ -406,9 +406,10 @@ any auth flow; signing tools and query api-keys supply none up front."
     _ ["authorization"]))
 
 (fn wrap-api-key-query [auth-config base-fn]
-  (let [name (required-param auth-config :name)
-        value (required-param auth-config :value)]
-    (fn [req]
+  (fn [req]
+    ;; read when a request is sent (env: values may be unset until then)
+    (let [name (required-param auth-config :name)
+          value (required-param auth-config :value)]
       ;; next-page URLs from pagination may already carry the key
       (let [in-url? (let [url (or req.url "")
                           param (.. (util.url-encode name) "=")]
@@ -467,6 +468,7 @@ any auth flow; signing tools and query api-keys supply none up front."
 {: get-headers
  : header-names
  : wrap-http-fn
+ : api-key-in-query?
  : authenticate
  : clear-token
  : save-token

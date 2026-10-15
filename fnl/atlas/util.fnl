@@ -81,6 +81,16 @@ that text from a spec can't drive the terminal (escape sequences)."
                          (when (and (not= c "\n") (not= c "\t"))
                            (string.format "\\x%02X" (string.byte c)))))))
 
+(fn terminal? [fd]
+  "Whether file descriptor fd (1 stdout, 2 stderr) is a terminal."
+  (= true (os.execute (.. "test -t " fd))))
+
+(fn json-content? [param]
+  "Whether a parameter is declared with JSON content rather than a schema."
+  (accumulate [found false media-type (pairs (or (?. param :content) {}))
+               &until found]
+    (not= nil (media-type:find "json" 1 true))))
+
 (fn required-names [schema]
   "The property names a schema requires; required: true (a Swagger 2
 leftover) or a non-table schema require none."
@@ -130,6 +140,9 @@ URL parsers read differently: such a URL matches no origin."
       (when (= (k:lower) wanted) v))))
 
 (fn url-encode [s]
+  (when (and (= (type s) :table) (not= s json.null))
+    (error "nested objects and arrays can't be sent in a URL or form; send them in a JSON body"
+           0))
   (pick-values 1
                (: (tostring s) :gsub "[^%w%-%.%_%~]"
                   (fn [c] (string.format "%%%02X" (string.byte c))))))
@@ -219,12 +232,13 @@ delimiters are not."
 
 (fn query-string [params ?styles]
   "Query string for params, keys sorted; ?styles maps a parameter name to
-its {:style :explode} (default: form, exploded)."
+its {:style :explode :json} (default: form, exploded; :json sends the value as
+JSON text)."
   (let [names (doto (icollect [k (pairs params)] k)
                 (table.sort #(< (tostring $1) (tostring $2))))
         parts []]
     (each [_ name (ipairs names)]
-      (let [{: style : explode} (or (?. ?styles name) {})
+      (let [{: style : explode :json as-json} (or (?. ?styles name) {})
             style (or style :form)
             explode (if (= nil explode) (= style :form) explode)
             ;; null is no value: left out, as are null list elements
@@ -232,7 +246,9 @@ its {:style :explode} (default: form, exploded)."
             value (if (= raw json.null) nil (json.array? raw)
                       (icollect [_ x (ipairs raw)]
                         (when (not= x json.null) x)) raw)]
-        (each [_ part (ipairs (if (= nil value) []
+        (each [_ part (ipairs (if (= nil value) [] as-json
+                                  [(.. (url-encode name) "="
+                                       (url-encode (json.encode raw)))]
                                   (query-pairs name value style explode)))]
           (table.insert parts part))))
     (table.concat parts "&")))
@@ -338,6 +354,8 @@ a,b and objects as k1,v1,k2,v2 (keys sorted), each part url-encoded."
  : write-private
  : printable
  : required-names
+ : json-content?
+ : terminal?
  : secret-name?
  : redact-url
  : origin

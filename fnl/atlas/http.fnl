@@ -6,9 +6,9 @@
 (local util (require :atlas.util))
 
 (fn json-type? [content-type]
-  (and content-type
-       (or (content-type:match "^application/json")
-           (content-type:match "^[%w%.%-]+/[%w%.%-]+%+json"))))
+  (let [ct (when content-type (content-type:lower))]
+    (and ct (or (ct:match "^application/json")
+                (ct:match "^[%w%.%-]+/[%w%.%-]+%+json")))))
 
 (fn multipart-boundary [parts]
   "A boundary string that does not occur in any part."
@@ -56,7 +56,8 @@ percent-escaped (as browsers do) so they cannot break out of the header."
   "Serialize the request body according to its content-type header.
 Returns the payload, plus a replacement content type when encoding
 determines one (multipart boundaries)."
-  (let [content-type (util.header req.headers "content-type")]
+  ;; media types are case-insensitive
+  (let [content-type (-?> (util.header req.headers "content-type") (: :lower))]
     (if req.raw-body req.raw-body (= nil req.body) nil
         (= (type req.body) :string) req.body
         (and content-type

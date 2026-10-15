@@ -406,3 +406,20 @@
                   (assert.are.equal "https://cdn.example.org/shared/pet.json"
                                     (util.resolve-reference "https://specs.example.com/v1/openapi.json"
                                                             "//cdn.example.org/shared/pet.json"))))))
+
+(describe "nested values in URLs and forms"
+          (fn []
+            (it "are errors rather than table addresses"
+                (fn []
+                  (each [_ f (ipairs [#(util.form-encode {:items [{:price "p1"}]})
+                                      #(util.query-string {:filter {:a {:b 1}}}
+                                                          {:filter {:style "deepObject"
+                                                                    :explode true}})
+                                      #(util.query-string {:ids [{:x 1}]})
+                                      #(util.resolve-path "/x/{id}"
+                                                          {:id {:a {:b 1}}})])]
+                    (let [(ok err) (pcall f)]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "nested objects and arrays can't be sent"
+                                           1 true))))))))
