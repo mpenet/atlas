@@ -393,6 +393,78 @@ values mustn't reach (they stay as they are in files and pipes)."
                                           text))
       fmt (when (not= nil body) (render body fmt use-color)))))
 
+(fn event-stream [on-data]
+  "A consumer of an event stream (text/event-stream): on-data gets the data
+of each event, its data: lines joined, as the event's blank line arrives.
+Other fields and comments are left out."
+  (var pending "")
+
+  (fn event [block]
+    (let [data (icollect [line (: (.. block "\n") :gmatch "([^\n]*)\n")]
+                 (let [value (line:match "^data:(.*)$")]
+                   (when value
+                     (pick-values 1 (value:gsub "^ " "")))))]
+      (when (next data)
+        (on-data (table.concat data "\n")))))
+
+  (fn [chunk]
+    ;; nil: the stream ended; what is left is the last event
+    (set pending (pick-values 1 (: (.. pending (or chunk "\n\n")) :gsub "\r\n?"
+                                   "\n")))
+    (var at (pending:find "\n\n" 1 true))
+    (while at
+      (event (pending:sub 1 (- at 1)))
+      (set pending (pending:sub (+ at 2)))
+      (set at (pending:find "\n\n" 1 true)))))
+
+(fn json-lines [on-record]
+  "A consumer of JSON Lines: on-record gets each non-blank line as it
+completes."
+  (var pending "")
+  (fn [chunk]
+    (set pending (.. pending (or chunk "\n")))
+    (var at (pending:find "\n" 1 true))
+    (while at
+      (let [line (pending:sub 1 (- at 1))]
+        (when (line:match "%S")
+          (on-record (pick-values 1 (line:gsub "\r$" "")))))
+      (set pending (pending:sub (+ at 1)))
+      (set at (pending:find "\n" 1 true)))))
+
+(fn stream-printer [output use-color ?select terminal]
+  "A req.stream that prints successful responses as they arrive: the events
+of an event stream and the records of JSON Lines one by one, ?select applied
+to each (JSON pretty on a terminal, else one compact line), and any body
+but JSON as it comes with output raw. Other responses are left to
+print-resp."
+  (let [record (fn [text]
+                 (let [(json? decoded) (pcall json.decode text true)
+                       v (if json? decoded text)
+                       v (if ?select (select-path v ?select) v)]
+                   (when (not= nil v)
+                     (print (if (or (not json?) (= output :raw))
+                                (if (= (type v) :table) (json.encode v)
+                                    (tostring v))
+                                terminal
+                                (render v (if (= output :yaml) :yaml :json)
+                                        use-color)
+                                (json.encode v)))
+                     (io.stdout:flush))))]
+    (fn [status headers]
+      (when (util.success? status)
+        (let [content-type (: (or (util.header headers "content-type") "")
+                              :lower)]
+          (if (content-type:match "^%s*text/event%-stream")
+              (event-stream record)
+              (http-mod.json-lines-type? content-type)
+              (json-lines record)
+              ;; JSON stays whole: pages of an array are merged
+              (and (= output :raw) (not (http-mod.json-type? content-type)))
+              #(when $
+                 (doto io.stdout
+                   (: :write $)
+                   (: :flush)))))))))
+
 (fn exit-code [status ignore-status]
   "Process exit code for an HTTP status: 4 for 4xx, 5 for 5xx, else 0."
   (if (or ignore-status (< status 400)) 0
@@ -426,12 +498,12 @@ values mustn't reach (they stay as they are in files and pipes)."
                                              (and use-color (util.terminal? 2)))
                                      "\n"))))
           (exit-code resp.status false))
-        (let [text (format-output resp output use-color ?select
-                                  (util.terminal? 1))]
-          (if text
-              (print text)
-              (when (not verbose)
-                (io.stderr:write (.. "HTTP " resp.status "\n"))))
+        (let [text (when (not resp.streamed)
+                     (format-output resp output use-color ?select
+                                    (util.terminal? 1)))]
+          (if text (print text) ;; a streamed body was printed as it came
+              (not (or verbose resp.streamed))
+              (io.stderr:write (.. "HTTP " resp.status "\n")))
           0))))
 
 (fn print-resp [resp output no-color verbose ?select ?elapsed ?ignore-status]
@@ -569,4 +641,5 @@ variable shows the value in effect."
  : show-value
  : format-servers
  : print-arazzo-result
- : list-arazzo-workflows}
+ : list-arazzo-workflows
+ : stream-printer}

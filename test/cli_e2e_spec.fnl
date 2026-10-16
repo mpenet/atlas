@@ -18,9 +18,31 @@
                     url (util.append-query req.url (or req.query {}))
                     route (or (. routes (.. req.method " " url)) (. routes url))]
                 (table.insert requests req)
-                (if (= (type route) :function) (route req)
-                    route route
-                    (respond 404 {:error "no route"})))) requests)))
+                (let [resp (if (= (type route) :function) (route req)
+                               route route
+                               (respond 404 {:error "no route"}))
+                      ;; the transport's streaming: req.stream takes the
+                      ;; body piece by piece, or leaves it
+                      consumer (when req.stream
+                                 (req.stream resp.status resp.headers))]
+                  (if consumer
+                      (do
+                        (each [_ piece (ipairs (or resp.pieces [resp.raw]))]
+                          (consumer piece))
+                        (consumer nil)
+                        {:status resp.status
+                         :headers resp.headers
+                         :raw ""
+                         :streamed true})
+                      resp)))) requests)))
+
+(fn respond-text [status content-type pieces]
+  "A response whose body is the text of pieces, which a streaming transport
+hands over one by one."
+  {:status status
+   :headers {:content-type content-type}
+   :raw (table.concat pieces)
+   : pieces})
 
 (local config {:profiles {:p {:schema "test/fixtures/cli-api.json"
                               :headers {:x-org "o1"}
@@ -55,16 +77,25 @@
         out []
         err []
         real-print _G.print
-        real-stderr io.stderr]
+        real-stderr io.stderr
+        real-stdout io.stdout
+        written []]
     (set _G.print (fn [...]
                     (table.insert out
                                   (table.concat (icollect [_ v (ipairs [...])]
                                                   (tostring v))
                                                 "\t"))))
     (set io.stderr {:write (fn [_ s] (table.insert err s))})
+    (set io.stdout {:write (fn [self s]
+                             (table.insert written s)
+                             self)
+                    :flush #nil})
     (let [(ok code) (pcall cli.run args {: transport :config current-config})]
       (set _G.print real-print)
       (set io.stderr real-stderr)
+      (set io.stdout real-stdout)
+      (when (next written)
+        (table.insert out (table.concat written)))
       (assert ok code)
       {: code :out (table.concat out "\n") :err (table.concat err) : requests})))
 
@@ -1365,8 +1396,8 @@
                       (assert.are.equal 0 r.code)
                       (assert.is_truthy (r.out:find "\"petstore.staging\"" 1
                                                     true))
-                      (assert.is_truthy (r.err:find "devices: 2 spec_files"
-                                                    1 true))
+                      (assert.is_truthy (r.err:find "devices: 2 spec_files" 1
+                                                    true))
                       (assert.is_nil (read-target)))))
               (it "adds profiles to the config, keeping existing ones"
                   (fn []
@@ -1950,3 +1981,93 @@
                        (assert.is_truthy (r.err:find "no OpenAPI description found at https://d7.test/api"
                                                      1 true))
                        (assert.is_truthy (r.err:find "\"schema\"" 1 true))))))))
+
+(describe "streamed responses"
+          (fn []
+            (it "prints server-sent events as they come"
+                (fn []
+                  (let [r (atlas-run ["http" "https://h.test/events"]
+                                     {"GET https://h.test/events" (respond-text 200
+                                                                                "text/event-stream"
+                                                                                ["data: {\"n\":1}\n"
+                                                                                 "\nevent: x\r\ndata: {\"n\":2}\r\n\r\n"
+                                                                                 ": keep-alive\n\n"
+                                                                                 "data: plain\ndata: text\n\n"
+                                                                                 "data: \"s\""])})]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "{\"n\":1}\n{\"n\":2}\nplain\ntext\n\"s\""
+                                      r.out)
+                    (assert.are.equal "" r.err))))
+            (it "selects in each record"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "https://h.test/events"
+                                      "--select=.n"]
+                                     {"GET https://h.test/events" (respond-text 200
+                                                                                "text/event-stream"
+                                                                                ["data: {\"n\":1}\n\n"
+                                                                                 "data: {\"m\":2}\n\n"
+                                                                                 "data: {\"n\":3}\n\n"])})]
+                    (assert.are.equal "1\n3" r.out))))
+            (it "prints JSON Lines records as they come"
+                (fn []
+                  (let [r (atlas-run ["http" "https://h.test/lines"]
+                                     {"GET https://h.test/lines" (respond-text 200
+                                                                               "application/x-ndjson"
+                                                                               ["{\"a\":1}\n{\"a\""
+                                                                                ":2}\n\n{\"a\":3}"])})]
+                    (assert.are.equal "{\"a\":1}\n{\"a\":2}\n{\"a\":3}" r.out))))
+            (it "writes any body as it comes with --output=raw"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "https://h.test/file"
+                                      "--output=raw"]
+                                     {"GET https://h.test/file" (respond-text 200
+                                                                              "application/octet-stream"
+                                                                              ["ab"
+                                                                               "\0c"
+                                                                               "d"])})]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "ab\0cd" r.out))))
+            (it "still merges the pages of a JSON array with --output=raw"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "https://h.test/list"
+                                      "--output=raw"]
+                                     {"GET https://h.test/list" (respond 200
+                                                                         [1]
+                                                                         {:content-type "application/json"
+                                                                          :link "<https://h.test/list?page=2>; rel=\"next\""})
+                                      "GET https://h.test/list?page=2" (respond 200
+                                                                                [2])})]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "[1,2]" r.out))))
+            (it "leaves error responses to the usual reporting"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "https://h.test/events"
+                                      "--retry=0"]
+                                     {"GET https://h.test/events" (respond-text 503
+                                                                                "text/event-stream"
+                                                                                ["data: down\n\n"])})]
+                    (assert.are.equal 5 r.code)
+                    (assert.are.equal "" r.out)
+                    (assert.is_truthy (r.err:find "HTTP 503" 1 true)))))
+            (it "streams the responses of operations too"
+                (fn []
+                  (let [json (require :atlas.json)
+                        spec (.. (os.tmpname) ".json")]
+                    (with-open [f (io.open spec :w)]
+                      (f:write (json.encode {:openapi "3.1.0"
+                                             :info {:title "s" :version "1"}
+                                             :servers [{:url "https://h.test"}]
+                                             :paths {"/events" {:get {:operationId "events"
+                                                                      :responses {:200 {:description "ok"
+                                                                                        :content {:text/event-stream {}}}}}}}})))
+                    (let [r (atlas-run ["op" spec "events"]
+                                       {"GET https://h.test/events" (respond-text 200
+                                                                                  "text/event-stream"
+                                                                                  ["data: 1\n\n"])})]
+                      (os.remove spec)
+                      (assert.are.equal 0 r.code)
+                      (assert.are.equal "1" r.out)))))))

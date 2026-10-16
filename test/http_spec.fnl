@@ -614,3 +614,130 @@
                                                                {:content-type "application/yaml"}
                                                                "~\n")
                                          :body)))))))
+
+(fn lua-interpreter []
+  "The Lua running these specs: the first argument of its command line."
+  (var i -1)
+  (while (. arg (- i 1))
+    (set i (- i 1)))
+  (. arg i))
+
+(fn serve-once [response-parts ?pause]
+  "Start a server, in another process, that answers one request with
+response-parts (strings sent in turn, ?pause seconds apart); returns
+(url close)."
+  (let [parts (table.concat (icollect [_ part (ipairs response-parts)]
+                              (string.format "%q" part))
+                            ", ")
+        script (.. "local socket = require('socket')
+local srv = assert(socket.bind('127.0.0.1', 0))
+local _, port = srv:getsockname()
+print(port)
+io.stdout:flush()
+-- a test that fails before connecting must not leave it waiting
+srv:settimeout(10)
+local c = srv:accept()
+if not c then return end
+repeat local line = c:receive('*l') until line == '' or line == nil
+for _, part in ipairs({" parts
+                   "}) do c:send(part) socket.sleep(" (or ?pause 0) ") end
+c:close()")
+        h (io.popen (.. (lua-interpreter) " -e '" (script:gsub "'" "'\\''") "'"))
+        port (h:read :*l)]
+    (values (.. "http://127.0.0.1:" port "/") #(h:close))))
+
+(fn chunked [...]
+  "An HTTP/1.1 chunked body of the strings given."
+  (.. (table.concat (icollect [_ s (ipairs [...])]
+                      (string.format "%x\r\n%s\r\n" (length s) s)))
+      "0\r\n\r\n"))
+
+(local sse-head
+       "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
+
+(describe "streaming"
+          (fn []
+            (it "hands the body over as it arrives"
+                (fn []
+                  (let [curl (require :atlas.curl)
+                        socket (require :socket)
+                        (url close) (serve-once [sse-head
+                                                 (string.format "%x\r\n%s\r\n"
+                                                                9 "data: 1\n\n")
+                                                 (string.format "%x\r\n%s\r\n"
+                                                                9 "data: 2\n\n")
+                                                 "0\r\n\r\n"]
+                                                0.4)
+                        chunks []
+                        times []
+                        seen {}
+                        (status head body) (curl.perform {:method "GET"
+                                                          : url
+                                                          :on_data (fn [chunk
+                                                                        status
+                                                                        head]
+                                                                     (set seen.status
+                                                                          status)
+                                                                     (set seen.head
+                                                                          head)
+                                                                     (table.insert chunks
+                                                                                   chunk)
+                                                                     (table.insert times
+                                                                                   (socket.gettime))
+                                                                     true)})]
+                    (close)
+                    (assert.are.equal 200 status)
+                    (assert.are.equal "" body)
+                    (assert.are.equal "data: 1\n\ndata: 2\n\n"
+                                      (table.concat chunks))
+                    (assert.are.equal 200 seen.status)
+                    (assert.is_truthy (seen.head:find "text/event-stream" 1
+                                                      true))
+                    ;; the first event came before the second was sent
+                    (assert.is_true (> (- (. times (length times)) (. times 1))
+                                       0.3)))))
+            (it "keeps the chunks a callback doesn't take"
+                (fn []
+                  (let [curl (require :atlas.curl)
+                        (url close) (serve-once [(.. sse-head (chunked "a" "b"))])
+                        (status _ body) (curl.perform {:method "GET"
+                                                       : url
+                                                       :on_data #false})]
+                    (close)
+                    (assert.are.equal 200 status)
+                    (assert.are.equal "ab" body))))
+            (it "raises what the callback raises"
+                (fn []
+                  (let [curl (require :atlas.curl)
+                        (url close) (serve-once [(.. sse-head (chunked "a"))])
+                        (ok err) (pcall curl.perform
+                                        {:method "GET"
+                                         : url
+                                         :on_data #(error "stop here" 0)})]
+                    (close)
+                    (assert.is_false ok)
+                    (assert.are.equal "stop here" err))))
+            (it "streams a final response through :stream, not redirects"
+                (fn []
+                  (let [(url close) (serve-once [(.. sse-head
+                                                     (chunked "data: x\n\n"))])
+                        got []
+                        resp (http.request {:method "GET"
+                                            : url
+                                            :stream (fn [status headers]
+                                                      (when (= status 200)
+                                                        #(table.insert got
+                                                                       (or $
+                                                                           :end))))})]
+                    (close)
+                    (assert.is_true resp.streamed)
+                    (assert.are.same ["data: x\n\n" :end] got))))
+            (it "won't be retried once part of the body was handed over"
+                (fn []
+                  (let [(url close) (serve-once [(.. "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 100\r\n\r\n"
+                                                     "data: 1\n\n")])
+                        (ok err) (pcall http.request
+                                        {:method "GET" : url :stream #(fn [])})]
+                    (close)
+                    (assert.is_false ok)
+                    (assert.is_true (= true (?. err :permanent))))))))

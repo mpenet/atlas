@@ -272,6 +272,8 @@ A response may also carry `:raw`, the body's text; pagination merges pages from 
 
 The default `atlas.http.request` function handles query-string encoding, content-type aware body encoding, timeouts and TLS options — your replacement must handle all of these itself.
 
+A request may carry `:stream`, a function called once the final response starts, with its status and headers: when it returns a function, that function receives each piece of the body as it arrives (then nil), and the response comes back with `:streamed true` and no body. A failure after the first piece is not retried. Redirects and responses it declines are buffered as usual.
+
 It also follows redirects for GET and HEAD (301, 302, 303, 307, 308; up to 5, then an error). On a redirect to another origin, credential headers (`Authorization`, cookies, anything key/token/secret-like) are dropped; a redirect from `https` to `http` is not followed. Header names and values are checked before sending, so a value containing a line break is rejected rather than injecting extra headers. `atlas.http.encode-body` and `atlas.http.decode-response` are exported if you want to reuse the default encoding.
 
 ## Retries and pagination

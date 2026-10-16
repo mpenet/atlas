@@ -1,5 +1,5 @@
 /* ABOUTME: Lua binding to libcurl's easy API: performs one HTTP exchange and
- * ABOUTME: returns the status, the final response's header block and the body. */
+ * ABOUTME: returns the status, the header block and the body, or streams it. */
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,9 +31,38 @@ static int buffer_append(buffer *b, const char *src, size_t n) {
   return 1;
 }
 
+/* Where the body goes: the buffer, unless the Lua function at on_data (a
+ * registry reference) takes the chunk. An error it raises is kept at error
+ * (a registry reference) and stops the transfer. */
+typedef struct {
+  lua_State *L;
+  buffer *out;
+  buffer *head;
+  int on_data;
+  int error;
+} body_sink;
+
 static size_t on_body(char *ptr, size_t size, size_t nmemb, void *userdata) {
+  body_sink *sink = (body_sink *)userdata;
   size_t n = size * nmemb;
-  return buffer_append((buffer *)userdata, ptr, n) ? n : 0;
+  if (sink->on_data != LUA_NOREF) {
+    lua_State *L = sink->L;
+    long status = 0;
+    curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, sink->on_data);
+    lua_pushlstring(L, ptr, n);
+    lua_pushinteger(L, status);
+    lua_pushlstring(L, sink->head->data ? sink->head->data : "", sink->head->len);
+    /* protected: an error must not unwind through libcurl */
+    if (lua_pcall(L, 3, 1, 0) != LUA_OK) {
+      sink->error = luaL_ref(L, LUA_REGISTRYINDEX);
+      return 0;
+    }
+    int taken = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    if (taken) return n;
+  }
+  return buffer_append(sink->out, ptr, n) ? n : 0;
 }
 
 /* Interim responses (100 Continue, proxy CONNECT) each start a new header
@@ -63,8 +92,12 @@ static const char *opt_string(lua_State *L, int t, const char *key) {
 }
 
 /* perform{method, url, headers = {"Name: value", ...}, body, timeout,
- *         verify, cafile, capath, cert, key}
- * -> status, header_text, body | nil, message */
+ *         verify, cafile, capath, cert, key, idle, on_data}
+ * -> status, header_text, body | nil, message
+ * on_data(chunk, status, header_text), when given, sees each piece of the
+ * body as it arrives and returns true when it took it (else it is kept in
+ * the body returned); an error it raises ends the transfer and is raised.
+ * idle: true when the peer may stay silent for long (event streams). */
 static int perform(lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
   const char *method = opt_string(L, 1, "method");
@@ -85,6 +118,16 @@ static int perform(lua_State *L) {
 
   lua_getfield(L, 1, "verify");
   int verify = lua_isnil(L, -1) ? 1 : lua_toboolean(L, -1);
+  lua_pop(L, 1);
+
+  lua_getfield(L, 1, "idle");
+  int idle = lua_toboolean(L, -1);
+  lua_pop(L, 1);
+
+  lua_getfield(L, 1, "on_data");
+  if (!lua_isnil(L, -1)) luaL_checktype(L, -1, LUA_TFUNCTION);
+  /* referenced last, once the arguments can no longer raise */
+  int has_on_data = !lua_isnil(L, -1);
   lua_pop(L, 1);
 
   const char *cafile = opt_string(L, 1, "cafile");
@@ -129,6 +172,11 @@ static int perform(lua_State *L) {
 
   buffer head = {0}, out = {0};
   char errbuf[CURL_ERROR_SIZE] = "";
+  body_sink sink = {L, &out, &head, LUA_NOREF, LUA_NOREF};
+  if (has_on_data) {
+    lua_getfield(L, 1, "on_data");
+    sink.on_data = luaL_ref(L, LUA_REGISTRYINDEX);
+  }
 
   curl_easy_setopt(handle, CURLOPT_URL, url);
   curl_easy_setopt(handle, CURLOPT_PROTOCOLS_STR, "http,https");
@@ -141,7 +189,7 @@ static int perform(lua_State *L) {
   curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, on_header);
   curl_easy_setopt(handle, CURLOPT_HEADERDATA, &head);
   curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, on_body);
-  curl_easy_setopt(handle, CURLOPT_WRITEDATA, &out);
+  curl_easy_setopt(handle, CURLOPT_WRITEDATA, &sink);
 
   if (strcmp(method, "HEAD") == 0) {
     curl_easy_setopt(handle, CURLOPT_NOBODY, 1L);
@@ -160,10 +208,13 @@ static int perform(lua_State *L) {
     long limit = ms >= (double)LONG_MAX ? LONG_MAX : (long)ms;
     curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, limit < 1 ? 1L : limit);
   } else {
-    /* no overall limit, but give up on a peer that stops answering */
+    /* no overall limit, but give up on a peer that stops answering, unless
+     * it may stay silent (an event stream between events) */
     curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 60L);
-    curl_easy_setopt(handle, CURLOPT_LOW_SPEED_LIMIT, 1L);
-    curl_easy_setopt(handle, CURLOPT_LOW_SPEED_TIME, 60L);
+    if (!idle) {
+      curl_easy_setopt(handle, CURLOPT_LOW_SPEED_LIMIT, 1L);
+      curl_easy_setopt(handle, CURLOPT_LOW_SPEED_TIME, 60L);
+    }
   }
 
   curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, verify ? 1L : 0L);
@@ -178,6 +229,16 @@ static int perform(lua_State *L) {
   /* the handle must not keep pointers to this call's stack */
   curl_easy_setopt(handle, CURLOPT_ERRORBUFFER, NULL);
   curl_easy_setopt(handle, CURLOPT_HTTPHEADER, NULL);
+  curl_easy_setopt(handle, CURLOPT_WRITEDATA, NULL);
+  luaL_unref(L, LUA_REGISTRYINDEX, sink.on_data);
+
+  if (sink.error != LUA_NOREF) {
+    free(head.data);
+    free(out.data);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, sink.error);
+    luaL_unref(L, LUA_REGISTRYINDEX, sink.error);
+    return lua_error(L);
+  }
 
   if (rc != CURLE_OK) {
     lua_pushnil(L);

@@ -254,17 +254,52 @@ lines, plus the TLS settings."
       (tset :body payload)
       (tset :timeout req.timeout))))
 
+(fn body-stream [stream]
+  "The transport's on_data for req.stream, and the state it keeps: stream
+is asked once, at the first piece of the body, whether it takes this
+response; when it returns a function, that function gets every piece."
+  (let [state {:asked false :consumer nil}]
+    (values (fn [chunk status head]
+              (when (not state.asked)
+                (set state.asked true)
+                (set state.consumer (stream status (parse-headers head))))
+              (when state.consumer
+                (state.consumer chunk)
+                true)) state)))
+
 (fn send [req]
-  "One HTTP exchange; redirects are followed by request, not by the transport."
+  "One HTTP exchange; redirects are followed by request, not by the transport.
+With req.stream (fn [status headers] consumer-or-nil), a response the
+consumer takes is handed to it piece by piece (then nil), and comes back
+with :streamed true and no body."
   (let [(ok url payload headers) (pcall encode-request req)
         _ (when (not ok)
             (error (util.permanent-error (tostring url))))
-        (status head body) (curl.perform (transfer req url payload headers
-                                                   (tls.options req.ssl)))]
-    (assert status (string.format "%s %s failed: %s" req.method
-                                  (util.redact-url url req.sensitive-query)
-                                  (tostring head)))
-    (decode-response status (parse-headers head) body)))
+        (on-data stream) (when req.stream
+                           (body-stream req.stream))
+        args (doto (transfer req url payload headers (tls.options req.ssl))
+               (tset :on_data on-data)
+               ;; an event stream may stay silent between events
+               (tset :idle
+                     (not= nil
+                           (: (or (util.header headers "accept") "") :find
+                              "text/event-stream" 1 true))))
+        (status head body) (curl.perform args)
+        failure (when (not status)
+                  (string.format "%s %s failed: %s" req.method
+                                 (util.redact-url url req.sensitive-query)
+                                 (tostring head)))]
+    (when failure
+      ;; what was handed over can't be taken back: trying again would
+      ;; repeat it
+      (error (if (?. stream :consumer) (util.permanent-error failure) failure)
+             0))
+    (if (?. stream :consumer)
+        (do
+          (stream.consumer nil)
+          (doto (decode-response status (parse-headers head) "")
+            (tset :streamed true)))
+        (decode-response status (parse-headers head) body))))
 
 (fn request [req]
   (follow-redirects send req))
@@ -298,4 +333,5 @@ lines, plus the TLS settings."
  : fetch-text
  : encode-body
  : decode-response
- : json-type?}
+ : json-type?
+ : json-lines-type?}

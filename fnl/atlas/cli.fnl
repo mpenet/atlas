@@ -30,7 +30,8 @@
         : list-arazzo-workflows
         : wrap-log-request
         : strip-location
-        : check-select} (require :atlas.cli.output))
+        : check-select
+        : stream-printer} (require :atlas.cli.output))
 
 (local {: config-path
         : load-config
@@ -478,10 +479,22 @@ the client options."
   (let [(ok c) (pcall atlas.client schema opts)]
     (if ok c (die (.. "failed to build client: " (tostring c))))))
 
+(fn print-streams [opts profile p config]
+  "opts with an http-fn whose requests print the responses that come as a
+stream (events, JSON Lines, raw output) as they arrive."
+  (let [{: output : no-color} (display-options profile p config)
+        http-fn opts.http-fn
+        stream (stream-printer output (not no-color) p.select
+                               (util.terminal? 1))]
+    (doto opts
+      (tset :http-fn #(http-fn (doto (collect [k v (pairs $)] k v)
+                                 (tset :stream stream)))))))
+
 (fn run-op [p env]
   (let [config env.config
         {: profile : schema : opts} (api-setup p env
-                                               "Usage: atlas op <profile-or-schema> [operation] [args...]")]
+                                               "Usage: atlas op <profile-or-schema> [operation] [args...]")
+        _ (print-streams opts profile p config)]
     (if p.servers
         (let [servers (atlas.servers (if (= (type schema) :string)
                                          (atlas.load-schema schema)
@@ -578,7 +591,9 @@ JSON or YAML one); otherwise -d is sent as given, as JSON when it is JSON."
         profile (find-profile config p.profile)
         _ (when (and p.profile (not profile))
             (die (.. "Profile not found: " p.profile)))
-        opts (client-options p.profile profile p config env.transport)
+        opts (print-streams (client-options p.profile profile p config
+                                            env.transport)
+                            profile p config)
         base (if profile
                  (profile-base-url p.profile profile p opts env)
                  opts.base-url)

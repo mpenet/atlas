@@ -300,6 +300,22 @@ For anything `--select` doesn't do, pipe the JSON to [jq](https://jqlang.org): o
 
 The selection is printed in the chosen `--output` format; `[]` gives an array. A path that matches nothing prints nothing (and `HTTP <status>` on stderr), and atlas exits 0.
 
+### Streams
+
+Some responses are printed as they arrive rather than once complete:
+
+- An event stream (`text/event-stream`, server-sent events) prints the data of each event as the event ends. Comments and the other fields (`event:`, `id:`) are left out.
+- JSON Lines (`application/x-ndjson`, `application/jsonl`) prints each record as its line ends.
+- With `--output=raw`, any body but JSON is written as it comes, so a large download isn't held in memory.
+
+Each event or record is selected on its own with `--select` and printed as pretty JSON on a terminal, or as one compact JSON line otherwise, ready for `jq` or `while read`. Text that isn't JSON is printed as it is. An error response (4xx, 5xx) is reported as usual, after it is complete.
+
+A request whose `Accept` includes `text/event-stream` (from the spec, or `--h.Accept=…`) may stay silent between events for as long as the server likes; otherwise atlas gives up on a peer silent for 60 seconds. `--timeout` still limits the whole exchange, so leave it out for long streams.
+
+```sh
+atlas http https://api.example.com/events --h.Accept=text/event-stream --select=.status
+```
+
 ### Verbose output
 
 `-v` logs, on stderr, each request (`> METHOD URL` with the query, then its headers and body) and, once the response arrives, its status, timing and headers:
