@@ -68,30 +68,31 @@ Inputs are checked against the `inputs` schema before anything runs (types, requ
 | `--arazzo-output` | Prints |
 |-------------------|--------|
 | `final` | The workflow's outputs (default) |
-| `progress` | Each step on stderr as it runs, with its outputs, then the workflow's outputs |
+| `progress` | A line per step on stderr as the workflow runs, then the workflow's outputs |
 | `steps` | Each step's response body, then the outputs |
 | `full` | For each step, the operation and request body, then the response, then the outputs |
 
 ```console
 $ atlas az doc/examples/petstore.arazzo.yaml first-pet --arazzo-output progress
-→ find
-✓ find  0.181s  HTTP 200
-{
-  "id": 7
-}
-→ fetch
-✓ fetch  0.115s  HTTP 200
-{
-  "pet": { ... }
-}
-✓ workflow first-pet  0.898s
+✓ 1/2 find   findPetsByStatus  116ms  200
+✓ 2/2 fetch  getPetById        117ms  200
+✓ workflow first-pet  960ms
 {
   "name": "Lion 1",
   "status": "available"
 }
 ```
 
-A failed workflow ends with `✗ workflow NAME failed` and the reason, and atlas exits 1. `-v` shows progress as well and logs every request, credentials redacted. Outputs use the `--output` format.
+Each line gives the step's position, its id, what it calls, how long it took and the response's status, once its success criteria are checked: `✓` when they pass, `✗` when they don't. When an action follows, the line says where it goes (`goto cleanup`, `end`) and, after a failure, which criterion failed and why. A step that runs again (a polling `goto` to itself, or a `retry`) is shown with `↻`, the wait and the criterion that failed, then `✓` with the number of attempts and the total time:
+
+```console
+↻ 4/5 wait  get-operation  180ms  200  again in 3s · $response.body#/state == 'success' ($response.body#/state is "pending")
+✓ 4/5 wait  get-operation  7 attempts · 21.4s  200
+```
+
+On a terminal, a step's line is updated in place while it runs and while it polls, cut to the terminal's width; in a log, each attempt gets its own line. The steps of a workflow run by a step are indented under it.
+
+A failed workflow ends with `✗ workflow NAME failed` and the reason: the step, the criterion that failed with the values it compared, and the response's status and body (shortened). atlas exits 1. `-v` shows progress as well and logs every request, credentials redacted. Outputs use the `--output` format.
 
 ## Named workflow documents
 

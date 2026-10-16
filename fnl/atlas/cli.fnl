@@ -7,6 +7,7 @@
 (local http-mod (require :atlas.http))
 (local mcp (require :atlas.cli.mcp))
 (local pretty-mod (require :atlas.pretty))
+(local progress (require :atlas.cli.progress))
 (local socket (require :socket))
 (local util (require :atlas.util))
 (local validate (require :atlas.validate))
@@ -20,7 +21,6 @@
 (local restish (require :atlas.cli.restish))
 (local json (require :atlas.json))
 (local {: list-ops
-        : render
         : print-resp
         : die
         : exit
@@ -231,27 +231,6 @@ positional path params, --inputs, --body, then --i./-i/--b. fields."
         (table.insert fields f))
       (build-body fields (arazzo.workflow-inputs doc wf) base))))
 
-(fn progress-reporter [output use-color]
-  "on-step callback printing live step progress to stderr."
-  (let [paint #(pretty-mod.paint $1 $2 use-color)]
-    (fn [info]
-      (match info.status
-        :running (io.stderr:write (.. (paint :dim "→") " "
-                                      (util.printable info.step) "\n"))
-        :done (do
-                (io.stderr:write (.. (paint :ok "✓") " "
-                                     (util.printable info.step)
-                                     (if info.elapsed
-                                         (string.format "  %.3fs" info.elapsed)
-                                         "")
-                                     (if (?. info :response :status)
-                                         (.. "  HTTP " info.response.status)
-                                         "")
-                                     "\n"))
-                (when (and info.outputs (next info.outputs))
-                  (io.stderr:write (.. (render info.outputs output use-color)
-                                       "\n"))))))))
-
 (fn check-inputs [doc wf inputs p]
   "Stop when inputs don't match the workflow's inputs schema, unless --no-validate."
   (let [errors (validate.check (arazzo.workflow-inputs doc wf) inputs :inputs)]
@@ -310,23 +289,21 @@ returns them. The clients of its sources are built on first use."
   (let [{: output : no-color : verbose} (display-options context.profile p
                                                          env.config)
         mode (or p.arazzo-output (if verbose :progress :final))
-        show-progress (or (= mode :progress) (= mode :full))
-        ;; progress goes to stderr
-        stderr-color (and (not no-color) (util.terminal? 2))
-        paint #(pretty-mod.paint $1 $2 stderr-color)
-        run (workflow-runner context p env
-                             (when show-progress
-                               (progress-reporter output stderr-color)))]
+        ;; progress goes to stderr; on a terminal, lines are rewritten in
+        ;; place, unless -v interleaves the requests' logs with them
+        stderr-terminal (util.terminal? 2)
+        reporter (when (or (= mode :progress) (= mode :full))
+                   (progress.reporter {:write #(io.stderr:write $)
+                                       :tty (and stderr-terminal (not verbose))
+                                       :columns (when stderr-terminal
+                                                  (util.terminal-columns))
+                                       :color (and stderr-terminal
+                                                   (not no-color))}))
+        run (workflow-runner context p env (?. reporter :on-step))]
     (let [t0 (socket.gettime)
-          (ok result) (run wf inputs)
-          timing (string.format "  %.3fs" (- (socket.gettime) t0))]
-      (when show-progress
-        (io.stderr:write (if ok
-                             (.. (paint :ok "✓") " workflow "
-                                 (util.printable wf.workflowId) timing "\n")
-                             (.. (paint :fail "✗") " workflow "
-                                 (util.printable wf.workflowId) " failed" timing
-                                 "\n"))))
+          (ok result) (run wf inputs)]
+      (when reporter
+        (reporter.finish ok wf.workflowId (- (socket.gettime) t0)))
       (if ok
           (print-arazzo-result result mode output no-color)
           (die (tostring result))))))

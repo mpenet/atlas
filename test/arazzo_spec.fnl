@@ -266,7 +266,7 @@
                     (assert.has.error (fn []
                                         (arazzo.run-workflow doc "wf" {}
                                                              clients {}))
-                                      "step 's1' failed success criteria (HTTP 500 {})"))))
+                                      "step 's1' failed: $statusCode == 200 ($statusCode is 500); HTTP 500 {}"))))
             (it "passes inputs to steps via path parameters"
                 (fn []
                   (let [received []
@@ -439,7 +439,97 @@
                                           :outputs {}}]}
                         on-step (fn [ev] (table.insert events ev.status))]
                     (arazzo.run-workflow doc "wf" {} clients {:on-step on-step})
-                    (assert.are.same [:running :done] events))))))
+                    (assert.are.same [:workflow :running :done] events))))
+            (it "reports a step after its criteria, the action taken, and each attempt"
+                (fn []
+                  (let [events []
+                        states ["pending" "success"]
+                        n (counter)
+                        clients {:api (make-client {:poll (fn []
+                                                            (n.inc)
+                                                            (ok-resp {:state (. states
+                                                                                (n.val))}))})}
+                        doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "wf"
+                                          :steps [{:stepId "wait"
+                                                   :operationId "poll"
+                                                   :successCriteria [{:condition "$response.body#/state == 'success'"}]
+                                                   :onFailure [{:name "again"
+                                                                :type "goto"
+                                                                :stepId "wait"
+                                                                :retryAfter 0
+                                                                :criteria [{:condition "$response.body#/state == 'pending'"}]}]}]}]}]
+                    (arazzo.run-workflow doc "wf" {} clients
+                                         {:on-step #(table.insert events $)})
+                    (assert.are.same [:workflow
+                                      :running
+                                      :done
+                                      :action
+                                      :running
+                                      :done]
+                                     (icollect [_ e (ipairs events)] e.status))
+                    (let [[start run1 fail action run2 pass] events]
+                      (assert.are.same [{:step "wait"
+                                         :op-ref "poll"
+                                         :calls "operation"}]
+                                       start.steps)
+                      (assert.are.equal "operation" run1.calls)
+                      (assert.are.equal "wf" start.workflow)
+                      (assert.are.equal 0 start.depth)
+                      (assert.are.equal 1 run1.attempt)
+                      (assert.are.equal 1 run1.index)
+                      (assert.are.equal 1 run1.count)
+                      (assert.is_false fail.passed)
+                      (assert.are.equal "$response.body#/state == 'success' ($response.body#/state is \"pending\")"
+                                        fail.failure)
+                      (assert.are.equal 200 fail.response.status)
+                      (assert.are.equal "goto" action.action.type)
+                      (assert.are.equal "wait" action.action.stepId)
+                      (assert.are.equal 0 action.wait)
+                      (assert.are.equal 2 run2.attempt)
+                      (assert.is_true pass.passed)
+                      (assert.is_nil pass.failure)))))
+            (it "reports a request that fails in transport"
+                (fn []
+                  (let [events []
+                        clients {:api (make-client {:op (fn []
+                                                          (error "connection refused"))})}
+                        doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "wf"
+                                          :steps [{:stepId "s1"
+                                                   :operationId "op"}]}]}]
+                    (assert.has.error #(arazzo.run-workflow doc "wf" {} clients
+                                                            {:on-step #(table.insert events
+                                                                                     $)}))
+                    (let [done (. events (length events))]
+                      (assert.are.equal :done done.status)
+                      (assert.is_false done.passed)
+                      (assert.is_truthy (done.error:find "connection refused" 1
+                                                         true))))))
+            (it "reports the steps of a sub-workflow one level deeper"
+                (fn []
+                  (let [events []
+                        clients {:api (make-client {:op (fn [] (ok-resp {}))})}
+                        doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "outer"
+                                          :steps [{:stepId "call"
+                                                   :workflowId "inner"}]}
+                                         {:workflowId "inner"
+                                          :steps [{:stepId "s1"
+                                                   :operationId "op"}]}]}]
+                    (arazzo.run-workflow doc "outer" {} clients
+                                         {:on-step #(table.insert events $)})
+                    (assert.are.same [[:workflow "outer" 0 nil]
+                                      [:running "outer" 0 "call"]
+                                      [:workflow "inner" 1 nil]
+                                      [:running "inner" 1 "s1"]
+                                      [:done "inner" 1 "s1"]
+                                      [:done "outer" 0 "call"]]
+                                     (icollect [_ e (ipairs events)]
+                                       [e.status e.workflow e.depth e.step])))))))
 
 ;; ---- run-workflow: $response.body (no pointer) ----
 
@@ -1377,7 +1467,7 @@
                                         "outer" {} (clients-logging []) {})]
                     (assert.is_false ok)
                     (assert.is_truthy (: (tostring err) :find
-                                         "step 'sub' failed: step 'i1' failed success criteria"
+                                         "step 'sub' failed: step 'i1' failed: $statusCode == 200 ($statusCode is 500)"
                                          1 true)))))))
 
 (describe "goto limit"

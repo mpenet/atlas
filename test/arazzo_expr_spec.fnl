@@ -567,6 +567,68 @@
                     (assert.are.equal "{\"empty\":{},\"n\":1,\"part\":{\"n\":1}}"
                                       (json.encode v)))))))
 
+(describe "explain-criterion"
+          (fn []
+            (let [ctx {:inputs {}
+                       :response {:status 403
+                                  :headers {}
+                                  :body {:state "pending" :n 3}}
+                       :steps {}
+                       :workflows {}}]
+              (it "shows the values of a simple condition's expressions"
+                  (fn []
+                    (assert.are.equal "$statusCode == 200 ($statusCode is 403)"
+                                      (expr.explain-criterion ctx
+                                                              {:condition "$statusCode == 200"}))
+                    (assert.are.equal "$response.body#/state == 'success' ($response.body#/state is \"pending\")"
+                                      (expr.explain-criterion ctx
+                                                              {:condition "$response.body#/state == 'success'"}))))
+              (it "says when an expression has no value"
+                  (fn []
+                    (assert.are.equal "$response.body#/gone == 1 ($response.body#/gone is missing)"
+                                      (expr.explain-criterion ctx
+                                                              {:condition "$response.body#/gone == 1"}))))
+              (it "names each expression once"
+                  (fn []
+                    (assert.are.equal "$response.body#/n > 5 && $response.body#/n < 10 ($response.body#/n is 3)"
+                                      (expr.explain-criterion ctx
+                                                              {:condition "$response.body#/n > 5 && $response.body#/n < 10"}))))
+              (it "shows the context of regex and JSONPath conditions"
+                  (fn []
+                    (assert.are.equal "regex ^2\\d{2}$ on $statusCode (403)"
+                                      (expr.explain-criterion ctx
+                                                              {:condition "^2\\d{2}$"
+                                                               :context "$statusCode"
+                                                               :type :regex}))
+                    (assert.are.equal "jsonpath $.items[0] on $response.body ({\"n\":3,\"state\":\"pending\"})"
+                                      (expr.explain-criterion ctx
+                                                              {:condition "$.items[0]"
+                                                               :context "$response.body"
+                                                               :type :jsonpath}))))
+              (it "shortens long values"
+                  (fn []
+                    (let [long-ctx (doto (collect [k v (pairs ctx)] k v)
+                                     (tset :response
+                                           {:status 200
+                                            :headers {}
+                                            :body {:s (string.rep "x" 200)}}))
+                          text (expr.explain-criterion long-ctx
+                                                       {:condition "$response.body#/s == 'y'"})]
+                      (assert.is_true (< (length text) 140))
+                      (assert.is_truthy (text:find "…" 1 true)))))
+              (it "shortens text that isn't UTF-8"
+                  (fn []
+                    (assert.is_truthy (: (expr.brief (.. (string.rep "x" 100)
+                                                         "\255"))
+                                         :find "…" 1 true))))
+              (it "says why a condition can't be evaluated"
+                  (fn []
+                    (assert.is_truthy (: (expr.explain-criterion ctx
+                                                                 {:condition "$statuscode == 200"})
+                                         :find
+                                         "can't be evaluated: unknown runtime expression: $statuscode"
+                                         1 true)))))))
+
 (describe "condition language, as the Arazzo spec defines it"
           (fn []
             (let [ctx {:inputs {:a "it's"}

@@ -51,6 +51,7 @@ build = {
       ["atlas.cli.mcp"] = "lua/atlas/cli/mcp.lua",
       ["atlas.cli.output"] = "lua/atlas/cli/output.lua",
       ["atlas.cli.width"] = "lua/atlas/cli/width.lua",
+      ["atlas.cli.progress"] = "lua/atlas/cli/progress.lua",
       ["atlas.unicode-categories"] = "lua/atlas/unicode-categories.lua",
       ["atlas.iregexp"] = "lua/atlas/iregexp.lua",
       ["atlas.jsonpath"] = "lua/atlas/jsonpath.lua",

@@ -65,6 +65,8 @@
 
 (require :atlas.cli.width)
 
+(require :atlas.cli.progress)
+
 (require :atlas.cli.output)
 
 (require :atlas.cli.settings)

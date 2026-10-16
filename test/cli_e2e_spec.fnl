@@ -803,12 +803,31 @@ does, which a streaming transport hands over one by one."
                                       "progress"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "workflow fetchPet failed" 1
-                                                  true)))))
+                                                  true))
+                    (assert.is_truthy (r.err:find "✗" 1 true))
+                    (assert.is_truthy (r.err:find "1/1 get  getPet" 1 true)))))
+            (it "shows each step's result in progress mode, not its outputs"
+                (fn []
+                  (let [r (atlas-run ["az"
+                                      "flows"
+                                      "fetchPet"
+                                      "-i"
+                                      "id=7"
+                                      "--arazzo-output"
+                                      "progress"]
+                                     {"GET https://api.test/pets/7" (respond 200
+                                                                             {:name "Rex"})})]
+                    (assert.are.equal 0 r.code)
+                    (assert.is_truthy (r.err:find "1/1 get  getPet  %d+ms  .*200"))
+                    (assert.is_truthy (r.err:find "workflow fetchPet  %d+ms"))
+                    (assert.is_nil (r.err:find "Rex" 1 true))
+                    (assert.are.equal "name: Rex" r.out))))
             (it "fails with exit 1 when a step fails"
                 (fn []
                   (let [r (atlas-run ["az" "flows" "fetchPet" "-i" "id=7"])]
                     (assert.are.equal 1 r.code)
-                    (assert.is_truthy (r.err:find "step 'get' failed" 1 true)))))))
+                    (assert.is_truthy (r.err:find "step 'get' failed: $statusCode == 200 ($statusCode is 404); HTTP 404"
+                                                  1 true)))))))
 
 (describe "other commands"
           (fn []

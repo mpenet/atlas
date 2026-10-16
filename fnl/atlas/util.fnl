@@ -92,6 +92,14 @@ controls and the overrides that reorder text on screen as \\u{HHHH}."
   "Whether file descriptor fd (1 stdout, 2 stderr) is a terminal."
   (= true (os.execute (.. "test -t " fd))))
 
+(fn terminal-columns []
+  "Columns of the terminal on stderr, else $COLUMNS, else nil."
+  (let [h (io.popen "stty size <&2 2>/dev/null")
+        out (when h (h:read :*a))]
+    (when h (h:close))
+    (or (tonumber (and out (out:match "^%d+ (%d+)")))
+        (tonumber (os.getenv :COLUMNS)))))
+
 (fn json-content? [param]
   "Whether a parameter is declared with JSON content rather than a schema."
   (accumulate [found false media-type (pairs (or (?. param :content) {}))
@@ -408,6 +416,7 @@ inside them are safe."
  : required-names
  : json-content?
  : terminal?
+ : terminal-columns
  : query-has?
  : permanent-error
  : secret-name?

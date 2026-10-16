@@ -6,7 +6,14 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 
 ### Changed
 
+- `--arazzo-output progress` prints a line per step once its success criteria are checked: `✓` or `✗`, its position (`2/5`), what it calls, its time and the response's status. A step polled with `goto` or `retry` stays on one `↻` line with the wait and the criterion that failed, then ends with the number of attempts and the total time; the steps of a workflow run by a step are indented. On a terminal, lines are updated in place and fit its width. Step outputs are no longer printed there; `steps` and `full` print them.
+- A failed workflow says which criterion failed and the values it compared: `step 'find' failed: $statusCode == 200 ($statusCode is 404); HTTP 404 {…}`, the body shortened to 500 characters.
+- The library's `on-step` events: `:workflow` when a workflow starts, `:running`, `:done` after the step's criteria are checked (with `:passed`, `:failure` and `:error`) and `:action`; each carries the workflow, its depth, and the step's index, count and attempt.
 - In an Arazzo payload, an object whose members all resolve to nothing (inputs that aren't given) is left out, like a single member, rather than sent empty; an object written as `{}` is still sent.
+
+### Fixed
+
+- Progress output marked a step `✓` when its response arrived, before its success criteria were checked, so a failing step showed `✓`.
 
 ## [1.0.0-beta6] - 2026-10-16
 

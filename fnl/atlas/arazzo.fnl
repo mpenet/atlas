@@ -278,8 +278,9 @@ a copy: the payload may be an input or another step's data)."
 
 ;; ---- step execution ----
 
-(fn execute-step [ctx clients step params on-step]
-  "Execute a single step with resolved parameter objects. Updates ctx in place.
+(fn execute-step [ctx clients step params on-running]
+  "Execute a single step with resolved parameter objects. Updates ctx in place;
+on-running is called with the operation reference just before the request.
 Returns the response, or (nil message) when the request failed in transport."
   (let [step-id step.stepId
         resolved (resolve-params ctx params)
@@ -302,8 +303,7 @@ Returns the response, or (nil message) when the request failed in transport."
       (error (.. "step '" step-id "': operation not found: " (tostring op-ref))))
     (tset request :method (op.method:upper))
     (tset request :url (op.url-for request))
-    (when on-step
-      (on-step {:status :running :step step-id}))
+    (on-running op-ref)
     (let [t0 (socket.gettime)
           (ok resp) (pcall op.invoke request)
           elapsed (- (socket.gettime) t0)]
@@ -318,15 +318,7 @@ Returns the response, or (nil message) when the request failed in transport."
       (tset ctx :response (when ok resp))
       (tset ctx :request request)
       (if ok
-          (do
-            (when on-step
-              (on-step {:elapsed elapsed
-                        :op-ref op-ref
-                        :outputs (resolve-outputs ctx step.outputs)
-                        :response resp
-                        :status :done
-                        :step step-id}))
-            resp)
+          resp
           (values nil (.. "request failed: " (tostring resp)))))))
 
 ;; ---- workflow execution ----
@@ -358,16 +350,23 @@ target; a :value on the reference overrides the target parameter's value."
         (table.insert out a)))
     out))
 
-(fn failure-message [step-id outcome]
+;; response bodies longer than this are cut in failure messages
+(local message-body-length 500)
+
+(fn failure-message [step-id outcome failure]
+  "Why step-id failed: its error, or the criterion that failed with the
+response's status and body."
   (if outcome.error
       (.. "step '" step-id "' failed: " (tostring outcome.error))
       (let [resp outcome.response
             b (?. resp :body)
-            body (if (= (type b) :table) (.. " " (json.encode b))
-                     b (.. " " (tostring b))
-                     "")]
-        (.. "step '" step-id "' failed success criteria (HTTP "
-            (tostring (or (?. resp :status) "?")) body ")"))))
+            body (if (= nil b) "" (= (type b) :string)
+                     (.. " "
+                         (if (<= (length b) message-body-length) b
+                             (.. (b:sub 1 message-body-length) "…")))
+                     (.. " " (expr.brief b message-body-length)))]
+        (.. "step '" step-id "' failed: " (tostring failure) "; HTTP "
+            (tostring (or (?. resp :status) "?")) body))))
 
 (fn find-workflow [doc workflow-id]
   "The workflow with workflow-id in doc, or nil."
@@ -389,21 +388,53 @@ already on the stack means a cycle (dependsOn or a step calling itself)."
             (doto (icollect [_ w (ipairs stack)] w)
               (table.insert workflow-id))))))
 
+(fn emit [run event]
+  "Pass event to the run's on-step callback, with the workflow and its depth."
+  (when run.on-step
+    (set event.workflow run.wf.workflowId)
+    (set event.depth run.depth)
+    (run.on-step event)))
+
+(fn calls [step]
+  "What step calls: an operation, or a workflow."
+  (if step.workflowId :workflow :operation))
+
+(fn step-event [run step status]
+  "An on-step event about step, at its current attempt."
+  {: status
+   :step step.stepId
+   :index (. run.step-index step.stepId)
+   :count (length run.steps)
+   :attempt (. run.attempts step.stepId)
+   :calls (calls step)})
+
+(fn op-ref-of [step]
+  (or step.operationId step.operationPath step.workflowId))
+
 (fn run-step [run step]
   "Run one step; returns {:ok bool :response resp :error message}."
+  (tset run.attempts step.stepId (+ 1 (or (. run.attempts step.stepId) 0)))
   (if step.workflowId
       ;; sub-workflow step: its outputs become the step's outputs
       (let [sub-inputs (collect [_ p (ipairs (expand-references run.doc
                                                                 step.parameters))]
                          p.name
                          (expr.eval run.ctx p.value))
+            _ (emit run
+                    (doto (step-event run step :running)
+                      (tset :op-ref step.workflowId)))
+            t0 (socket.gettime)
             (ok sub) (pcall run.run-sub step.workflowId sub-inputs)]
         ;; the step has no response of its own: criteria must not see the
         ;; previous step's
         (tset run.ctx :response nil)
         (tset run.ctx :request nil)
         (tset run.ctx.steps step.stepId
-              {:outputs (if ok sub.outputs {}) :request nil :response nil})
+              {:elapsed (- (socket.gettime) t0)
+               :op-ref step.workflowId
+               :outputs (if ok sub.outputs {})
+               :request nil
+               :response nil})
         (if ok {:ok true} {:ok false :error sub}))
       ;; operation step: merge workflow params then step params
       (let [step-params (expand-references run.doc step.parameters)
@@ -418,18 +449,49 @@ already on the stack means a cycle (dependsOn or a step calling itself)."
                              "' has no 'in' (path, query, header or cookie)")
                          0)))
             params (util.merge-parameters run.wf-params step-params)]
-        (match (execute-step run.ctx run.clients step params run.on-step)
+        (match (execute-step run.ctx run.clients step params
+                             #(emit run
+                                    (doto (step-event run step :running)
+                                      (tset :op-ref $))))
           resp {:ok true :response resp}
           (nil message) {:ok false :error message}))))
 
-(fn wait-before-retry [run seconds]
-  "Sleep before retrying: the response's Retry-After (seconds or a date, at
-most run.max-wait) overrules the action's retryAfter, as the Arazzo spec
-recommends."
-  (let [asked (retry.retry-after run.ctx.response os.time)
-        wait (if asked (math.min run.max-wait asked) seconds)]
-    (when (and wait (> wait 0))
-      (socket.sleep wait))))
+(fn finish-step [run step outcome]
+  "Check step's success criteria after it ran, resolve its outputs and report
+it: (passed failure), failure saying which criterion didn't pass."
+  (let [failing (when outcome.ok
+                  (expr.failing-criterion run.ctx step.successCriteria))
+        passed (and outcome.ok (= nil failing))
+        failure (when failing (expr.explain-criterion run.ctx failing))
+        record (. run.ctx.steps step.stepId)]
+    (when step.outputs
+      (tset record :outputs (resolve-outputs run.ctx step.outputs)))
+    (when passed
+      (tset run.retry-counts step.stepId nil))
+    (emit run (doto (step-event run step :done)
+                (tset :op-ref (or (?. record :op-ref) (op-ref-of step)))
+                (tset :elapsed (?. record :elapsed))
+                (tset :response outcome.response)
+                (tset :outputs (?. record :outputs))
+                (tset :passed passed)
+                (tset :failure failure)
+                (tset :error outcome.error)))
+    (values passed failure)))
+
+(fn retry-wait [run seconds]
+  "Seconds to wait before running a step again: the response's Retry-After
+(seconds or a date, at most run.max-wait) overrules the action's retryAfter,
+as the Arazzo spec recommends."
+  (let [asked (retry.retry-after run.ctx.response os.time)]
+    (if asked (math.min run.max-wait asked) seconds)))
+
+(fn take-action [run step action ?wait]
+  "Report the action taken after step, then wait ?wait seconds."
+  (emit run (doto (step-event run step :action)
+              (tset :action action)
+              (tset :wait (or ?wait 0))))
+  (when (and ?wait (> ?wait 0))
+    (socket.sleep ?wait)))
 
 (fn run-step-first [run step-id retried]
   "Run the step a retry action names before the retried step runs again; it
@@ -437,14 +499,11 @@ must succeed."
   (let [target (. run.steps
                   (or (. run.step-index step-id)
                       (error (.. "retry: unknown step: " step-id) 0)))
-        outcome (run-step run target)]
-    (when target.outputs
-      (tset (. run.ctx.steps step-id) :outputs
-            (resolve-outputs run.ctx target.outputs)))
-    (when (not (and outcome.ok
-                    (expr.eval-criteria run.ctx target.successCriteria)))
+        outcome (run-step run target)
+        (passed failure) (finish-step run target outcome)]
+    (when (not passed)
       (error (.. "step '" retried.stepId "': retry step "
-                 (failure-message step-id outcome)) 0))))
+                 (failure-message step-id outcome failure)) 0))))
 
 (fn action-inputs [run action]
   "The inputs of the workflow an action goes to: its parameters, else the
@@ -461,8 +520,11 @@ current workflow's inputs."
         n (+ 1 (or (. run.goto-counts target) 0))]
     (tset run.goto-counts target n)
     (assert (<= n run.max-gotos) (.. "goto loop detected at: " target))
-    (when (and action.stepId (= action.stepId step.stepId) action.retryAfter)
-      (wait-before-retry run action.retryAfter))
+    ;; only going back to the same step waits: that's a polling loop
+    (take-action run step action
+                 (when (and action.stepId (= action.stepId step.stepId)
+                            action.retryAfter)
+                   (retry-wait run action.retryAfter)))
     (if action.stepId
         (or (. run.step-index action.stepId)
             (error (.. "goto: unknown step: " action.stepId) 0))
@@ -475,7 +537,7 @@ current workflow's inputs."
   (let [n (+ 1 (or (. run.retry-counts step.stepId) 0))]
     (when (<= n (or action.retryLimit 1))
       (tset run.retry-counts step.stepId n)
-      (wait-before-retry run action.retryAfter)
+      (take-action run step action (retry-wait run action.retryAfter))
       (when action.workflowId
         (run.run-sub action.workflowId (action-inputs run action)))
       (when action.stepId
@@ -494,7 +556,9 @@ nil when a failure is left unhandled."
         chosen (accumulate [found nil _ action (ipairs actions) &until found]
                  (when (expr.eval-criteria run.ctx action.criteria)
                    (match action.type
-                     :end [(+ (length run.steps) 1)]
+                     :end (do
+                            (take-action run step action)
+                            [(+ (length run.steps) 1)])
                      :goto [(goto-action run action step)]
                      :retry (match (retry-action run action i step)
                               again [again]))))]
@@ -570,6 +634,8 @@ messages), and a dependsOn that sequential execution can't satisfy."
                            i)
              :wf-params (expand-references doc wf.parameters)
              :on-step opts.on-step
+             :depth (- (length opts.workflow-stack) 1)
+             :attempts {}
              :max-gotos (or opts.max-gotos 50)
              :max-wait (or opts.max-wait 300)
              :goto-counts {}
@@ -583,6 +649,11 @@ messages), and a dependsOn that sequential execution can't satisfy."
                                 {:outputs sub.outputs :inputs sub.inputs})
                           sub))}
         step-order []]
+    (emit run {:status :workflow
+               :steps (icollect [_ step (ipairs run.steps)]
+                        {:step step.stepId
+                         :op-ref (op-ref-of step)
+                         :calls (calls step)})})
     ;; workflows listed in dependsOn run first, once each, with the same inputs
     (each [_ dep (ipairs (or wf.dependsOn []))]
       (when (= nil (. ctx.workflows dep))
@@ -591,17 +662,11 @@ messages), and a dependsOn that sequential execution can't satisfy."
     (while (<= i (length run.steps))
       (let [step (. run.steps i)
             outcome (run-step run step)
-            success? (and outcome.ok
-                          (expr.eval-criteria ctx step.successCriteria))]
+            (success? failure) (finish-step run step outcome)]
         (table.insert step-order step.stepId)
-        (when step.outputs
-          (tset (. ctx.steps step.stepId) :outputs
-                (resolve-outputs ctx step.outputs)))
-        (when success?
-          (tset run.retry-counts step.stepId nil))
         (set i
              (or (next-index run i step success?)
-                 (error (failure-message step.stepId outcome) 0)))))
+                 (error (failure-message step.stepId outcome failure) 0)))))
     ;; $outputs refers to the workflow's own outputs
     (set ctx.outputs {})
     (each [k v (pairs (or wf.outputs {}))]
@@ -635,7 +700,18 @@ order; the CLI accepts these as positional arguments."
 (fn run [path workflow-id inputs ?opts]
   "Load an Arazzo document and execute a workflow.
 ?opts: { clients, http-fn, ssl, headers, timeout, base-url, on-step, max-gotos,
-max-wait (seconds a response's Retry-After may ask, default 300) }"
+max-wait (seconds a response's Retry-After may ask, default 300) }
+
+on-step is called with events, each with :status, :workflow (its id) and
+:depth (0, or 1 and more in workflows run by steps):
+  :workflow  a workflow starts; :steps [{:step :op-ref :calls}]
+  :running   a step's request is about to be sent
+  :done      a step ran and its criteria were checked: :passed, :failure (the
+             criterion that failed, with its values), :error (a request that
+             failed in transport), :elapsed, :response, :outputs
+  :action    an action applies after a step: :action, :wait (seconds)
+Step events also have :step, :index, :count, :attempt (1, then 2… each time
+the step runs again), :op-ref and :calls (:operation or :workflow)."
   (let [doc (load-doc path ?opts)
         client-opts (collect [k v (pairs (or ?opts {}))]
                       (when (not= k :on-step) (values k v)))

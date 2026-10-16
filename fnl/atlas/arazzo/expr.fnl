@@ -468,13 +468,55 @@ why, as Arazzo 1.1 requires; an unsupported type raises."
                 (.. "condition '" (tostring criterion.condition)
                     "' can't be evaluated: " (tostring result))))))
 
-(fn eval-criteria [ctx criteria]
-  "Whether all criteria pass. Problems evaluating them go to ctx.warn."
-  (accumulate [ok true _ c (ipairs (or criteria [])) &until (not ok)]
+(fn failing-criterion [ctx criteria]
+  "The first of criteria that doesn't pass, or nil. Problems evaluating them
+go to ctx.warn."
+  (accumulate [failing nil _ c (ipairs (or criteria [])) &until failing]
     (let [(passed problem) (eval-criterion ctx c)]
       (when (and problem ctx.warn)
         (ctx.warn problem))
-      passed)))
+      (when (not passed) c))))
+
+(fn eval-criteria [ctx criteria]
+  "Whether all criteria pass. Problems evaluating them go to ctx.warn."
+  (= nil (failing-criterion ctx criteria)))
+
+;; ---- explanations ----
+
+;; values longer than this are cut in explanations
+(local shown-length 60)
+
+(fn brief [v ?max-length]
+  "v as JSON text of at most ?max-length characters (60 by default), cut with
+…, for a person reading why a criterion failed; missing for nil."
+  (let [max-length (or ?max-length shown-length)]
+    (if (= v nil) "missing"
+        (let [text (json.encode v)
+              ;; cut between characters, or bytes when it isn't UTF-8
+              cut (if (utf8.len text)
+                      (when (> (utf8.len text) max-length)
+                        (- (utf8.offset text (+ max-length 1)) 1))
+                      (when (> (length text) max-length) max-length))]
+          (if cut (.. (text:sub 1 cut) "…") text)))))
+
+(fn explain-criterion [ctx criterion]
+  "Why criterion doesn't pass, for a person: a simple condition with the values
+of its runtime expressions, a regex or JSONPath condition with its context's
+value, or why it can't be evaluated."
+  (let [(_ problem) (eval-criterion ctx criterion)
+        kind (expression-type (or criterion.type :simple))]
+    (if problem problem (= kind :simple)
+        (let [seen {}
+              parts (icollect [_ token (ipairs (tokenize criterion.condition))]
+                      (when (and (= token.kind :expr) (not (. seen token.text)))
+                        (tset seen token.text true)
+                        (.. token.text " is "
+                            (brief (resolve-expr ctx token.text)))))]
+          (if (next parts)
+              (.. criterion.condition " (" (table.concat parts ", ") ")")
+              criterion.condition))
+        (.. kind " " criterion.condition " on " (tostring criterion.context)
+            " (" (brief (eval ctx criterion.context)) ")"))))
 
 {: eval
  : expression-type
@@ -482,5 +524,8 @@ why, as Arazzo 1.1 requires; an unsupported type raises."
  : eval-template
  : resolve-expr
  : eval-criterion
+ : failing-criterion
+ : explain-criterion
+ : brief
  : eval-criteria
  : json-pointer}

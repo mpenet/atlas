@@ -11,6 +11,7 @@
                :punct "\27[90m"
                :dim "\27[2m"
                :ok "\27[32m"
+               :warn "\27[33m"
                :fail "\27[31m"})
 
 (fn c [color s use-color]
