@@ -2,14 +2,14 @@
 
 All notable changes to atlas. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-beta5] - 2026-10-16
 
 ### Added
 
 - `atlas http [METHOD] URL-or-path`: a request without a spec, with a profile's headers, authentication and TLS settings, retries, pagination, `-v`, `--dry-run`/`--curl` and the usual output and exit codes. A path is appended to the profile's API URL; a profile's credentials are only sent to its API's origin.
 - `atlas.base-url`: the URL a client of a schema sends requests to.
 - Spec discovery: a profile with `base-url` and no `schema` finds its spec through the base URL's `Link` header (`service-desc`, `service-doc`, `describedby`), `openapi.json` and `openapi.yaml` under it, or the base URL itself; the location is cached. Restish profiles without `spec_files` import without a warning.
-- Streamed responses: server-sent events and JSON Lines are printed record by record as they arrive (with `--select` applied to each), and `--output=raw` writes any body but JSON as it comes. Requests accepting `text/event-stream` may stay idle between events. The transport takes a `:stream` function for this.
+- Streamed responses: server-sent events and JSON Lines are printed record by record as they arrive (with `--select` applied to each), and with `--output=raw` and no `--select`, a body of a type other than JSON or YAML is written as it comes. Requests accepting `text/event-stream` may stay idle between events. The transport takes a `:stream` function for this.
 - `--output=table` aligns wide characters (CJK, most emoji) and combining marks by their display width; csv and tsv escape control characters on a terminal.
 - `--select` filters: `[?state==running]`, `[?size>10]`, `[?tags.env=="prod"]`, `[?tags]`; negative indexes (`[-1]`); `..key` for a field at any depth.
 - `--output=table`, `csv` and `tsv` for arrays of objects, with the columns a `{a,b}` selection picks.
@@ -19,11 +19,14 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 ### Changed
 
 - `--output=raw` prints a selected array of strings, numbers or booleans one value per line.
+- Output escapes C1 control characters and the bidirectional overrides (U+202A–202E, U+2066–2069) as well as ASCII control characters, so text from an API can neither drive nor reorder what the terminal shows.
+- The documentation is split into a page per topic, with an index in `doc/README.md`; `make test` checks its links.
 
 ### Fixed
 
 - Content types that only start like JSON (`application/json-seq`, `application/jsonl`) are no longer decoded as JSON.
 - YAML with an alias inside its own anchor, or whose aliases expand past a million nodes, is refused instead of crashing atlas or making it spin; this covers YAML specs and Arazzo documents too.
+- OpenAPI 3.0 `nullable` allows null whatever else the schema says (`enum`, `allOf`…), and read-only properties declared in `allOf` members are not required in requests.
 - External auth tools run with stdin from `/dev/null` (unless given the request to sign), and the browser of OAuth flows with stdin and stdout on `/dev/null`.
 
 ## [1.0.0-beta4] - 2026-10-15
