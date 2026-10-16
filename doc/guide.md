@@ -217,3 +217,33 @@ Each API becomes a profile with the API's name; its other profiles become `API.P
 Settings with no atlas equivalent are listed as warnings rather than dropped silently: APIs without `spec_files` (Restish can discover specs; atlas needs `schema`), extra `spec_files`, `issuer_url` (OIDC discovery), `credentials`, `tls_signer`, `url_overrides` and `pagination`.
 
 Commands map directly: `restish example list-items` becomes `atlas op example list-items`.
+
+### How they differ
+
+Most of what you do with Restish has a direct equivalent:
+
+| Restish | atlas |
+|---------|-------|
+| `restish example list-items` | `atlas op example list-items` |
+| `restish get https://…`, `restish post https://… name: x` | `atlas http GET https://…`, `atlas http POST https://… --b.name=x` |
+| Shorthand body input (`name: x, tags[]: a`) | `-d` with JSON or YAML, `--b.name=x` fields (`--b.disk.size=10` for nested ones) |
+| `-f body.items[state == running].{id, name}` | `--select '.items[?state==running].{id,name}'` |
+| `--rsh-filter-lang jq` | pipe the JSON output to `jq` |
+| CSV formatter plugin | `--output=csv`, `tsv` or `table` |
+| MCP command plugin | `atlas mcp PROFILE` |
+| TLS signer and auth hook plugins | `external-tool` authentication, for any command that signs or fetches credentials |
+
+atlas also:
+
+- checks a request against the spec before sending it: required parameters, and the body against its schema;
+- runs [Arazzo](arazzo.md) workflows, and offers them to AI agents through `atlas mcp --arazzo`;
+- is one static binary of about 2 MB, with these features built in rather than installed as plugins.
+
+What Restish has that atlas doesn't:
+
+- Finding an API's spec from its base URL. atlas needs the spec's location in `schema`.
+- Recursive search (`..`), negative indexes (`[-1]`) and jq built into its filters.
+- Streaming responses, and caching them.
+- Plugins (hooks, commands, TLS signers) and the plugins built on them, like bulk resource management and PKCS#11 signing.
+
+See the [Restish documentation](https://rest.sh/docs/) for its side of the comparison.
