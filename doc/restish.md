@@ -47,12 +47,12 @@ Most of what you do with Restish has a direct equivalent:
 | `--rsh-filter-lang jq` | pipe the JSON output to `jq` |
 | CSV formatter plugin | `--output=csv`, `tsv` or `table` |
 | MCP command plugin | `atlas mcp PROFILE` |
-| TLS signer and auth hook plugins | `external-tool` authentication, for any command that signs or fetches credentials |
+| TLS signer and auth hook plugins | [Auth plugins](authentication.md#plugins) in Lua or Fennel, run inside atlas, or `external-tool` authentication for any command that signs or fetches credentials |
 
 atlas also:
 
 - checks a request against the spec before sending it: required parameters, and the body against its schema;
 - runs [Arazzo](arazzo.md) workflows, and offers them to AI agents through `atlas mcp --arazzo`;
-- is one static binary of less than 2 MB, with these features built in rather than installed as plugins.
+- is one static binary of about 2 MB, with these features built in rather than installed as plugins; its own plugins are Lua or Fennel files, with nothing to install.
 
 See the [Restish documentation](https://rest.sh/docs/) for its side of the comparison.

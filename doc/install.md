@@ -2,7 +2,7 @@
 
 [Documentation](README.md) › Installing atlas
 
-atlas is one static binary of less than 2 MB for macOS and Linux, with no runtime dependencies. Install it with Homebrew, download it, or build it; the [library](library.md) installs with luarocks.
+atlas is one static binary of about 2 MB for macOS and Linux, with no runtime dependencies. Install it with Homebrew, download it, or build it; the [library](library.md) installs with luarocks.
 
 ## Homebrew
 

@@ -4,7 +4,7 @@ atlas calls any HTTP API that publishes an [OpenAPI 3](https://spec.openapis.org
 
 ## Getting started
 
-- [Installing atlas](install.md): Homebrew, release binaries (less than 2 MB, no runtime dependencies), from source, with luarocks; shell completion.
+- [Installing atlas](install.md): Homebrew, release binaries (about 2 MB, no runtime dependencies), from source, with luarocks; shell completion.
 - [Guide](guide.md): adding an API, credentials, several environments, scripting, debugging a request, corporate networks.
 
 ## Reference
