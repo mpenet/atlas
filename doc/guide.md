@@ -229,6 +229,7 @@ Most of what you do with Restish has a direct equivalent:
 | `restish get https://…`, `restish post https://… name: x` | `atlas http GET https://…`, `atlas http POST https://… --b.name=x` |
 | Shorthand body input (`name: x, tags[]: a`) | `-d` with JSON or YAML, `--b.name=x` fields (`--b.disk.size=10` for nested ones) |
 | `-f body.items[state == running].{id, name}` | `--select '.items[?state==running].{id,name}'` |
+| `-f 'body..name'`, `-f 'body.items[-1]'` | `--select '..name'`, `--select '.items[-1]'` |
 | `--rsh-filter-lang jq` | pipe the JSON output to `jq` |
 | CSV formatter plugin | `--output=csv`, `tsv` or `table` |
 | MCP command plugin | `atlas mcp PROFILE` |
@@ -242,8 +243,8 @@ atlas also:
 
 What Restish has that atlas doesn't:
 
-- Recursive search (`..`), negative indexes (`[-1]`) and jq built into its filters.
-- Streaming responses, and caching them.
+- jq built into its filters.
+- Caching responses.
 - Plugins (hooks, commands, TLS signers) and the plugins built on them, like bulk resource management and PKCS#11 signing.
 
 See the [Restish documentation](https://rest.sh/docs/) for its side of the comparison.
