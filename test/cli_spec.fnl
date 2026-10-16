@@ -848,6 +848,15 @@
                                     "op"
                                     "profile"]
                                    (complete ""))))
+            (it "completes the operations of a spec discovery found"
+                (fn []
+                  (let [ctx {:config {:profiles {:disc {:base-url "https://x.test"}}}
+                             :known-schema #(when (= $.base-url
+                                                     "https://x.test")
+                                              "D")
+                             :load-schema #(when (= $ "D") completion-schema)}]
+                    (assert.are.same ["add-pet" "list-pets"]
+                                     (cli.complete-line "op disc " ctx)))))
             (it "completes mcp's profiles and options"
                 (fn []
                   (assert.are.same ["exo"] (complete "mcp e"))

@@ -9,7 +9,8 @@
         : check-config
         : load-schema-cached
         : find-profile
-        : merge-ssl} (require :atlas.cli.settings))
+        : merge-ssl
+        : discovered-schema} (require :atlas.cli.settings))
 
 ;; ---- options and completion ----
 (fn shown [o]
@@ -162,7 +163,12 @@ operation, or an Arazzo document's workflow and inputs."
         c {}]
     (when (and (= cmd :op) target)
       (let [(_ profile) (pcall find-profile config target)
-            source (or (?. profile :schema) (home-path target))
+            source (or (?. profile :schema)
+                       ;; where discovery found it, for a profile with
+                       ;; base-url only
+                       (when (and profile ctx.known-schema)
+                         (ctx.known-schema profile))
+                       (home-path target))
             (ok schema) (pcall ctx.load-schema source profile)]
         (when (and ok (= (type schema) :table))
           (let [index-flag (accumulate [v nil i w (ipairs words)]
@@ -358,6 +364,10 @@ atlas __complete [--describe] LINE-UP-TO-CURSOR"
                                                                      nil)
                                                      :timeout timeout})
                                 (atlas.load-schema src)))
+             ;; no probing on Tab: what an earlier run found
+             :known-schema #(when $.base-url
+                              (discovered-schema $.base-url
+                                                 (or $.cache-ttl 3600)))
              :load-doc arazzo.load-doc
              : timeout}]
     (each [_ e (ipairs (if line (complete-entries line ctx) []))]

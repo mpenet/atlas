@@ -301,7 +301,7 @@
                                              "is not an OpenAPI document" 1 true)))))))
             (it "explains a profile without a schema"
                 (fn []
-                  (let [r (with-config {:profiles {:noschema {:base-url "https://api.test"}}}
+                  (let [r (with-config {:profiles {:noschema {:headers {:x-a "b"}}}}
                             #(atlas-run ["op" "noschema" "list-pets"]))]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "profile noschema has no schema"
@@ -1365,7 +1365,7 @@
                       (assert.are.equal 0 r.code)
                       (assert.is_truthy (r.out:find "\"petstore.staging\"" 1
                                                     true))
-                      (assert.is_truthy (r.err:find "discovered: no spec_files"
+                      (assert.is_truthy (r.err:find "devices: 2 spec_files"
                                                     1 true))
                       (assert.is_nil (read-target)))))
               (it "adds profiles to the config, keeping existing ones"
@@ -1861,3 +1861,92 @@
                     (assert.is_truthy (r.err:find "Usage: atlas mcp" 1 true)))
                   (let [r (mcp-run ["mcp" "p" "--dry-run"] [])]
                     (assert.are.equal 1 r.code))))))
+
+(fn fixture-spec []
+  (let [json (require :atlas.json)]
+    (with-open [f (io.open "test/fixtures/cli-api.json")]
+      (json.decode (f:read :*a)))))
+
+(fn discovering [base auth]
+  {:profiles {:d {:base-url base : auth}}})
+
+(describe "spec discovery"
+          (fn []
+            (it "follows the base URL's Link rel=service-desc"
+                (fn []
+                  (with-config (discovering "https://d1.test/v1")
+                    #(let [r (atlas-run ["op" "d" "list-pets"]
+                                        {"GET https://d1.test/v1" (respond 200
+                                                                           {}
+                                                                           {:link "</specs/api.json>; rel=\"service-desc\""})
+                                         "GET https://d1.test/specs/api.json" (respond 200
+                                                                                       (fixture-spec))
+                                         "GET https://d1.test/v1/pets" (respond 200
+                                                                                [])})]
+                       (assert.are.equal 0 r.code)
+                       (assert.are.equal "https://d1.test/v1/pets"
+                                         (. r.requests (length r.requests) :url))))))
+            (it "tries openapi.json and openapi.yaml under the base URL"
+                (fn []
+                  (with-config (discovering "https://d2.test/v1/")
+                    #(let [r (atlas-run ["op" "d" "--list"]
+                                        {"GET https://d2.test/v1/openapi.yaml" (respond 200
+                                                                                        (fixture-spec))})]
+                       (assert.are.equal 0 r.code)
+                       (assert.is_truthy (r.out:find "list-pets" 1 true))))))
+            (it "takes the base URL's own body when it is the spec"
+                (fn []
+                  (with-config (discovering "https://d3.test")
+                    #(let [r (atlas-run ["op" "d" "--list"]
+                                        {"GET https://d3.test" (respond 200
+                                                                        (fixture-spec))})]
+                       (assert.are.equal 0 r.code)
+                       (assert.is_truthy (r.out:find "list-pets" 1 true))))))
+            (it "follows links to the base URL's origin only"
+                (fn []
+                  (with-config (discovering "https://d4.test")
+                    #(let [r (atlas-run ["op" "d" "--list"]
+                                        {"GET https://d4.test" (respond 200 {}
+                                                                        {:link "<https://evil.test/spec.json>; rel=\"service-desc\""})
+                                         "GET https://evil.test/spec.json" (respond 200
+                                                                                    (fixture-spec))})]
+                       (assert.are.equal 1 r.code)
+                       (each [_ req (ipairs r.requests)]
+                         (assert.is_nil (req.url:find "evil.test" 1 true)))))))
+            (it "asks for credentials when the base URL wants them"
+                (fn []
+                  (with-config (discovering "https://d5.test"
+                                            {:name "bearer"
+                                             :params {:token "t0k"}})
+                    #(let [r (atlas-run ["op" "d" "--list"]
+                                        {"GET https://d5.test" (fn [req]
+                                                                 (if (= (?. req
+                                                                            :headers
+                                                                            :authorization)
+                                                                        "Bearer t0k")
+                                                                     (respond 200
+                                                                              {}
+                                                                              {:link "</openapi>; rel=\"service-desc\""})
+                                                                     (respond 401
+                                                                              {})))
+                                         "GET https://d5.test/openapi" (respond 200
+                                                                                (fixture-spec))})]
+                       (assert.are.equal 0 r.code)))))
+            (it "remembers where it found the spec"
+                (fn []
+                  (with-config (discovering "https://d6.test")
+                    #(let [routes {"GET https://d6.test/openapi.json" (respond 200
+                                                                               (fixture-spec))}
+                           first (atlas-run ["op" "d" "--list"] routes)
+                           again (atlas-run ["op" "d" "--list"] routes)]
+                       (assert.are.equal 0 first.code)
+                       (assert.are.equal 0 again.code)
+                       (assert.are.equal 0 (length again.requests))))))
+            (it "says where it looked when it finds nothing"
+                (fn []
+                  (with-config (discovering "https://d7.test/api")
+                    #(let [r (atlas-run ["op" "d" "--list"])]
+                       (assert.are.equal 1 r.code)
+                       (assert.is_truthy (r.err:find "no OpenAPI description found at https://d7.test/api"
+                                                     1 true))
+                       (assert.is_truthy (r.err:find "\"schema\"" 1 true))))))))

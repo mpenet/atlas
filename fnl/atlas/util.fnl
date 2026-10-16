@@ -361,7 +361,26 @@ a,b and objects as k1,v1,k2,v2 (keys sorted), each part url-encoded."
                                           (s:gsub "%." "%%2E")
                                           s)))))))
 
+(fn link-params-rel [params]
+  "Space-separated rel value of a Link entry's parameters, lowercased."
+  (let [lower (params:lower)]
+    (or (lower:match ";%s*rel%s*=%s*\"([^\"]*)\"")
+        (lower:match ";%s*rel%s*=%s*([^;,%s]+)") "")))
+
+(fn link-urls [headers rels]
+  "URLs of the Link header entries with one of rels (a set of lower-case
+relation names), in header order. URLs are delimited by <>, so commas
+inside them are safe."
+  (let [link (header headers "link")]
+    (icollect [url params (: (or link "") :gmatch "<([^>]*)>([^<]*)")]
+      (when (accumulate [found false rel (: (link-params-rel params) :gmatch
+                                            "%S+")
+                         &until found]
+              (= true (. rels rel)))
+        url))))
+
 {: camel->kebab
+ : link-urls
  : query-string
  : operation-name
  : extract-path-params

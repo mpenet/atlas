@@ -357,7 +357,7 @@ Settings apply in this order, first found wins: command-line option, profile, to
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `schema` | string | The spec's URL or file path |
+| `schema` | string | The spec's URL or file path; without it, atlas finds the spec from `base-url` (see [Finding the spec](#finding-the-spec)) |
 | `extends` | string | Profile to inherit from |
 | `base-url` | string | Send requests here instead of the spec's server |
 | `server-index` | number | Which of the spec's servers to use, from 1 |
@@ -515,6 +515,16 @@ $ atlas op myapi --servers
 ```
 
 `*` marks the server in use. `--server-index=2` (or `server-index` in a profile) picks another one, `--server.region=us` (or `server` in a profile) sets a variable, and `--base-url` (or `base-url`) replaces the server altogether. Values outside a variable's allowed values are an error.
+
+## Finding the spec
+
+A profile with `base-url` and no `schema` lets atlas find the spec, the way Restish does. It looks, in order, at:
+
+1. the links of the base URL's `Link` header with `rel="service-desc"`, `"service-doc"` or `"describedby"` ([RFC 8631](https://www.rfc-editor.org/rfc/rfc8631)), on the base URL's origin only;
+2. `openapi.json` and `openapi.yaml` under the base URL;
+3. the base URL itself.
+
+The first that is an OpenAPI document is used, and where it was found is cached like the spec (`--reload` looks again). Credentials follow the spec's rules: sent only once a URL answers 401 or 403. When nothing is found, set `schema`.
 
 ## Schema cache
 

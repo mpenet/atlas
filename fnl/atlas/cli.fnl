@@ -44,7 +44,8 @@
         : fetch-schema
         : retry-options
         : request-timeout
-        : load-schema-cached} (require :atlas.cli.settings))
+        : load-schema-cached
+        : discover-schema} (require :atlas.cli.settings))
 
 (local {: usage
         : completion-fish
@@ -362,23 +363,27 @@ context's."
 
 ;; ---- op ----
 
+(fn schema-fetch-options [profile p opts env verbose]
+  "load-schema-cached options for the spec of an API."
+  {:transport (schema-transport env verbose)
+   :headers opts.headers
+   ;; a dry run's auth headers are placeholders
+   :auth-headers (when (not (and p.dry-run (not p.curl)))
+                   opts.auth-headers)
+   :authorize opts.authorize
+   :base-url opts.base-url
+   :ssl opts.ssl
+   :timeout opts.timeout
+   :ttl (or p.cache-ttl (?. profile :cache-ttl) 3600)
+   :reload p.reload
+   :cache env.schema-cache})
+
 (fn load-op-schema [raw-schema profile p opts env verbose]
   "Parsed schema for op: URLs through the cache and the transport, files
 parsed by atlas.client."
   (if (and (= (type raw-schema) :string) (raw-schema:match "^https?://"))
       (load-schema-cached raw-schema
-                          {:transport (schema-transport env verbose)
-                           :headers opts.headers
-                           ;; a dry run's auth headers are placeholders
-                           :auth-headers (when (not (and p.dry-run (not p.curl)))
-                                           opts.auth-headers)
-                           :authorize opts.authorize
-                           :base-url opts.base-url
-                           :ssl opts.ssl
-                           :timeout opts.timeout
-                           :ttl (or p.cache-ttl (?. profile :cache-ttl) 3600)
-                           :reload p.reload
-                           :cache env.schema-cache})
+                          (schema-fetch-options profile p opts env verbose))
       raw-schema))
 
 (fn request-problems [op request opts]
@@ -438,12 +443,21 @@ the client options."
       (usage-with-choices usage "Configured profiles" (or config.profiles {})
                           #(or $.schema "(no schema)")))
     (let [profile (find-profile config p.schema)
-          raw-schema (if (not profile) p.schema
-                         (or profile.schema
-                             (die (.. "profile " p.schema
-                                      " has no schema: set \"schema\" to the spec's URL or path"))))
           opts (client-options p.schema profile p config env.transport)
           verbose (. (display-options profile p config) :verbose)
+          raw-schema (if (not profile) p.schema profile.schema profile.schema
+                         ;; no schema: the API may say where its spec is
+                         opts.base-url
+                         (or (discover-schema opts.base-url
+                                              (schema-fetch-options profile p
+                                                                    opts env
+                                                                    verbose))
+                             (die (.. "no OpenAPI description found at "
+                                      opts.base-url
+                                      " (its Link headers, openapi.json, openapi.yaml, the URL itself): set \"schema\" in profile "
+                                      p.schema)))
+                         (die (.. "profile " p.schema
+                                  " has no schema: set \"schema\" to the spec's URL or path, or \"base-url\" to find it")))
           schema (load-op-schema raw-schema profile p opts env verbose)]
       (when (= (type schema) :table)
         (set opts.source-url raw-schema))

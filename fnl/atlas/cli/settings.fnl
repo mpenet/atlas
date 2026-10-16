@@ -326,12 +326,12 @@ request signing, logging, and the transport (or dry-run printing)."
                     queried)
                   queried)}))
 
-(fn fetch-schema [url opts]
-  "Fetch and parse a schema URL through opts.transport. Credentials are only
-sent after the server answers 401/403, so help and listings don't trigger
-authentication; headers and credentials are not sent at all when the schema
-is on another origin than the API's :base-url. :authorize wraps a transport
-with the authentication that isn't headers (a query key, request signing).
+(fn fetch-document [url opts]
+  "The response to GET url through opts.transport. Credentials are only sent
+after the server answers 401/403, so help and listings don't trigger
+authentication; headers and credentials are not sent at all when url is on
+another origin than the API's :base-url. :authorize wraps a transport with
+the authentication that isn't headers (a query key, request signing).
 opts: {:transport :headers :ssl :timeout :auth-headers :authorize :base-url}"
   (let [opts (if (and opts.base-url
                       (not= (util.origin url) (util.origin opts.base-url)))
@@ -367,6 +367,11 @@ opts: {:transport :headers :ssl :timeout :auth-headers :authorize :base-url}"
                              opts.transport) headers
                          added))
                  first)]
+    resp))
+
+(fn fetch-schema [url opts]
+  "Fetch and parse a schema URL (see fetch-document for opts)."
+  (let [resp (fetch-document url opts)]
     (assert (util.success? resp.status)
             (string.format "HTTP %s fetching schema from %s" resp.status
                            (util.redact-url url)))
@@ -381,6 +386,53 @@ opts: fetch-schema options plus {:ttl seconds :reload bool :cache bool}"
     (or cached (let [schema (fetch-schema url opts)]
                  (when use-cache (cache.put url schema))
                  schema))))
+
+;; Link relations naming an API's description (RFC 8631, RFC 6892)
+(local description-rels {:service-desc true
+                         :service-doc true
+                         :describedby true})
+
+(fn find-schema [base opts]
+  "Location of the OpenAPI description of the API at base, or nil: a
+same-origin Link of the base URL (service-desc, service-doc, describedby),
+openapi.json and openapi.yaml under it, then the base URL itself."
+  (let [(ok resp) (pcall fetch-document base opts)
+        candidates (icollect [_ ref (ipairs (if ok
+                                                (util.link-urls resp.headers
+                                                                description-rels)
+                                                []))]
+                     (let [url (util.resolve-reference base ref)]
+                       ;; a link elsewhere could hand atlas any API
+                       (when (= (util.origin url) (util.origin base)) url)))
+        root (pick-values 1 (base:gsub "/+$" ""))]
+    (each [_ url (ipairs [(.. root "/openapi.json")
+                          (.. root "/openapi.yaml")
+                          base])]
+      (table.insert candidates url))
+    (accumulate [found nil _ url (ipairs candidates) &until found]
+      (let [(loaded doc) (pcall load-schema-cached url opts)]
+        (when (and loaded (= (type doc) :table) (or doc.openapi doc.swagger))
+          url)))))
+
+(fn discovery-key [base]
+  (.. "discovery " base))
+
+(fn discovered-schema [base ttl]
+  "Where discovery found the spec of the API at base, when the cache still
+knows, else nil."
+  (?. (cache.get (discovery-key base) ttl) :location))
+
+(fn discover-schema [base opts]
+  "Location of the OpenAPI description of the API at base (see
+find-schema), remembered in the cache like specs are. opts:
+load-schema-cached's."
+  (let [use-cache (not= opts.cache false)
+        known (when (and use-cache (not opts.reload))
+                (discovered-schema base (or opts.ttl 3600)))]
+    (or known (let [found (find-schema base opts)]
+                (when (and found use-cache)
+                  (cache.put (discovery-key base) {:location found}))
+                found))))
 
 {: config-path
  : colors-wanted?
@@ -397,4 +449,6 @@ opts: fetch-schema options plus {:ttl seconds :reload bool :cache bool}"
  : request-timeout
  : display-options
  : fetch-schema
- : load-schema-cached}
+ : load-schema-cached
+ : discover-schema
+ : discovered-schema}

@@ -8,6 +8,8 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 
 - `atlas http [METHOD] URL-or-path`: a request without a spec, with a profile's headers, authentication and TLS settings, retries, pagination, `-v`, `--dry-run`/`--curl` and the usual output and exit codes. A path is appended to the profile's API URL; a profile's credentials are only sent to its API's origin.
 - `atlas.base-url`: the URL a client of a schema sends requests to.
+- Spec discovery: a profile with `base-url` and no `schema` finds its spec through the base URL's `Link` header (`service-desc`, `service-doc`, `describedby`), `openapi.json` and `openapi.yaml` under it, or the base URL itself; the location is cached. Restish profiles without `spec_files` import without a warning.
+- `--output=table` aligns wide characters (CJK, most emoji) and combining marks by their display width; csv and tsv escape control characters on a terminal.
 - `--select` filters: `[?state==running]`, `[?size>10]`, `[?tags.env=="prod"]`, `[?tags]`; negative indexes (`[-1]`); `..key` for a field at any depth.
 - `--output=table`, `csv` and `tsv` for arrays of objects, with the columns a `{a,b}` selection picks.
 - `atlas mcp PROFILE`: an MCP server over stdio (protocol 2026-07-28, and the earlier ones that open with `initialize`). The operations become tools, authenticated with the profile: the read-only ones by default, all with `--allow-writes`, or those the profile's `mcp.operations` lists (names, or patterns like `list-*`). `--arazzo=NAME` adds the workflows of an Arazzo context as tools.

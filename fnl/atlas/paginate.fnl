@@ -3,24 +3,9 @@
 (local json (require :atlas.json))
 (local util (require :atlas.util))
 
-(fn link-params-rel [params]
-  "Space-separated rel value of a Link entry's parameters, lowercased."
-  (let [lower (params:lower)]
-    (or (lower:match ";%s*rel%s*=%s*\"([^\"]*)\"")
-        (lower:match ";%s*rel%s*=%s*([^;,%s]+)") "")))
-
 (fn next-link [headers]
-  "URL of the rel=\"next\" entry of a Link header, or nil.
-URLs are delimited by <>, so commas inside them are safe."
-  (let [link (util.header headers "link")]
-    (when link
-      (accumulate [found nil url params (link:gmatch "<([^>]*)>([^<]*)")
-                   &until found]
-        (when (accumulate [next? false rel (: (link-params-rel params) :gmatch
-                                              "%S+")
-                           &until next?]
-                (= rel "next"))
-          url)))))
+  "URL of the rel=\"next\" entry of a Link header, or nil."
+  (. (util.link-urls headers {:next true}) 1))
 
 (fn resolve-next [current ref]
   (if (= (ref:sub 1 1) "?")

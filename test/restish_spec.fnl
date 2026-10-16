@@ -60,8 +60,11 @@
                   (fn []
                     (assert.is_true (has warnings
                                          "devices: 2 spec_files; using the first (./devices.yaml)"))
-                    (assert.is_true (has warnings
-                                         "discovered: no spec_files; set \"schema\" (atlas does not discover specs)")))))))
+                    ;; a base URL without spec_files: atlas finds the spec
+                    ;; as Restish does
+                    (assert.is_nil (accumulate [found nil _ w (ipairs warnings)
+                                                &until found]
+                                     (when (w:find "discovered:" 1 true) w))))))))
 
 (describe "restish.convert v2 (restish.json)"
           (fn []

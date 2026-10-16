@@ -103,9 +103,9 @@ items are left out)."
     (when (> (length specs) 1)
       (warn where (string.format "%d spec_files; using the first (%s)"
                                  (length specs) (. specs 1))))
-    (when (= nil schema)
-      (warn where
-            "no spec_files; set \"schema\" (atlas does not discover specs)"))
+    ;; with a base URL, atlas finds the spec as Restish does
+    (when (and (= nil schema) (= nil base))
+      (warn where "no spec_files or base URL; set \"schema\""))
     (when prof.credentials
       (warn where "credentials are not supported; add an auth block"))
     (when prof.tls_signer

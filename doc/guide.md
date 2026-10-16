@@ -214,7 +214,7 @@ Each API becomes a profile with the API's name; its other profiles become `API.P
 | `server_variables` | `server` |
 | `auth` (`name` or `type`), `auth_ref` | `auth`; `http-basic` → `basic`, `oauth-device-code` → `oauth-device-authorization`, `scopes` → `scope` |
 
-Settings with no atlas equivalent are listed as warnings rather than dropped silently: APIs without `spec_files` (Restish can discover specs; atlas needs `schema`), extra `spec_files`, `issuer_url` (OIDC discovery), `credentials`, `tls_signer`, `url_overrides` and `pagination`.
+Settings with no atlas equivalent are listed as warnings rather than dropped silently: APIs without `spec_files` or a base URL, extra `spec_files`, `issuer_url` (OIDC discovery), `credentials`, `tls_signer`, `url_overrides` and `pagination`.
 
 Commands map directly: `restish example list-items` becomes `atlas op example list-items`.
 
@@ -225,6 +225,7 @@ Most of what you do with Restish has a direct equivalent:
 | Restish | atlas |
 |---------|-------|
 | `restish example list-items` | `atlas op example list-items` |
+| Spec discovery from the API's base URL | the same, for a profile with `base-url` and no `schema` |
 | `restish get https://…`, `restish post https://… name: x` | `atlas http GET https://…`, `atlas http POST https://… --b.name=x` |
 | Shorthand body input (`name: x, tags[]: a`) | `-d` with JSON or YAML, `--b.name=x` fields (`--b.disk.size=10` for nested ones) |
 | `-f body.items[state == running].{id, name}` | `--select '.items[?state==running].{id,name}'` |
@@ -241,7 +242,6 @@ atlas also:
 
 What Restish has that atlas doesn't:
 
-- Finding an API's spec from its base URL. atlas needs the spec's location in `schema`.
 - Recursive search (`..`), negative indexes (`[-1]`) and jq built into its filters.
 - Streaming responses, and caching them.
 - Plugins (hooks, commands, TLS signers) and the plugins built on them, like bulk resource management and PKCS#11 signing.
