@@ -2,6 +2,12 @@
 
 All notable changes to atlas. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- In an Arazzo payload, an object whose members all resolve to nothing (inputs that aren't given) is left out, like a single member, rather than sent empty; an object written as `{}` is still sent.
+
 ## [1.0.0-beta6] - 2026-10-16
 
 ### Added

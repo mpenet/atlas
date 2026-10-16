@@ -554,6 +554,17 @@
                                       :ids (json.array [1 2])
                                       :n "$inputs.n"})]
                     (assert.are.equal "{\"ids\":[1,2],\"n\":1,\"tags\":[]}"
+                                      (json.encode v)))))
+            (it "leaves out an object whose members all resolve to nothing"
+                (fn []
+                  (let [v (expr.eval {:inputs {:n 1}}
+                                     {:n "$inputs.n"
+                                      :key {:name "$inputs.key"}
+                                      :deep {:a {:b "$inputs.missing"}}
+                                      :part {:name "$inputs.key"
+                                             :n "$inputs.n"}
+                                      :empty {}})]
+                    (assert.are.equal "{\"empty\":{},\"n\":1,\"part\":{\"n\":1}}"
                                       (json.encode v)))))))
 
 (describe "condition language, as the Arazzo spec defines it"

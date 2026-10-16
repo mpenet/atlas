@@ -234,10 +234,14 @@ and stays as is."
                               (match (eval ctx (. expr i))
                                 nil json.null
                                 v v)))
+                ;; an object whose members all resolve to nothing is nothing
+                ;; too, so optional inputs can fill nested objects; {} stays
                 (= (type expr) :table)
-                (collect [k v (pairs expr)]
-                  k
-                  (eval ctx v))
+                (let [v (collect [k v (pairs expr)]
+                          k
+                          (eval ctx v))]
+                  (when (or (next v) (not (next expr)))
+                    v))
                 expr)))
 
 ;; ---- simple condition language ----

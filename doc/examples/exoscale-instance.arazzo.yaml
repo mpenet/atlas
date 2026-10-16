@@ -3,7 +3,7 @@
 #
 #   atlas az doc/examples/exoscale-instance.arazzo.yaml create-instance \
 #     --profile exo -i name=web1 -i template="Linux Ubuntu 24.04 LTS 64-bit" \
-#     -i instance-size=medium -i ssh-key=<key-name>
+#     -i instance-size=medium [-i ssh-key=<key-name>]
 arazzo: 1.1.0
 info:
   title: Exoscale instance
@@ -17,7 +17,7 @@ workflows:
     summary: Create an instance, wait until it exists, and return it.
     inputs:
       type: object
-      required: [name, template, instance-size, ssh-key]
+      required: [name, template, instance-size]
       properties:
         name:
           type: string
@@ -34,7 +34,7 @@ workflows:
           description: Instance type size (micro, small, medium, large…)
         ssh-key:
           type: string
-          description: Name of an SSH key registered with Exoscale
+          description: Name of an SSH key registered with Exoscale, if any
         disk-size:
           type: integer
           description: Disk size in GiB
