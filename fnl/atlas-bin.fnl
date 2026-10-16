@@ -59,6 +59,8 @@
 
 (require :atlas.unicode-categories)
 
+(require :atlas.iregexp)
+
 (require :atlas.cli.width)
 
 (require :atlas.cli.output)
