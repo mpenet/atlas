@@ -1,6 +1,8 @@
 # Arazzo workflows
 
-[Arazzo](https://spec.openapis.org/arazzo/latest.html) describes sequences of API calls: call this, take a value from the response, call that, repeat until a job is done. `atlas az` runs Arazzo 1.0 documents, using your [profiles](cli.md#configuration) for authentication and TLS.
+[Documentation](README.md) › Arazzo workflows
+
+[Arazzo](https://spec.openapis.org/arazzo/latest.html) describes sequences of API calls: call this, take a value from the response, call that, repeat until a job is done. `atlas az` runs Arazzo 1.0 documents, using your [profiles](configuration.md) for authentication and TLS.
 
 It is the natural fit for asynchronous APIs: one workflow starts an operation, polls its status until it completes, and returns the result, in a single command.
 

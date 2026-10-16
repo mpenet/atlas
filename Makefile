@@ -114,7 +114,7 @@ else
 endif
 CURL_MODULE = $(LUA_DIR)/atlas/curl.so
 
-.PHONY: build binary check-binary check-binary-tls corpus unicode-width check-globals check-manifests clean deps fmt fmt-check install native-libs test
+.PHONY: build binary check-binary check-binary-tls corpus unicode-width check-docs check-globals check-manifests clean deps fmt fmt-check install native-libs test
 .DELETE_ON_ERROR:
 
 deps:
@@ -135,7 +135,7 @@ $(LUA_TARGETS): $(LUA_DIR)/%.lua: $(FNL_DIR)/%.fnl
 	@mkdir -p $(dir $@)
 	$(FENNEL) --compile $< > $@
 
-test: build check-globals check-manifests
+test: build check-globals check-manifests check-docs
 	rm -rf build/test-home && mkdir -p build/test-home
 	XDG_CACHE_HOME=$(CURDIR)/build/test-home/cache XDG_CONFIG_HOME=$(CURDIR)/build/test-home/config \
 	LUA_PATH="./$(LUA_DIR)/?.lua;./$(LUA_DIR)/?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" \
@@ -279,6 +279,10 @@ else ifneq ($(STATIC_LDFLAGS),)
 else
 	@! ldd bin/atlas-bin | grep -vE 'linux-vdso|ld-linux|/lib(c|m|dl|pthread|rt)\.so' || (echo "non-system libraries linked above" && false)
 endif
+
+# Every relative link of the documentation names an existing page and heading.
+check-docs:
+	lua tools/check-doc-links.lua README.md CHANGELOG.md doc/*.md
 
 # Regenerates fnl/atlas/cli/width.fnl (display width of text in a terminal)
 # from Unicode's data files.

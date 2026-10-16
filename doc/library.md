@@ -1,5 +1,7 @@
 # Library
 
+[Documentation](README.md) › Library
+
 The engine behind the `atlas` command line, for use from Fennel or Lua: it turns any OpenAPI 3 description into a client whose operations are functions. Path parameters, request bodies, query parameters and headers are handled for you, with the same encoding, TLS verification and redirect handling as the CLI; retries and pagination are available as wrappers you opt into.
 
 Looking for the command line? Start with the [README](../README.md).

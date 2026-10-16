@@ -13,7 +13,7 @@ Point `atlas` at a spec and every operation becomes a command, with its own help
 - **Ready for AI agents.** `atlas mcp exo` serves an API to Claude, Cursor and other [MCP](https://modelcontextprotocol.io) clients: operations become tools, authenticated with your profile, read-only unless you allow more.
 - **Workflows.** Run multi-step [Arazzo](https://spec.openapis.org/arazzo/latest.html) workflows: chain calls, poll until a job finishes, branch on results.
 - **Safe by default.** Verified TLS, credentials never follow a redirect to another host, secrets redacted from logs and `--dry-run`.
-- **One small static binary** for macOS and Linux, about 2 MB, with no runtime dependencies. Also a [Fennel/Lua library](doc/library.md).
+- **One small static binary** for macOS and Linux, less than 2 MB, with no runtime dependencies. Also a [Fennel/Lua library](doc/library.md).
 
 ## Install
 
@@ -39,7 +39,7 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 gh attestation verify atlas-macos-arm64 --repo mpenet/atlas
 ```
 
-Other ways to install (from source, with luarocks) are in the [CLI reference](doc/cli.md#installation).
+Other ways to install (from source, with luarocks) are in [Installing atlas](doc/install.md).
 
 ## A five-minute tour
 
@@ -115,7 +115,7 @@ $ atlas op $PETSTORE find-pets-by-status --q.status=sold --select '[].{id,name}'
 ...
 ```
 
-`--select` takes `.field`, `[N]`, `[]` (every element) and `{a,b}` (pick fields). `--output` is `json` (the default), `yaml`, `raw`, `status` or `headers`. Colours are used on a terminal only.
+`--select` takes `.field`, `[N]`, `[]` (every element), `{a,b}` (pick fields), filters like `[?status==sold]` and `..field` at any depth. `--output` is `json` (the default), `yaml`, `raw`, `table`, `csv`, `tsv`, `status` or `headers`; see [Output](doc/output.md). Colours are used on a terminal only.
 
 **Send a body.** Fields are typed from the request schema; `-d` takes JSON or YAML, inline, from a file (`@pet.json`) or from stdin (`@-`). Check what would be sent with `--dry-run`, or get a `curl` command with `--curl`:
 
@@ -175,7 +175,7 @@ name: Lion 1
 status: available
 ```
 
-`env:NAME` reads a secret from the environment. Authentication runs only when a request is actually sent, never for `--help`, `--list` or completion. OAuth tokens are cached and refreshed. See the [guide](doc/guide.md) for every auth method, environments, TLS client certificates and proxies.
+`env:NAME` reads a secret from the environment. Authentication runs only when a request is actually sent, never for `--help`, `--list` or completion. OAuth tokens are cached and refreshed. See [Configuration](doc/configuration.md), [Authentication](doc/authentication.md) and the [guide](doc/guide.md).
 
 ## Workflows
 
@@ -192,31 +192,24 @@ status: sold
 
 `--arazzo-output progress` shows each step as it runs. Workflows can poll with `goto` and `retry`, branch on success criteria and call other workflows; they use your profiles for authentication. See [Arazzo workflows](doc/arazzo.md).
 
-## Shell completion
+## AI agents
+
+`atlas mcp` serves an API's operations as tools to Claude, Cursor and other [MCP](https://modelcontextprotocol.io) clients, authenticated with your profile:
 
 ```sh
-# fish
-atlas completion fish > ~/.config/fish/completions/atlas.fish
-
-# bash, in ~/.bashrc
-eval "$(atlas completion bash)"
-
-# zsh, in ~/.zshrc after compinit
-eval "$(atlas completion zsh)"
+claude mcp add petstore -- atlas mcp petstore
 ```
 
-Completion knows profiles, operations, their parameters and body fields, allowed values, server variables, workflows and their inputs.
-
-## Coming from Restish
-
-`atlas profile import-restish` turns your Restish configuration into atlas profiles. `--dry-run` shows what it would add. `atlas http` takes the place of `restish get URL` and friends for calls without a spec. See [Moving from Restish](doc/guide.md#moving-from-restish).
+Read-only operations by default; see [MCP server](doc/mcp.md).
 
 ## Documentation
 
-- [Guide](doc/guide.md): profiles, authentication, environments, scripting, debugging.
-- [CLI reference](doc/cli.md): every command, option and configuration key.
-- [Arazzo workflows](doc/arazzo.md): running and writing workflows.
-- [Library](doc/library.md): using atlas from Fennel or Lua.
+The [documentation](doc/README.md) has an index of every page. Most used:
+
+- [Installing atlas](doc/install.md), with shell completion.
+- [Guide](doc/guide.md): adding an API, credentials, environments, scripting, debugging.
+- [Commands](doc/commands.md), [Requests](doc/requests.md), [Output](doc/output.md) and [Configuration](doc/configuration.md): every option and setting.
+- [Moving from Restish](doc/restish.md): `atlas profile import-restish` turns a Restish configuration into profiles.
 - [Changelog](CHANGELOG.md).
 
 ## Using atlas as a library
@@ -236,28 +229,12 @@ Install it with `luarocks install atlas-oai`. See the [library documentation](do
 ## Building from source
 
 ```sh
-# lunajson, luasocket, lyaml, fennel, busted
 make deps
-# compile Fennel to Lua, and the libcurl binding
-make build
 make test
-# the standalone binary, in bin/atlas-bin
 make binary
-# build the binary and install it to /usr/local/bin (PREFIX=... to change)
-make install
-# check real-world specs (downloads them)
-make corpus
 ```
 
-`make build` and `make test` also compile the libcurl binding, which needs the libcurl headers (`curl-config` on `PATH`). `make binary` requires a C compiler, `fennel`, `lua`, `luarocks`, `libyaml`, `pkg-config`, `unzip` and `curl`; it downloads the mbedTLS and libcurl sources (checked against pinned checksums) and statically links Lua, luasocket, libcurl, mbedTLS, lyaml and libyaml — the resulting binary depends only on system libraries. `make binary STATIC_LDFLAGS=-static` links those too; the Linux release binaries are built that way against musl (see the `Dockerfile`), so they run on any distribution. `make binary DEPS_FROM_SOURCE=1` also builds Lua and libyaml from pinned sources for `MACOSX_DEPLOYMENT_TARGET` (default 12.0), which the macOS release binaries use.
-
-## Releasing
-
-1. Set the version in `fnl/atlas.fnl` (`:version`).
-2. Turn `unreleased` into today's date in that version's `CHANGELOG.md` section.
-3. Commit, tag `vVERSION` and push the tag.
-
-The release workflow refuses a tag that disagrees with either, builds and checks the four binaries (including TLS verification over the network), and publishes them with `SHA256SUMS`, provenance attestations and the changelog section as release notes. Versions with a `-` suffix are marked as prereleases.
+See [Development](doc/development.md) for the requirements, the release process and the other targets.
 
 ## License
 
