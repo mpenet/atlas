@@ -41,6 +41,16 @@ gh attestation verify atlas-macos-arm64 --repo mpenet/atlas
 
 Other ways to install (from source, with luarocks) are in [Installing atlas](doc/install.md).
 
+## Documentation
+
+The [documentation](doc/README.md) has an index of every page. Most used:
+
+- [Installing atlas](doc/install.md), with shell completion.
+- [Guide](doc/guide.md): adding an API, credentials, environments, scripting, debugging.
+- [Commands](doc/commands.md), [Requests](doc/requests.md), [Output](doc/output.md) and [Configuration](doc/configuration.md): every option and setting.
+- [Moving from Restish](doc/restish.md): `atlas profile import-restish` turns a Restish configuration into profiles.
+- [Changelog](CHANGELOG.md).
+
 ## A five-minute tour
 
 The tour uses the public [Swagger Petstore](https://petstore3.swagger.io). It is a shared demo, so the pets you see will differ.
@@ -201,16 +211,6 @@ claude mcp add petstore -- atlas mcp petstore
 ```
 
 Read-only operations by default; see [MCP server](doc/mcp.md).
-
-## Documentation
-
-The [documentation](doc/README.md) has an index of every page. Most used:
-
-- [Installing atlas](doc/install.md), with shell completion.
-- [Guide](doc/guide.md): adding an API, credentials, environments, scripting, debugging.
-- [Commands](doc/commands.md), [Requests](doc/requests.md), [Output](doc/output.md) and [Configuration](doc/configuration.md): every option and setting.
-- [Moving from Restish](doc/restish.md): `atlas profile import-restish` turns a Restish configuration into profiles.
-- [Changelog](CHANGELOG.md).
 
 ## Using atlas as a library
 
