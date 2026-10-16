@@ -1790,3 +1790,35 @@ answers candidates; one reply per line, each followed by |."
                                                                      true]}
                                                           :raw "{}"}
                                                          :raw false ".x")))))))
+
+(describe "cli.select-path from the end and in depth"
+          (fn []
+            (let [data {:items [{:id 1 :name "a" :tags ["x"]}
+                                {:id 2 :name "b" :tags ["y" "z"]}]
+                        :meta {:count 2 :page {:next "n"}}}]
+              (it "counts negative indexes from the end"
+                  (fn []
+                    (assert.are.equal "b"
+                                      (cli.select-path data ".items[-1].name"))
+                    (assert.are.equal 1 (cli.select-path data ".items[-2].id"))
+                    (assert.are.equal "z"
+                                      (cli.select-path data
+                                                       ".items[1].tags[-1]"))
+                    (assert.is_nil (cli.select-path data ".items[-3]"))))
+              (it "finds a field at any depth with .."
+                  (fn []
+                    (assert.are.same ["a" "b"] (cli.select-path data "..name"))
+                    (assert.are.same [1 2] (cli.select-path data ".items..id"))
+                    (assert.are.same ["n"] (cli.select-path data "..page.next"))
+                    (assert.are.same [["y" "z"]]
+                                     (cli.select-path data "..items[1].tags"))))
+              (it "finds fields inside the ones it found"
+                  (fn []
+                    (assert.are.same [{:a {:a 1}} {:a 1} 1]
+                                     (cli.select-path {:a {:a {:a 1}}} "..a"))))
+              (it "finds nothing as an empty array"
+                  (fn []
+                    (let [json (require :atlas.json)
+                          none (cli.select-path data "..nope")]
+                      (assert.is_true (json.array? none))
+                      (assert.are.same [] none)))))))

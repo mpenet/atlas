@@ -278,8 +278,9 @@ A 4xx or 5xx response is printed on stderr, after an `HTTP <status>` line, and a
 | Syntax | Selects |
 |--------|---------|
 | `.key` | A field of an object |
-| `[N]` | Element N of an array, from 0 |
+| `[N]` | Element N of an array, from 0; `[-1]` is the last |
 | `[]` | Every element of an array; the rest of the path applies to each |
+| `..key` | Every field `key`, at any depth, as an array; the rest of the path applies to each |
 | `{a,b}` | Fields `a` and `b` of an object, or of each object of an array |
 | `[?PATH OP VALUE]` | The elements of an array whose PATH compares to VALUE; the rest of the path applies to each |
 | `[?PATH]` | The elements of an array where PATH is present and not null or false |
@@ -292,6 +293,7 @@ atlas op petstore find-pets-by-status --q.status=sold --select '[0].name'
 atlas op petstore find-pets-by-status --q.status=sold --select '[].name'
 atlas op petstore find-pets-by-status --q.status=sold --select '[].{id,name}'
 atlas op exo list-instances --select '.instances[?state==running].{name,id}' --output=table
+atlas op exo list-instances --select '..ip-address' --output=raw
 ```
 
 For anything `--select` doesn't do, pipe the JSON to [jq](https://jqlang.org): output piped to another program has no colours, so `atlas op exo list-instances | jq …` works as is.

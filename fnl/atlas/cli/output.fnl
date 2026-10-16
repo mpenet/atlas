@@ -147,11 +147,31 @@ says whether an element matches."
                    (and (not= nil v) (not= json.null v) (not= false v))))
             rest)))
 
+(fn find-fields [data name found]
+  "found with every value of field name in data appended, at any depth:
+depth first, in array order and key order."
+  (when (container? data)
+    (if (json.array? data)
+        (each [_ v (ipairs data)]
+          (find-fields v name found))
+        (let [keys (icollect [k (pairs data)] k)]
+          (table.sort keys #(< (tostring $1) (tostring $2)))
+          (each [_ k (ipairs keys)]
+            (when (= k name)
+              (table.insert found (. data k)))
+            (find-fields (. data k) name found)))))
+  found)
+
 (fn select-path [data path]
-  "Value at path in data: .field, [N] (0-based), [] to map the rest of the path
-over an array, [?PATH OP VALUE] to keep the elements that match (then map the
-rest over them), {a,b} to keep fields. nil when the path doesn't match."
-  (if (or (= nil data) (= path "")) data (path:match "^%.")
+  "Value at path in data: .field, [N] (0-based, negative from the end), []
+to map the rest of the path over an array, ..field for the field at any
+depth (then map the rest over what is found), [?PATH OP VALUE] to keep the
+elements that match (then map the rest over them), {a,b} to keep fields.
+nil when the path doesn't match."
+  (if (or (= nil data) (= path "")) data (path:match "^%.%.[^%.%[{]")
+      (let [(name rest) (path:match "^%.%.([^%.%[{]+)(.*)$")]
+        (json.array (icollect [_ v (ipairs (find-fields data name []))]
+                      (select-path v rest)))) (path:match "^%.")
       (select-path data (path:sub 2)) (path:match "^%[%?")
       (let [(keep rest) (parse-filter path select-path)]
         (when (and (container? data)
@@ -165,10 +185,11 @@ rest over them), {a,b} to keep fields. nil when the path doesn't match."
       (path:match "^%[%]")
       (when (container? data)
         (json.array (icollect [_ v (ipairs data)] (select-path v (path:sub 3)))))
-      (path:match "^%[%d+%]")
-      (let [(index rest) (path:match "^%[(%d+)%](.*)$")]
+      (path:match "^%[%-?%d+%]")
+      (let [(index rest) (path:match "^%[(%-?%d+)%](.*)$")
+            n (tonumber index)]
         (when (container? data)
-          (select-path (. data (+ 1 (tonumber index))) rest)))
+          (select-path (. data (if (< n 0) (+ (length data) n 1) (+ n 1))) rest)))
       (path:match "^{")
       (let [(fields rest) (path:match "^{([^}]+)}(.*)$")]
         (when (and fields (container? data))
