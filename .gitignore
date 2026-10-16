@@ -9,3 +9,4 @@ luarocks.lock
 !test/fixtures/*.lua
 *.so
 !test/corpus/*.lua
+!tools/*.lua
