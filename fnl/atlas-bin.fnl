@@ -49,6 +49,12 @@
 
 (require :atlas)
 
+(require :atlas.unicode-categories)
+
+(require :atlas.iregexp)
+
+(require :atlas.jsonpath)
+
 (require :atlas.arazzo.expr)
 
 (require :atlas.arazzo)
@@ -56,12 +62,6 @@
 (require :atlas.cli.request)
 
 (require :atlas.cli.args)
-
-(require :atlas.unicode-categories)
-
-(require :atlas.iregexp)
-
-(require :atlas.jsonpath)
 
 (require :atlas.cli.width)
 

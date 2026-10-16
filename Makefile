@@ -237,13 +237,19 @@ binary: $(LUA_TARGETS) native-libs
 	  --native-module $(NATIVE_BUILD)/liblyaml_ext.a
 	strip bin/atlas-bin
 
-# Every module must be installed by the rockspec and bundled in the binary;
-# both lists are maintained by hand.
+# Every module must be installed by the rockspec and bundled in the binary,
+# after the Fennel modules it requires; both lists are maintained by hand.
 check-manifests:
 	@missing=0; for f in $(FNL_SOURCES); do \
 	  m=$$(echo $$f | sed -e 's|^$(FNL_DIR)/||' -e 's|\.fnl$$||' -e 's|/|.|g'); \
 	  grep -q "\[\"$$m\"\]" atlas-oai-dev-1.rockspec || { echo "missing from rockspec: $$m"; missing=1; }; \
-	  grep -q "(require :$$m)" fnl/atlas-bin.fnl || { echo "missing from atlas-bin.fnl: $$m"; missing=1; }; \
+	  at=$$(grep -n "^(require :$$m)" fnl/atlas-bin.fnl | cut -d: -f1); \
+	  [ -n "$$at" ] || { echo "missing from atlas-bin.fnl: $$m"; missing=1; continue; }; \
+	  for d in $$(grep -o "(require :atlas[a-z.-]*)" $$f | sed -e 's|(require :||' -e 's|)||'); do \
+	    [ -f $(FNL_DIR)/$$(echo $$d | tr . /).fnl ] || continue; \
+	    dat=$$(grep -n "^(require :$$d)" fnl/atlas-bin.fnl | cut -d: -f1); \
+	    [ -n "$$dat" ] && [ "$$dat" -lt "$$at" ] || { echo "atlas-bin.fnl requires $$m before $$d, which it requires"; missing=1; }; \
+	  done; \
 	done; exit $$missing
 
 # A name used before its definition compiles to a global lookup that is
