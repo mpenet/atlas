@@ -7,6 +7,7 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 ### Added
 
 - Plugins: Lua or Fennel files listed in the configuration's `plugins` provide authentication methods, which profiles use by name. A method is a function signing each request in-process, with helpers for SHA-256, HMAC-SHA256, base64, hex, JSON and URLs; a plugin must belong to the user and be writable only by them. The binary carries the Fennel compiler (compressed, loaded only for a Fennel plugin), and `doc/examples/plugins/exoscale.fnl` signs Exoscale's API requests.
+- `atlas az FILE [WORKFLOW] --check` checks a document against its sources without running it: operations and workflows that don't exist, parameters and bodies, references to steps, outputs, inputs, workflows and components, conditions, regexes and JSONPath queries, and actions. It exits 1 on an error.
 - `--until CONDITION` on `op` and `http` sends the request again, every `--every` seconds, until the condition holds (written as in workflows: `$response.body#/state == 'ready'`, `$statusCode == 404`), then prints the last response and exits 0. After `--max-time` seconds (default 600) it gives up saying what the condition found.
 - `--timing` logs a line per request: method, URL, status and how long each phase took (dns, tcp, tls, server, download, total). `-v` shows the same timings for each exchange, and the library's responses carry them as `:timings`.
 

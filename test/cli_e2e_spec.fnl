@@ -822,6 +822,41 @@ does, which a streaming transport hands over one by one."
                     (assert.is_truthy (r.err:find "workflow fetchPet  %d+ms"))
                     (assert.is_nil (r.err:find "Rex" 1 true))
                     (assert.are.equal "name: Rex" r.out))))
+            (it "checks a document without running it"
+                (fn []
+                  (let [r (atlas-run ["az" "flows" "--check"])]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal 0 (length r.requests))
+                    (assert.is_truthy (r.out:find "nothing wrong found" 1 true)
+                                      r.out))))
+            (it "refuses to check a workflow that doesn't exist"
+                (fn []
+                  (let [r (atlas-run ["az" "flows" "fetchPett" "--check"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.are.equal "Unknown workflow: fetchPett\n" r.err))))
+            (it "lists what is wrong in a document, and fails"
+                (fn []
+                  (let [json (require :atlas.json)
+                        flow (with-open [f (io.open "test/fixtures/cli-flow.arazzo.json")]
+                               (json.decode (f:read :*a)))
+                        file (.. (os.tmpname) ".json")]
+                    (set (. flow :sourceDescriptions 1 :url)
+                         (.. (os.getenv "PWD") "/test/fixtures/cli-api.json"))
+                    (set (. flow :workflows 1 :steps 1 :operationId) "getPett")
+                    (set (. flow :workflows 1 :outputs)
+                         {:x "$steps.nope.outputs.y"})
+                    (with-open [f (io.open file :w)]
+                      (f:write (json.encode flow)))
+                    (let [r (atlas-run ["az" file "--check"])]
+                      (os.remove file)
+                      (assert.are.equal 1 r.code)
+                      (assert.are.equal 0 (length r.requests))
+                      (assert.is_truthy (r.out:find "✗ fetchPet › step get: operation not found: getPett"
+                                                    1 true)
+                                        r.out)
+                      (assert.is_truthy (r.out:find "unknown step 'nope'" 1
+                                                    true))
+                      (assert.is_truthy (r.out:find "2 errors" 1 true) r.out)))))
             (it "fails with exit 1 when a step fails"
                 (fn []
                   (let [r (atlas-run ["az" "flows" "fetchPet" "-i" "id=7"])]

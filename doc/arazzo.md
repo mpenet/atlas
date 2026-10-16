@@ -94,6 +94,20 @@ On a terminal, a step's line is updated in place while it runs and while it poll
 
 A failed workflow ends with `✗ workflow NAME failed` and the reason: the step, the criterion that failed with the values it compared, and the response's status and body (shortened). atlas exits 1. `-v` shows progress as well and logs every request, credentials redacted. Outputs use the `--output` format.
 
+## Checking a document
+
+`--check` reads the document and its OpenAPI sources and reports what would go wrong, without sending a request to the API:
+
+```console
+$ atlas az flows.yaml --check
+✗ create-instance › step create: required header parameter 'x-trace' is missing
+✗ create-instance › step wait › onFailure poll: goto to unknown step 'wiat'
+! create-instance › step create: create-instance has no query parameter 'colour'
+2 errors, 1 warning
+```
+
+It finds steps calling operations or workflows that don't exist; required parameters left out and parameters the operation doesn't declare (a warning); a body missing or not expected; references to steps, outputs, inputs, workflows, sources and components that don't exist; runtime expressions atlas doesn't know; conditions, regular expressions and JSONPath queries that can't be evaluated (unless they embed `{$expressions}`, only known when running); actions going to unknown steps or workflows. With a workflow id, it reports that workflow's problems only. atlas exits 1 when it finds an error, 0 otherwise.
+
 ## Named workflow documents
 
 The configuration's `arazzo` section names documents and attaches a profile and default inputs:

@@ -3,6 +3,7 @@
 (local atlas (require :atlas))
 (local arazzo (require :atlas.arazzo))
 (local arazzo-expr (require :atlas.arazzo.expr))
+(local arazzo-check (require :atlas.arazzo.check))
 (local auth (require :atlas.auth))
 (local cli-help (require :atlas.cli.help))
 (local http-mod (require :atlas.http))
@@ -268,10 +269,9 @@ another origin); files directly."
                                     client-opts.authorize)})
         (atlas.load-schema location opts))))
 
-(fn workflow-runner [{: doc : file : profile-name : profile} p env ?reporter]
-  "A function running a workflow of doc with its inputs: (ok result) as pcall
-returns them, reporting progress to ?reporter. The clients of its sources are
-built on first use."
+(fn run-options [{: profile-name : profile} p env]
+  "The options of a workflow run with the context's profile: its clients'
+options, and how to load its sources."
   (let [
         ;; merged pages would change what step expressions like $response.body#/0 refer to
         p (doto (collect [k v (pairs p)] k v)
@@ -279,8 +279,15 @@ built on first use."
         verbose (. (display-options profile p env.config) :verbose)
         run-opts (client-options profile-name profile p env.config
                                  env.transport)]
-    (var clients nil)
     (set run-opts.load-schema (source-schema-loader env run-opts verbose))
+    run-opts))
+
+(fn workflow-runner [{: doc : file &as context} p env ?reporter]
+  "A function running a workflow of doc with its inputs: (ok result) as pcall
+returns them, reporting progress to ?reporter. The clients of its sources are
+built on first use."
+  (let [run-opts (run-options context p env)]
+    (var clients nil)
     (set run-opts.on-step (?. ?reporter :on-step))
     (set run-opts.max-gotos p.max-gotos)
     (set run-opts.max-wait (. (retry-options profile p env.config) :max-wait))
@@ -293,6 +300,38 @@ built on first use."
                 (when (not clients)
                   (set clients (arazzo.build-clients doc run-opts file)))
                 (arazzo.run-workflow doc wf.workflowId inputs clients run-opts))))))
+
+(fn check-document [{: doc : file &as context} p env]
+  "Print what is wrong in the document, or in workflow p.operation, found
+without running it; exit 1 when something is."
+  (let [clients (let [(ok c) (pcall arazzo.build-clients doc
+                                    (run-options context p env) file)]
+                  (if ok c (die (tostring c))))
+        problems (icollect [_ problem (ipairs (arazzo-check.check doc clients))]
+                   (when (or (not p.operation) (= problem.where p.operation)
+                             (= (problem.where:sub 1 (+ (length p.operation) 3))
+                                (.. p.operation " ›")))
+                     problem))
+        count-of #(accumulate [n 0 _ problem (ipairs problems)]
+                    (if (= problem.level $) (+ n 1) n))
+        errors (count-of :error)
+        warnings (count-of :warning)
+        plural #(.. $1 " " $2 (if (= $1 1) "" "s"))]
+    (each [_ problem (ipairs problems)]
+      (print (util.printable (.. (if (= problem.level :error) "✗ " "! ")
+                                 problem.where ": " problem.message))))
+    (print (if (next problems)
+               (.. (plural errors :error) ", " (plural warnings :warning))
+               (let [workflows (icollect [_ wf (ipairs (or doc.workflows []))]
+                                 (when (or (not p.operation)
+                                           (= wf.workflowId p.operation))
+                                   wf))]
+                 (.. "✓ " (plural (length workflows) :workflow) ", "
+                     (plural (accumulate [n 0 _ wf (ipairs workflows)]
+                               (+ n (length (or wf.steps []))))
+                             :step) ": nothing wrong found"))))
+    (when (> errors 0)
+      (exit 1))))
 
 (fn execute-workflow [context wf inputs p env]
   (let [{: output : no-color : verbose} (display-options context.profile p
@@ -345,8 +384,9 @@ context's."
                         #(or $.file "")))
   (let [{: named : doc &as context} (arazzo-context p.schema p.profile p env)
         wf (when p.operation (arazzo.find-workflow doc p.operation))]
-    (if (not p.operation) (list-arazzo-workflows doc) (not wf)
-        (die (.. "Unknown workflow: " p.operation)) p.help
+    (if (and p.operation (not wf)) (die (.. "Unknown workflow: " p.operation))
+        p.check (check-document context p env) (not p.operation)
+        (list-arazzo-workflows doc) p.help
         (print (util.printable (cli-help.build-workflow wf
                                                         (arazzo.workflow-inputs doc
                                                                                 wf)

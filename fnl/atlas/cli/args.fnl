@@ -221,6 +221,10 @@
          :choices [:final :steps :progress :full]
          :scope :az
          :help "final (default), steps, progress, full"}
+        {:names ["--check"]
+         :key :check
+         :scope :az
+         :help "Check the document against its sources without running it"}
         {:names ["--max-gotos"]
          :key :max-gotos
          :value :number

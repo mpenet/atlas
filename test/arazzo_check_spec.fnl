@@ -1,0 +1,208 @@
+;; ABOUTME: Specs for checking Arazzo documents before running them: targets,
+;; ABOUTME: parameters, bodies, references, conditions and actions.
+(local check (require :atlas.arazzo.check))
+
+(fn op [id ?fields]
+  (doto {:operation-id id
+         :method "get"
+         :path-params []
+         :parameters []
+         :has-body false
+         :spec {}
+         :url-for #""
+         :invoke #{}}
+    (#(each [k v (pairs (or ?fields {}))]
+        (tset $ k v)))))
+
+(local clients
+       {:api {:get-pet (op "get-pet"
+                           {:path-params ["id"]
+                            :parameters [{:name "id" :in "path" :required true}
+                                         {:name "fields" :in "query"}
+                                         {:name "x-trace"
+                                          :in "header"
+                                          :required true}]})
+              :add-pet (op "add-pet"
+                           {:method "post"
+                            :has-body true
+                            :spec {:requestBody {:required true}}})}})
+
+(fn doc [steps ?wf ?extra]
+  (doto {:arazzo "1.1.0"
+         :info {}
+         :workflows [(doto {:workflowId "wf"
+                            :inputs {:type "object"
+                                     :properties {:id {:type "string"}}}
+                            : steps}
+                       (#(each [k v (pairs (or ?wf {}))]
+                           (tset $ k v))))]}
+    (#(each [k v (pairs (or ?extra {}))]
+        (tset $ k v)))))
+
+(local get-pet {:stepId "get"
+                :operationId "get-pet"
+                :parameters [{:name "id" :in "path" :value "$inputs.id"}
+                             {:name "x-trace" :in "header" :value "t"}]
+                :successCriteria [{:condition "$statusCode == 200"}]
+                :outputs {:name "$response.body#/name"}})
+
+(fn step [fields]
+  (collect [k v (pairs (doto (collect [k v (pairs get-pet)] k v)
+                         (#(each [k v (pairs fields)]
+                             (tset $ k v)))))]
+    k
+    v))
+
+(fn messages [problems ?level]
+  (icollect [_ p (ipairs problems)]
+    (when (or (= nil ?level) (= p.level ?level))
+      (.. p.where ": " p.message))))
+
+(fn has [problems text ?level]
+  (accumulate [found false _ m (ipairs (messages problems ?level))]
+    (or found (not= nil (m:find text 1 true)))))
+
+(describe "arazzo check"
+          (fn []
+            (it "finds nothing wrong in a correct document"
+                (fn []
+                  (assert.are.same []
+                                   (messages (check.check (doc [get-pet
+                                                                {:stepId "add"
+                                                                 :operationId "add-pet"
+                                                                 :requestBody {:payload {:name "$steps.get.outputs.name"}}}]
+                                                               {:outputs {:pet "$steps.get.outputs.name"}})
+                                                          clients)))))
+            (it "finds operations that don't exist"
+                (fn []
+                  (assert.is_true (has (check.check (doc [(step {:operationId "get-pets"})])
+                                                    clients)
+                                       "wf › step get: operation not found: get-pets"
+                                       :error))))
+            (it "finds steps that call nothing, or several things"
+                (fn []
+                  (assert.is_true (has (check.check (doc [{:stepId "s"}])
+                                                    clients)
+                                       "step s: calls nothing" :error))
+                  (assert.is_true (has (check.check (doc [(step {:workflowId "wf"})])
+                                                    clients)
+                                       "step get: calls both" :error))))
+            (it "finds ids used twice"
+                (fn []
+                  (assert.is_true (has (check.check (doc [get-pet get-pet])
+                                                    clients)
+                                       "step get: stepId used twice" :error))))
+            (it "finds missing required parameters, and parameters the operation doesn't declare"
+                (fn []
+                  (let [problems (check.check (doc [(step {:parameters [{:name "id"
+                                                                         :in "path"
+                                                                         :value 1}
+                                                                        {:name "colour"
+                                                                         :in "query"
+                                                                         :value "red"}]})])
+                                              clients)]
+                    (assert.is_true (has problems
+                                         "step get: required header parameter 'x-trace' is missing"
+                                         :error))
+                    (assert.is_true (has problems
+                                         "step get: get-pet has no query parameter 'colour'"
+                                         :warning)))))
+            (it "finds parameters without a valid location"
+                (fn []
+                  (assert.is_true (has (check.check (doc [(step {:parameters [{:name "id"
+                                                                               :in "body"
+                                                                               :value 1}]})])
+                                                    clients)
+                                       "parameter 'id': 'in' must be path, query, header, cookie or querystring"
+                                       :error))))
+            (it "finds bodies missing or not expected"
+                (fn []
+                  (assert.is_true (has (check.check (doc [{:stepId "add"
+                                                           :operationId "add-pet"}])
+                                                    clients)
+                                       "step add: add-pet requires a request body"
+                                       :error))
+                  (assert.is_true (has (check.check (doc [(step {:requestBody {:payload {}}})])
+                                                    clients)
+                                       "step get: get-pet takes no request body"
+                                       :warning))))
+            (it "finds references to steps, outputs, inputs and workflows that don't exist"
+                (fn []
+                  (let [problems (check.check (doc [(step {:outputs {:a "$steps.nope.outputs.x"
+                                                                     :b "$steps.get.outputs.nmae"
+                                                                     :c "$inputs.idd"
+                                                                     :d "$workflows.other.outputs.x"
+                                                                     :e "Hi {$inputs.who}"}})])
+                                              clients)]
+                    (assert.is_true (has problems "unknown step 'nope'" :error))
+                    (assert.is_true (has problems
+                                         "step 'get' has no output 'nmae'"
+                                         :error))
+                    (assert.is_true (has problems "no input 'idd'" :error))
+                    (assert.is_true (has problems "no input 'who'" :error))
+                    (assert.is_true (has problems "unknown workflow 'other'"
+                                         :error)))))
+            (it "finds runtime expressions it doesn't know"
+                (fn []
+                  (assert.is_true (has (check.check (doc [(step {:outputs {:a "$statuscode"}})])
+                                                    clients)
+                                       "unknown runtime expression: $statuscode"
+                                       :error))))
+            (it "finds conditions, regexes and JSONPath queries that can't be evaluated"
+                (fn []
+                  (let [problems (check.check (doc [(step {:successCriteria [{:condition "$statusCode =="}
+                                                                             {:condition "(a"
+                                                                              :context "$statusCode"
+                                                                              :type "regex"}
+                                                                             {:condition "$[?"
+                                                                              :context "$response.body"
+                                                                              :type "jsonpath"}
+                                                                             {:condition "^{$inputs.id}$"
+                                                                              :context "$statusCode"
+                                                                              :type "regex"}]})])
+                                              clients)]
+                    (assert.is_true (has problems "unexpected end in condition"
+                                         :error))
+                    (assert.is_true (has problems "invalid regular expression"
+                                         :error))
+                    (assert.is_true (has problems "invalid JSONPath query"
+                                         :error))
+                    ;; runtime expressions inside: only known when running
+                    (assert.are.equal 3 (length (messages problems :error))))))
+            (it "finds actions going nowhere"
+                (fn []
+                  (let [problems (check.check (doc [(step {:onFailure [{:name "poll"
+                                                                        :type "goto"
+                                                                        :stepId "wiat"}
+                                                                       {:name "odd"
+                                                                        :type "jump"}
+                                                                       {:name "sub"
+                                                                        :type "goto"
+                                                                        :workflowId "nope"}]})])
+                                              clients)]
+                    (assert.is_true (has problems
+                                         "step get › onFailure poll: goto to unknown step 'wiat'"
+                                         :error))
+                    (assert.is_true (has problems
+                                         "onFailure odd: type must be end, goto or retry"
+                                         :error))
+                    (assert.is_true (has problems "unknown workflow 'nope'"
+                                         :error)))))
+            (it "finds workflows that depend on or call workflows that don't exist"
+                (fn []
+                  (assert.is_true (has (check.check (doc [get-pet]
+                                                         {:dependsOn ["setup"]})
+                                                    clients)
+                                       "wf: depends on unknown workflow 'setup'"
+                                       :error))
+                  (assert.is_true (has (check.check (doc [{:stepId "call"
+                                                           :workflowId "nope"}])
+                                                    clients)
+                                       "step call: unknown workflow 'nope'"
+                                       :error))))
+            (it "finds references to components that don't exist"
+                (fn []
+                  (assert.is_true (has (check.check (doc [(step {:parameters [{:reference "$components.parameters.trace"}]})])
+                                                    clients)
+                                       "unknown component $components.parameters.trace"
+                                       :error))))))

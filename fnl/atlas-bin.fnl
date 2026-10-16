@@ -61,6 +61,8 @@
 
 (require :atlas.arazzo)
 
+(require :atlas.arazzo.check)
+
 (require :atlas.cli.request)
 
 (require :atlas.cli.args)

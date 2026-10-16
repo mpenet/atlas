@@ -717,6 +717,8 @@ the step runs again), :op-ref and :calls (:operation or :workflow)."
     (run-workflow doc workflow-id (or inputs {}) clients ?opts)))
 
 {:build-clients build-clients
+ :find-op-by-id find-op-by-id
+ :find-op-by-path find-op-by-path
  :load-doc load-doc
  :run run
  :run-workflow run-workflow
