@@ -2,7 +2,7 @@
 
 All notable changes to atlas. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-beta6] - 2026-10-16
 
 ### Added
 
@@ -247,6 +247,8 @@ The first beta with release binaries: 1.0.0-beta1 was published without them, an
 
 Earlier releases are described on the [releases page](https://github.com/mpenet/atlas/releases).
 
+[1.0.0-beta6]: https://github.com/mpenet/atlas/compare/v1.0.0-beta5...v1.0.0-beta6
+[1.0.0-beta5]: https://github.com/mpenet/atlas/compare/v1.0.0-beta4...v1.0.0-beta5
 [1.0.0-beta4]: https://github.com/mpenet/atlas/compare/v1.0.0-beta3...v1.0.0-beta4
 [1.0.0-beta3]: https://github.com/mpenet/atlas/compare/v1.0.0-beta2...v1.0.0-beta3
 [1.0.0-beta2]: https://github.com/mpenet/atlas/compare/v1.0.0-beta1...v1.0.0-beta2
