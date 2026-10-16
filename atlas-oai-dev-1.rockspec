@@ -51,6 +51,7 @@ build = {
       ["atlas.cli.mcp"] = "lua/atlas/cli/mcp.lua",
       ["atlas.cli.output"] = "lua/atlas/cli/output.lua",
       ["atlas.cli.width"] = "lua/atlas/cli/width.lua",
+      ["atlas.unicode-categories"] = "lua/atlas/unicode-categories.lua",
       ["atlas.cli.request"] = "lua/atlas/cli/request.lua",
       ["atlas.cli.restish"] = "lua/atlas/cli/restish.lua",
       ["atlas.cli.settings"] = "lua/atlas/cli/settings.lua",

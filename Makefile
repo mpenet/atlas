@@ -114,7 +114,7 @@ else
 endif
 CURL_MODULE = $(LUA_DIR)/atlas/curl.so
 
-.PHONY: build binary check-binary check-binary-tls corpus unicode-width check-docs check-globals check-manifests clean deps fmt fmt-check install native-libs test
+.PHONY: build binary check-binary check-binary-tls corpus unicode check-docs check-globals check-manifests clean deps fmt fmt-check install native-libs test
 .DELETE_ON_ERROR:
 
 deps:
@@ -284,16 +284,19 @@ endif
 check-docs:
 	lua tools/check-doc-links.lua README.md CHANGELOG.md doc/*.md doc/library/*.md
 
-# Regenerates fnl/atlas/cli/width.fnl (display width of text in a terminal)
-# from Unicode's data files.
+# Regenerates the tables made from Unicode's data files:
+# fnl/atlas/cli/width.fnl (display width of text in a terminal) and
+# fnl/atlas/unicode-categories.fnl (general categories, for regexes).
 UNICODE_VERSION = 17.0.0
 UNICODE_DIR = build/unicode
-unicode-width:
+unicode:
 	mkdir -p $(UNICODE_DIR)
 	curl -fsSL -o $(UNICODE_DIR)/EastAsianWidth.txt https://www.unicode.org/Public/$(UNICODE_VERSION)/ucd/EastAsianWidth.txt
 	curl -fsSL -o $(UNICODE_DIR)/DerivedGeneralCategory.txt https://www.unicode.org/Public/$(UNICODE_VERSION)/ucd/extracted/DerivedGeneralCategory.txt
 	lua tools/unicode-width.lua $(UNICODE_VERSION) $(UNICODE_DIR)/EastAsianWidth.txt $(UNICODE_DIR)/DerivedGeneralCategory.txt > $(UNICODE_DIR)/width.fnl
 	mv $(UNICODE_DIR)/width.fnl fnl/atlas/cli/width.fnl
+	lua tools/unicode-categories.lua $(UNICODE_VERSION) $(UNICODE_DIR)/DerivedGeneralCategory.txt > $(UNICODE_DIR)/categories.fnl
+	mv $(UNICODE_DIR)/categories.fnl fnl/atlas/unicode-categories.fnl
 
 # Over the network: real-world specs (test/corpus/specs.txt) must load and
 # every operation must build, render help and pass the request checks.

@@ -35,10 +35,10 @@ downloads the public specs listed in `test/corpus/specs.txt` (GitHub, Stripe, Cl
 
 ## Generated code
 
-`fnl/atlas/cli/width.fnl`, the display width of text in a terminal, is generated from Unicode's data files by `tools/unicode-width.lua`:
+Two modules are generated from Unicode's data files: `fnl/atlas/cli/width.fnl`, the display width of text in a terminal (by `tools/unicode-width.lua`), and `fnl/atlas/unicode-categories.fnl`, the general category of each code point for regular expressions (by `tools/unicode-categories.lua`):
 
 ```sh
-make unicode-width UNICODE_VERSION=17.0.0
+make unicode UNICODE_VERSION=17.0.0
 ```
 
 ## Releasing

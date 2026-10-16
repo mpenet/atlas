@@ -57,6 +57,8 @@
 
 (require :atlas.cli.args)
 
+(require :atlas.unicode-categories)
+
 (require :atlas.cli.width)
 
 (require :atlas.cli.output)
