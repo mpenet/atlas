@@ -518,6 +518,16 @@
                                                             :output "bearer-token"}}
                                                   {})]
                     (assert.are.equal "Bearer my-token" headers.authorization))))
+            (it "runs a commandline that ends with a comment"
+                (fn []
+                  (let [(http) (seq-mock)
+                        auth (reload-auth http)
+                        headers (auth.get-headers "test-profile"
+                                                  {:name "external-tool"
+                                                   :params {:commandline "echo tok # from the vault"
+                                                            :output "bearer-token"}}
+                                                  {})]
+                    (assert.are.equal "Bearer tok" headers.authorization))))
             (it "doesn't give the tool atlas's own stdin"
                 (fn []
                   ;; under atlas mcp, stdin carries the protocol

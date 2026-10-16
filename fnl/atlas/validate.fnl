@@ -51,14 +51,25 @@ adds null to a declared type."
 
 (var check-value nil)
 
+(fn read-only-names [schema]
+  "Names of the read-only properties of schema and of its allOf members."
+  (let [names {}
+        parts [schema]]
+    (each [_ member (ipairs (or (?. schema :allOf) []))]
+      (table.insert parts member))
+    (each [_ part (ipairs parts)]
+      (each [name s (pairs (or (?. part :properties) {}))]
+        (when (and (= (type s) :table) (= s.readOnly true))
+          (tset names name true))))
+    names))
+
 (fn check-object [schema v path errors]
-  (each [_ name (ipairs (util.required-names schema))]
-    ;; a required readOnly property is required in responses only, and
-    ;; requests are what is checked
-    (when (and (= nil (. v name))
-               (not (let [prop (?. schema :properties name)]
-                      (and (= (type prop) :table) prop.readOnly))))
-      (table.insert errors (.. path "." name ": required"))))
+  ;; a required readOnly property is required in responses only, and
+  ;; requests are what is checked
+  (let [read-only (read-only-names schema)]
+    (each [_ name (ipairs (util.required-names schema))]
+      (when (and (= nil (. v name)) (not (. read-only name)))
+        (table.insert errors (.. path "." name ": required")))))
   (let [names (icollect [k (pairs v)] k)]
     (table.sort names #(< (tostring $1) (tostring $2)))
     (each [_ name (ipairs names)]
@@ -113,6 +124,9 @@ adds null to a declared type."
        ;; OpenAPI 3.1 boolean schemas: true allows anything, false nothing
        (if (= schema true) nil (= schema false)
            (table.insert errors (.. path ": not allowed"))
+           ;; OpenAPI 3.0: nullable allows null whatever else the schema
+           ;; says (enum, allOf, …), as tool schemas have it
+           (and (= schema.nullable true) (= v json.null)) nil
            (let [types (allowed-types schema)
                  active (doto (collect [k (pairs (or ?active {}))]
                                 k
@@ -165,4 +179,4 @@ adds null to a declared type."
     (check-value (or schema {}) value (or ?path "value") errors)
     errors))
 
-{: check : null}
+{: check : null : read-only-names}

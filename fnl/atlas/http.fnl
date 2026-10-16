@@ -297,4 +297,5 @@ lines, plus the TLS settings."
  : header-value
  : fetch-text
  : encode-body
- : decode-response}
+ : decode-response
+ : json-type?}

@@ -75,9 +75,11 @@
                       (assert.are.equal "#/$defs/s1"
                                         (. out :properties :s :contentSchema
                                            "$ref"))
+                      ;; draft-07 dependencies, as 2020-12 has them
+                      (assert.is_nil out.dependencies)
                       (assert.are.equal "#/$defs/s1"
-                                        (. out :dependencies :x "$ref"))
-                      (assert.are.same ["z"] (. out :dependencies :y))))))
+                                        (. out :dependentSchemas :x "$ref"))
+                      (assert.are.same ["z"] (. out :dependentRequired :y))))))
             (it "leaves out $id, $anchor and $schema, which would move $defs"
                 (fn []
                   (let [node {"$id" "https://example.com/node"
@@ -545,3 +547,62 @@
                     (assert.are.same {:type :object
                                       :additionalProperties false}
                                      t.inputSchema))))))
+
+(describe "mcp fixes from review"
+          (fn []
+            (it "leaves read-only properties of allOf members out of required"
+                (fn []
+                  (assert.are.same ["name"]
+                                   (. (mcp.json-schema {:required ["id" "name"]
+                                                        :allOf [{:properties {:id {:readOnly true}
+                                                                              :name {}}}]}
+                                                       false nil true)
+                                      :required))))
+            (it "drops nullable when only annotations are left"
+                (fn []
+                  (assert.are.same {:description "d"}
+                                   (mcp.json-schema {:description "d"
+                                                     :nullable true}
+                                                    true))))
+            (it "sends JSON Lines and other text bodies as given"
+                (fn []
+                  (let [c (atlas.client {:openapi "3.1.0"
+                                         :info {}
+                                         :servers [{:url "https://h"}]
+                                         :paths {"/x" {:post {:operationId "postX"
+                                                              :requestBody {:content {:application/x-ndjson {}}}}}}}
+                                        {:http-fn #nil})]
+                    (assert.are.equal "{\"a\":1}\n{\"a\":2}"
+                                      (. (mcp.request c.post-x
+                                                      {:body "{\"a\":1}\n{\"a\":2}"})
+                                         :body)))))
+            (it "takes null arguments as none"
+                (fn []
+                  (let [(handle calls) (make-handler)]
+                    (handle {:jsonrpc "2.0"
+                             :id 1
+                             :method "tools/call"
+                             :params {:_meta modern
+                                      :name "t"
+                                      :arguments json.null}})
+                    (assert.are.same [["t" {}]] calls))))
+            (it "answers an empty object as an invalid request"
+                (fn []
+                  (assert.are.equal -32600 (. ((make-handler) {}) :error :code))
+                  (assert.is_nil ((make-handler) {:jsonrpc "2.0"
+                                                  :id 1
+                                                  :result {}}))))
+            (it "cleans invalid UTF-8 in linear time"
+                (fn []
+                  (let [text (string.rep "a\255" 100000)
+                        out []
+                        t0 (os.clock)]
+                    (var done false)
+                    (mcp.serve (fn [_] {:jsonrpc "2.0" :id 1 :result {: text}})
+                               (fn []
+                                 (when (not done)
+                                   (set done true)
+                                   "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"x\"}"))
+                               #(table.insert out $))
+                    (assert.is_true (< (- (os.clock) t0) 1))
+                    (assert.is_truthy (utf8.len (. out 1))))))))

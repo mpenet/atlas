@@ -207,3 +207,32 @@
                                    (validate.check {:type "object"}
                                                    (json.array [])))
                   (assert.are.same [] (validate.check {:type "object"} {}))))))
+
+(describe "validate.check and OpenAPI 3.0 nullable"
+          (fn []
+            (it "takes null whatever else the schema says"
+                (fn []
+                  (let [json (require :atlas.json)]
+                    (assert.are.same []
+                                     (errors {:allOf [{:type :object}]
+                                              :nullable true}
+                                             json.null))
+                    (assert.are.same []
+                                     (errors {:type :string
+                                              :enum ["a"]
+                                              :nullable true}
+                                             json.null))
+                    (assert.are.equal 1
+                                      (length (errors {:type :string
+                                                       :enum ["a"]}
+                                                      json.null))))))))
+
+(describe "validate.check and read-only properties"
+          (fn []
+            (it "doesn't require read-only properties of allOf members"
+                (fn []
+                  (assert.are.same []
+                                   (errors {:required ["id" "name"]
+                                            :allOf [{:properties {:id {:readOnly true}
+                                                                  :name {}}}]}
+                                           {:name "x"}))))))

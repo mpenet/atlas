@@ -367,13 +367,15 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
                   (f:close)
                   (set tmp-path tmp)
                   (.. "/bin/sh -c "
-                      (shell-quote (.. "( " (param params :commandline) " ) < "
-                                       (shell-quote tmp)))))
+                      (shell-quote (.. "( " (param params :commandline)
+                                       "\n) < " (shell-quote tmp)))))
                 ;; never atlas's own stdin: under atlas mcp it carries the
                 ;; protocol
                 (.. "/bin/sh -c "
                     (shell-quote (.. "( " (param params :commandline)
-                                     " ) < /dev/null"))))
+                                     ;; on its own line: a # comment at the
+                                     ;; end of the commandline can't hide it
+                                     "\n) < /dev/null"))))
         h (io.popen cmd)]
     (assert h "failed to start external auth command")
     (let [out (h:read "*a")

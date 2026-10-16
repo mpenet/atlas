@@ -1,6 +1,7 @@
 ;; ABOUTME: The MCP server of atlas mcp: operations as tools with JSON Schema
 ;; ABOUTME: 2020-12 inputs, and JSON-RPC over stdio for modern and legacy clients.
 (local json (require :atlas.json))
+(local http (require :atlas.http))
 (local validate (require :atlas.validate))
 
 (fn object? [v]
@@ -54,6 +55,23 @@ hold, becomes null."
         (tset seen v nil)
         out)))
 
+;; keywords that describe without constraining
+(local annotations {:title true
+                    :description true
+                    :default true
+                    :example true
+                    :examples true
+                    :deprecated true
+                    :readOnly true
+                    :writeOnly true
+                    :externalDocs true
+                    :xml true})
+
+(fn constrains? [schema]
+  "Whether schema has a keyword that limits what it allows."
+  (accumulate [found false k (pairs schema) &until found]
+    (not (or (. annotations k) (k:match "^x%-")))))
+
 (fn openapi-30-keywords [out]
   "out with OpenAPI 3.0's nullable and boolean exclusive bounds written as
 JSON Schema 2020-12 has them."
@@ -74,18 +92,13 @@ JSON Schema 2020-12 has them."
             (table.insert out.enum json.null))
           out)
         ;; nullable next to allOf, oneOf…: what they allow, or null
-        (and (= nil out.type) (= nil out.enum) (next out))
+        (and (= nil out.type) (= nil out.enum) (constrains? out))
         {:anyOf [out {:type :null}]} out)))
 
 (fn new-context []
   "Conversion state shared by the schemas of one tool: the $defs written for
 recursive schemas, by schema."
   {:defs {} :ids {} :count 0})
-
-(fn read-only-names [schema]
-  (collect [name s (pairs (or (?. schema :properties) {}))]
-    (when (and (= (type s) :table) (= s.readOnly true))
-      (values name true))))
 
 (fn convert [schema openapi-30 ctx ancestors]
   (if (or (not= (type schema) :table) (= schema json.null)) schema
@@ -100,7 +113,7 @@ recursive schemas, by schema."
       (let [out (setmetatable {} (getmetatable schema))
             sub #(convert $ openapi-30 ctx ancestors)
             ;; what is sent leaves out what only the server sets
-            read-only (if ctx.request (read-only-names schema) {})]
+            read-only (if ctx.request (validate.read-only-names schema) {})]
         (tset ancestors schema true)
         (each [k v (pairs schema)]
           (when (not (. dropped-keywords k))
@@ -115,11 +128,9 @@ recursive schemas, by schema."
                               (when (not (and (= k :properties)
                                               (. read-only name)))
                                 (values name (sub s))))
-                            ;; draft 4-7: a schema, or the names a property needs
+                            ;; draft 4-7: written as 2020-12 has it, below
                             (and (= k :dependencies) (= (type v) :table))
-                            (collect [name d (pairs v)]
-                              name
-                              (if (json.array? d) (copy-data d {}) (sub d)))
+                            nil
                             (and (= k :required) (json.array? v)
                                  (next read-only))
                             (json.array (icollect [_ name (ipairs v)]
@@ -127,6 +138,15 @@ recursive schemas, by schema."
                             ;; data: copied, so the result never shares tables with
                             ;; the spec
                             (copy-data v {})))))
+        ;; dependencies: the names a property needs, or a schema
+        (when (= (type schema.dependencies) :table)
+          (each [name d (pairs schema.dependencies)]
+            (let [[k value] (if (json.array? d)
+                                [:dependentRequired (copy-data d {})]
+                                [:dependentSchemas (sub d)])]
+              (when (= nil (. out k))
+                (tset out k {}))
+              (tset (. out k) name value))))
         (tset ancestors schema nil)
         (let [out (if openapi-30 (openapi-30-keywords out) out)
               id (. ctx.ids schema)]
@@ -305,8 +325,8 @@ refuse."
      :headers (when (next req.headers) req.headers)
      ;; a JSON string, number or null is sent as JSON, not as the body's text
      :body (if (and (not= nil req.body) (not (object? req.body))
-                    (not (json.array? req.body)) op.content-type
-                    (: (op.content-type:lower) :match :json))
+                    (not (json.array? req.body))
+                    (http.json-type? op.content-type))
                (json.encode req.body)
                req.body)}))
 
@@ -368,7 +388,13 @@ the process. server: {:tools [tool] :call (fn [name arguments] result)
                  "tools/call" (fn [_ params]
                                 (if (. by-name params.name)
                                     (server.call params.name
-                                                 (or params.arguments {}))
+                                                 ;; null is no arguments
+                                                 (if (or (= nil
+                                                            params.arguments)
+                                                         (= json.null
+                                                            params.arguments))
+                                                     {}
+                                                     params.arguments))
                                     (values nil -32602
                                             (.. "Unknown tool: "
                                                 (tostring params.name)))))
@@ -392,13 +418,17 @@ the process. server: {:tools [tool] :call (fn [name arguments] result)
                         (error-response msg.id -32601
                                         (.. "Method not found: " msg.method)))))]
     (fn [msg]
-      (if (or (not (object? msg))
-              (and (not= nil msg.id) (not (valid-id? msg.id)))
-              (and (not= (type msg.method) :string) (not= nil msg.id)))
-          (error-response (when (and (object? msg) (valid-id? msg.id))
-                            msg.id) -32600
+      (if (not (object? msg))
+          (error-response nil -32600 "Invalid request")
+          ;; responses: atlas asks nothing, so there is nothing to match
+          (and (not= (type msg.method) :string)
+               (or (not= nil msg.result) (not= nil msg.error)))
+          nil
+          (or (not= (type msg.method) :string)
+              (and (not= nil msg.id) (not (valid-id? msg.id))))
+          (error-response (when (valid-id? msg.id) msg.id) -32600
                           "Invalid request")
-          ;; notifications, and responses we never asked for
+          ;; notifications
           (= nil msg.id)
           nil
           (not (or (= nil msg.params) (object? msg.params)))
@@ -437,12 +467,16 @@ the process. server: {:tools [tool] :call (fn [name arguments] result)
 
 (fn valid-utf8 [s]
   "s with each byte that isn't part of valid UTF-8 replaced by U+FFFD."
-  (var out s)
-  (var (ok bad) (utf8.len out))
-  (while (not ok)
-    (set out (.. (out:sub 1 (- bad 1)) "\239\191\189" (out:sub (+ bad 1))))
-    (set (ok bad) (utf8.len out bad)))
-  out)
+  (if (utf8.len s) s (let [parts []]
+                       (var from 1)
+                       (var (ok bad) (utf8.len s))
+                       (while (not ok)
+                         (table.insert parts (s:sub from (- bad 1)))
+                         (table.insert parts "\239\191\189")
+                         (set from (+ bad 1))
+                         (set (ok bad) (utf8.len s from)))
+                       (table.insert parts (s:sub from))
+                       (table.concat parts))))
 
 (fn answer [handle msg]
   "handle's response to msg, an internal error when it fails."
