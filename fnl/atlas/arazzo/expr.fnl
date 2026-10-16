@@ -322,7 +322,7 @@ Arazzo spec, a doubled quote stands for the quote itself."
                                           "null" null
                                           _ word)})
                   (set pos (+ pos (length word))))
-                (error (.. "unexpected character '" ch "' in condition: " s)))))))
+                (error (.. "unexpected character '" ch "' in condition: " s) 0))))))
     tokens))
 
 (fn numeric-pair [a b]
@@ -375,7 +375,7 @@ Arazzo spec, a doubled quote stands for the quote itself."
                        ">=" true})
 
 (fn fail [parser message]
-  (error (.. message " in condition: " parser.condition)))
+  (error (.. message " in condition: " parser.condition) 0))
 
 (fn peek [parser]
   (. parser.tokens parser.pos))

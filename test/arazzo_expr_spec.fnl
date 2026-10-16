@@ -579,6 +579,19 @@
                     (assert.are.equal "{\"empty\":{},\"n\":1,\"part\":{\"n\":1}}"
                                       (json.encode v)))))))
 
+(describe "condition syntax errors"
+          (fn []
+            (it "say what is wrong, not where in atlas"
+                (fn []
+                  (let [(_ problem) (expr.eval-criterion {:inputs {}}
+                                                         {:condition "$statusCode =="})]
+                    (assert.are.equal "condition '$statusCode ==' can't be evaluated: unexpected end in condition: $statusCode =="
+                                      problem))
+                  (let [(_ problem) (expr.eval-criterion {:inputs {}}
+                                                         {:condition "$statusCode ~ 1"})]
+                    (assert.are.equal "condition '$statusCode ~ 1' can't be evaluated: unexpected character '~' in condition: $statusCode ~ 1"
+                                      problem))))))
+
 (describe "explain-criterion"
           (fn []
             (let [ctx {:inputs {}
