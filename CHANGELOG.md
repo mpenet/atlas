@@ -2,6 +2,20 @@
 
 All notable changes to atlas. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Arazzo 1.1 documents: Selector Objects (JSONPath or JSON pointer, with runtime expressions embedded in `{}`) wherever values are evaluated; `jsonpath` criteria and Expression Type Objects; `{$expression}` in regex and JSONPath conditions; replacements with `targetSelectorType: jsonpath`; `in: querystring` parameters; action `parameters` as the inputs of the workflow an action runs; step `timeout` and `dependsOn`; `$self`, `$outputs.NAME`, `$workflows.ID.inputs.NAME` and source description fields. AsyncAPI steps and XPath are refused.
+- JSONPath (RFC 9535), passing its compliance test suite, with I-Regexp (RFC 9485) patterns for `match()` and `search()`, matched in linear time.
+- Operations take `:querystring`, the whole query string (OpenAPI 3.2).
+- An Arazzo example that creates an Exoscale instance from names.
+
+### Changed
+
+- An Arazzo condition that can't be evaluated fails, with a warning on stderr saying why, instead of failing the workflow.
+- An Arazzo step's `timeout` is in milliseconds, as Arazzo 1.1 defines it, rather than seconds.
+
 ## [1.0.0-beta5] - 2026-10-16
 
 ### Added

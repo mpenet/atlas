@@ -1,0 +1,119 @@
+# Creates an Exoscale compute instance from names (template, instance type),
+# waits for the creation job to finish, and returns the instance.
+#
+#   atlas az doc/examples/exoscale-instance.arazzo.yaml create-instance \
+#     --profile exo -i name=web1 -i template="Linux Ubuntu 24.04 LTS 64-bit" \
+#     -i instance-size=medium -i ssh-key=<key-name>
+arazzo: 1.1.0
+info:
+  title: Exoscale instance
+  version: 1.0.0
+sourceDescriptions:
+  - name: exoscale
+    url: https://openapi-v2.exoscale.com/source.json
+    type: openapi
+workflows:
+  - workflowId: create-instance
+    summary: Create an instance, wait until it exists, and return it.
+    inputs:
+      type: object
+      required: [name, template, instance-size, ssh-key]
+      properties:
+        name:
+          type: string
+          description: Instance name
+        template:
+          type: string
+          description: Template name, as list-templates shows it
+        instance-family:
+          type: string
+          description: Instance type family (standard, cpu, memory…)
+          default: standard
+        instance-size:
+          type: string
+          description: Instance type size (micro, small, medium, large…)
+        ssh-key:
+          type: string
+          description: Name of an SSH key registered with Exoscale
+        disk-size:
+          type: integer
+          description: Disk size in GiB
+          default: 10
+    steps:
+      - stepId: template
+        operationId: list-templates
+        parameters:
+          - name: visibility
+            in: query
+            value: public
+        successCriteria:
+          - condition: $statusCode == 200
+          # the name must be one of the templates
+          - context: $response.body
+            condition: "$.templates[?@.name == '{$inputs.template}']"
+            type: jsonpath
+        outputs:
+          id:
+            context: $response.body
+            selector: "$.templates[?@.name == '{$inputs.template}'].id"
+            type: jsonpath
+      - stepId: instance-type
+        operationId: list-instance-types
+        successCriteria:
+          - condition: $statusCode == 200
+          - context: $response.body
+            condition: "$['instance-types'][?@.family == '{$inputs.instance-family}' && @.size == '{$inputs.instance-size}']"
+            type: jsonpath
+        outputs:
+          id:
+            context: $response.body
+            selector: "$['instance-types'][?@.family == '{$inputs.instance-family}' && @.size == '{$inputs.instance-size}'].id"
+            type: jsonpath
+      - stepId: create
+        operationId: create-instance
+        requestBody:
+          contentType: application/json
+          payload:
+            name: $inputs.name
+            instance-type:
+              id: $steps.instance-type.outputs.id
+            template:
+              id: $steps.template.outputs.id
+            ssh-key:
+              name: $inputs.ssh-key
+            disk-size: $inputs.disk-size
+        successCriteria:
+          - condition: $statusCode == 200
+        outputs:
+          job: $response.body#/id
+      - stepId: wait
+        operationId: get-operation
+        parameters:
+          - name: id
+            in: path
+            value: $steps.create.outputs.job
+        successCriteria:
+          - condition: $response.body#/state == 'success'
+        onFailure:
+          # still running: ask again in 3 seconds; failure or timeout ends
+          # the workflow with an error
+          - name: poll
+            type: goto
+            stepId: wait
+            retryAfter: 3
+            criteria:
+              - condition: $response.body#/state == 'pending'
+        outputs:
+          instance: $response.body#/reference/id
+      - stepId: details
+        operationId: get-instance
+        parameters:
+          - name: id
+            in: path
+            value: $steps.wait.outputs.instance
+        successCriteria:
+          - condition: $statusCode == 200
+        outputs:
+          instance: $response.body
+    outputs:
+      instance: $steps.details.outputs.instance

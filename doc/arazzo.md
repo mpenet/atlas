@@ -2,7 +2,7 @@
 
 [Documentation](README.md) › Arazzo workflows
 
-[Arazzo](https://spec.openapis.org/arazzo/latest.html) describes sequences of API calls: call this, take a value from the response, call that, repeat until a job is done. `atlas az` runs Arazzo 1.0 documents, using your [profiles](configuration.md) for authentication and TLS.
+[Arazzo](https://spec.openapis.org/arazzo/latest.html) describes sequences of API calls: call this, take a value from the response, call that, repeat until a job is done. `atlas az` runs Arazzo 1.0 and 1.1 documents, using your [profiles](configuration.md) for authentication and TLS.
 
 It is the natural fit for asynchronous APIs: one workflow starts an operation, polls its status until it completes, and returns the result, in a single command.
 
@@ -123,7 +123,9 @@ A short reference of what atlas supports. The [Arazzo specification](https://spe
 
 ### Steps
 
-A step calls an operation, named by `operationId` (written `$sourceDescriptions.NAME.ID` when several sources define the same id) or `operationPath`, or runs another workflow with `workflowId`. Its `parameters` fill path, query, header and cookie parameters (`in` is required); step parameters replace workflow-level parameters with the same `name` and `in`. `requestBody` gives the body: `payload` (with runtime expressions anywhere inside), `contentType` to override the operation's, and `replacements`, each setting the value at a JSON pointer `target` in the payload. A `null` in a payload array is sent as `null`; an object member written as `null` in the document is left out.
+A step calls an operation, named by `operationId` (written `$sourceDescriptions.NAME.ID` when several sources define the same id) or `operationPath`, or runs another workflow with `workflowId`. Its `parameters` fill path, query, header and cookie parameters (`in` is required), or the whole query string with `in: querystring`; step parameters replace workflow-level parameters with the same `name` and `in`. `requestBody` gives the body: `payload` (with runtime expressions anywhere inside), `contentType` to override the operation's, and `replacements`, each setting the value at a JSON pointer `target` in the payload, or at every node a JSONPath `target` selects with `targetSelectorType: jsonpath` (one that selects nothing is an error). A `null` in a payload array is sent as `null`; an object member written as `null` in the document is left out.
+
+`timeout` is the step's request timeout in milliseconds. `dependsOn` lists steps that must run before this one; steps run in order, so a step depending on a later one is an error.
 
 ### Runtime expressions
 
@@ -138,17 +140,36 @@ A step calls an operation, named by `operationId` (written `$sourceDescriptions.
 | `$request.query.NAME`, `$request.path.NAME` | A query or path parameter of the current request |
 | `$steps.ID.outputs.NAME` | An output of an earlier step |
 | `$steps.ID.response.body#/pointer`, `$steps.ID.response.header.NAME` | An earlier step's response |
-| `$workflows.ID.outputs.NAME` | An output of a workflow this one already ran |
+| `$workflows.ID.outputs.NAME`, `$workflows.ID.inputs.NAME` | An output or input of a workflow this one already ran |
+| `$outputs.NAME` | In the workflow's `outputs`: one of its outputs defined above |
+| `$self` | The Arazzo document's own URL; relative source URLs resolve against it |
+| `$sourceDescriptions.NAME.url` | A field of a source description |
 | `$find(ARRAY, FIELD, VALUE[, RETURN])` | atlas extension: the first element of `ARRAY` whose `FIELD` is `VALUE`, or its `RETURN` field |
 | `{$expression}` | Inside a string: the expression's value |
 
+Arazzo 1.1 `{$expression}` embedding works in regex and JSONPath conditions and in selectors too.
+
 To reach inside an input or output, add a JSON pointer: `$steps.fetch.outputs.pet#/name`. Names may contain dots, so `$steps.fetch.outputs.pet.name` means an output named `pet.name`; when there is none but there is a `pet`, atlas says to use the pointer form.
+
+### Selectors
+
+Wherever a value is expected (outputs, parameter values, payloads), a Selector Object picks part of a value with [JSONPath](https://www.rfc-editor.org/rfc/rfc9535) or a JSON pointer, with runtime expressions embedded in `{}`. One node gives its value, several an array of their values, none no value. This finds an id by name:
+
+```yaml
+outputs:
+  id:
+    context: $response.body
+    selector: "$.templates[?@.name == '{$inputs.template}'].id"
+    type: jsonpath
+```
+
+[`examples/exoscale-instance.arazzo.yaml`](examples/exoscale-instance.arazzo.yaml) uses this to create an Exoscale instance from a template name and an instance type's family and size, then polls the creation job. `type` is `jsonpath` or `jsonpointer`, or an Expression Type Object such as `{type: jsonpath, version: rfc9535}`.
 
 ### Success criteria
 
-All of a step's `successCriteria` must hold; a step without any succeeds. Two kinds are supported:
+All of a step's `successCriteria` must hold; a step without any succeeds. A condition that can't be evaluated (a misspelled expression, a malformed pattern) fails, and atlas prints why as a warning on stderr. Three kinds are supported:
 
-- **Simple conditions:** comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!` and parentheses, with strings in single or double quotes (`''` for a quote inside: `'it''s'`), numbers, `true`, `false` and `null`. Strings compare case-insensitively, as the spec requires. Values from responses are compared as values, never read as part of the condition. A misspelled expression (`$statuscode`) is an error, not a silent `null`.
+- **Simple conditions:** comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!` and parentheses, with strings in single or double quotes (`''` for a quote inside: `'it''s'`), numbers, `true`, `false` and `null`. Strings compare case-insensitively, as the spec requires. Values from responses are compared as values, never read as part of the condition. A misspelled expression (`$statuscode`) fails the condition with a warning, rather than reading as `null`.
 
   ```yaml
   - condition: $statusCode == 200
@@ -163,7 +184,15 @@ All of a step's `successCriteria` must hold; a step without any succeeds. Two ki
     condition: ^2%d%d$
   ```
 
-JSONPath and XPath criteria are not supported.
+- **JSONPath** (`type: jsonpath`, [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535)) passes when the query selects at least one node of the context. Its `match()` and `search()` functions take [I-Regexp](https://www.rfc-editor.org/rfc/rfc9485) patterns, matched in linear time.
+
+  ```yaml
+  - context: $response.body
+    type: jsonpath
+    condition: "$.items[?@.name == '{$inputs.name}']"
+  ```
+
+XPath criteria and selectors are not supported: atlas works with JSON, not XML.
 
 ### Actions
 
@@ -172,6 +201,8 @@ After a step, `onSuccess` or `onFailure` decide what happens next; the workflow'
 - `end` stops the workflow.
 - `goto` continues at `stepId`, or runs `workflowId` and stops. A `goto` to the same step waits `retryAfter` seconds first, which makes polling loops. A workflow aborts after 50 jumps to the same step; raise it with `--max-gotos`.
 - `retry` runs the step again after `retryAfter` seconds, at most `retryLimit` times (default 1). With `workflowId` or `stepId`, that workflow or step runs first (to refresh a token, say).
+
+An action that runs a workflow passes it its `parameters` as inputs, or the current workflow's inputs when it has none.
 
 When the response has a `Retry-After` header (seconds or a date), it overrules `retryAfter`, up to `--retry-max-wait` seconds (default 300). A request that fails in transport (connection refused, timeout…) is a step failure like any other, so `retry` handles it too. A step that fails with no action to handle it fails the workflow.
 
@@ -209,3 +240,7 @@ steps:
 ### Reuse and composition
 
 `components` holds reusable `parameters`, `successActions`, `failureActions` and input schemas; refer to them with `reference: $components.parameters.NAME` (a `value` next to it overrides the component's); input schemas can use `$ref`. Workflows listed in `dependsOn` run first, once each, with the same inputs, and their outputs are available as `$workflows.ID.outputs.NAME`. A step with `workflowId` runs another workflow as a step: its `parameters` are that workflow's inputs, and its criteria, actions and outputs work as for any step (a step without `outputs` exposes the workflow's outputs).
+
+### Not supported
+
+AsyncAPI sources are skipped, and a workflow with steps that send or receive messages (`channelPath`, `action`, `correlationId`, an AsyncAPI `operationId`) is refused before it runs; `$message` is an error. XPath criteria and selectors are refused too.

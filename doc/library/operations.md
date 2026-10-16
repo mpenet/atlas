@@ -35,6 +35,7 @@ Every part of the request is named, so nothing depends on argument order or on w
 |-----|------|-------------|
 | `:path` | table | Path parameters by name; values are percent-encoded (`"a/b c"` → `a%2Fb%20c`) |
 | `:query` | table | Query parameters, serialized in each declared parameter's `style` and `explode` (by default an array repeats the key, `{:id [1 2]}` → `id=1&id=2`; `explode: false` gives `id=1,2`; `deepObject` gives `filter[a]=1`) |
+| `:querystring` | string | The whole query string, already encoded (OpenAPI 3.2 `in: querystring`); `:query` is ignored when it is given |
 | `:headers` | table | Merged over client-level defaults; names are case-insensitive, per-request wins |
 | `:body` | any | Request body, encoded according to the operation's `Content-Type` |
 | `:timeout` | number | Overrides the client-level timeout for this call |
