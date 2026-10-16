@@ -61,6 +61,8 @@
 
 (require :atlas.iregexp)
 
+(require :atlas.jsonpath)
+
 (require :atlas.cli.width)
 
 (require :atlas.cli.output)

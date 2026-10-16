@@ -53,6 +53,7 @@ build = {
       ["atlas.cli.width"] = "lua/atlas/cli/width.lua",
       ["atlas.unicode-categories"] = "lua/atlas/unicode-categories.lua",
       ["atlas.iregexp"] = "lua/atlas/iregexp.lua",
+      ["atlas.jsonpath"] = "lua/atlas/jsonpath.lua",
       ["atlas.cli.request"] = "lua/atlas/cli/request.lua",
       ["atlas.cli.restish"] = "lua/atlas/cli/restish.lua",
       ["atlas.cli.settings"] = "lua/atlas/cli/settings.lua",
