@@ -5,6 +5,7 @@
 (local http-mod (require :atlas.http))
 (local json (require :atlas.json))
 (local pretty-mod (require :atlas.pretty))
+(local width (require :atlas.cli.width))
 
 (fn redact-header [name value ?names]
   "Value safe to print for header name: credentials are masked, as are the
@@ -293,21 +294,18 @@ arrays."
                (text:gsub "[\\\t\n\r]"
                           {"\\" "\\\\" "\t" "\\t" "\n" "\\n" "\r" "\\r"})))
 
-(fn text-width [text]
-  (or (utf8.len text) (length text)))
-
 (fn aligned [rows]
   "rows of cells as columns padded to their widest cell, two spaces apart."
   (let [widths []]
     (each [_ row (ipairs rows)]
       (each [i cell (ipairs row)]
-        (tset widths i (math.max (or (. widths i) 0) (text-width cell)))))
+        (tset widths i (math.max (or (. widths i) 0) (width.of cell)))))
     (table.concat (icollect [_ row (ipairs rows)]
                     (let [line (table.concat (icollect [i cell (ipairs row)]
                                                (.. cell
                                                    (string.rep " "
                                                                (- (. widths i)
-                                                                  (text-width cell)))))
+                                                                  (width.of cell)))))
                                              "  ")]
                       (pick-values 1 (line:gsub "%s+$" ""))))
                   "\n")))

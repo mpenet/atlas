@@ -57,6 +57,8 @@
 
 (require :atlas.cli.args)
 
+(require :atlas.cli.width)
+
 (require :atlas.cli.output)
 
 (require :atlas.cli.settings)

@@ -265,7 +265,7 @@ JSON, JSON Lines and YAML responses are decoded, so `--select` and every `--outp
 | `status` | The status code |
 | `headers` | The response headers, one `name: value` per line, sorted |
 
-Table columns are the fields a selection ending in `{a,b}` picks, in that order, else every field of the rows, sorted. Objects and arrays inside a cell are written as compact JSON, and null or missing fields as empty cells. Control characters in values are shown escaped (`\x1B`) on a terminal; in a file or a pipe, csv and tsv write them as they are. For workflows, `table`, `csv` and `tsv` print the outputs as one row.
+Table columns are the fields a selection ending in `{a,b}` picks, in that order, else every field of the rows, sorted, aligned by the columns text takes on a terminal (two for wide East Asian characters and most emoji, none for combining marks). Objects and arrays inside a cell are written as compact JSON, and null or missing fields as empty cells. Control characters in values are shown escaped (`\x1B`) on a terminal; in a file or a pipe, csv and tsv write them as they are. For workflows, `table`, `csv` and `tsv` print the outputs as one row.
 
 Output is coloured only when stdout is a terminal, and never when the `NO_COLOR` environment variable is set or `--no-color` is given. When a successful response has no body, `HTTP <status>` is printed on stderr instead.
 

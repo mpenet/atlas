@@ -114,7 +114,7 @@ else
 endif
 CURL_MODULE = $(LUA_DIR)/atlas/curl.so
 
-.PHONY: build binary check-binary check-binary-tls corpus check-globals check-manifests clean deps fmt fmt-check install native-libs test
+.PHONY: build binary check-binary check-binary-tls corpus unicode-width check-globals check-manifests clean deps fmt fmt-check install native-libs test
 .DELETE_ON_ERROR:
 
 deps:
@@ -279,6 +279,16 @@ else ifneq ($(STATIC_LDFLAGS),)
 else
 	@! ldd bin/atlas-bin | grep -vE 'linux-vdso|ld-linux|/lib(c|m|dl|pthread|rt)\.so' || (echo "non-system libraries linked above" && false)
 endif
+
+# Regenerates fnl/atlas/cli/width.fnl (display width of text in a terminal)
+# from Unicode's data files.
+UNICODE_VERSION = 17.0.0
+UNICODE_DIR = build/unicode
+unicode-width:
+	mkdir -p $(UNICODE_DIR)
+	curl -fsSL -o $(UNICODE_DIR)/EastAsianWidth.txt https://www.unicode.org/Public/$(UNICODE_VERSION)/ucd/EastAsianWidth.txt
+	curl -fsSL -o $(UNICODE_DIR)/DerivedGeneralCategory.txt https://www.unicode.org/Public/$(UNICODE_VERSION)/ucd/extracted/DerivedGeneralCategory.txt
+	lua tools/unicode-width.lua $(UNICODE_VERSION) $(UNICODE_DIR)/EastAsianWidth.txt $(UNICODE_DIR)/DerivedGeneralCategory.txt > fnl/atlas/cli/width.fnl
 
 # Over the network: real-world specs (test/corpus/specs.txt) must load and
 # every operation must build, render help and pass the request checks.

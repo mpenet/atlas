@@ -1698,6 +1698,17 @@ answers candidates; one reply per line, each followed by |."
                     (assert.are.equal "name   id\na      1\nb,\"c\"  22"
                                       (cli.format-output resp :table false
                                                          "[].{name,id}"))))
+              (it "aligns wide characters by their display width"
+                  (fn []
+                    (assert.are.equal "name  id\n日本  1\nab    2"
+                                      (cli.format-output {:status 200
+                                                          :headers {}
+                                                          :body [{:name "日本"
+                                                                  :id 1}
+                                                                 {:name "ab"
+                                                                  :id 2}]}
+                                                         :table false
+                                                         "[].{name,id}"))))
               (it "writes CSV with quoting"
                   (fn []
                     (assert.are.equal (.. "id,name,tags\n"
