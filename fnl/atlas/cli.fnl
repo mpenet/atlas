@@ -31,7 +31,8 @@
         : wrap-log-request
         : strip-location
         : check-select
-        : stream-printer} (require :atlas.cli.output))
+        : stream-printer
+        : exit?} (require :atlas.cli.output))
 
 (local {: config-path
         : load-config
@@ -433,7 +434,8 @@ invalid body unless --no-validate."
       (if ok
           (print-resp resp output no-color verbose p.select
                       (- (socket.gettime) t0) p.ignore-status)
-          (die (.. "request failed: " (tostring resp)))))))
+          (if (exit? resp) (error resp 0)
+              (die (.. "request failed: " (tostring resp))))))))
 
 (fn discovered-api-schema [profile-name profile p opts env verbose]
   "(location schema) of the spec discovery finds for the profile's base URL;
@@ -505,10 +507,10 @@ the client options."
 (fn print-streams [opts profile p config]
   "opts with an http-fn whose requests print the responses that come as a
 stream (events, JSON Lines, raw output) as they arrive."
-  (let [{: output : no-color} (display-options profile p config)
+  (let [{: output : no-color : verbose} (display-options profile p config)
         http-fn opts.http-fn
         stream (stream-printer output (not no-color) p.select
-                               (util.terminal? 1))]
+                               (util.terminal? 1) verbose)]
     (doto opts
       (tset :http-fn #(http-fn (doto (collect [k v (pairs $)] k v)
                                  (tset :stream stream)))))))
@@ -640,7 +642,8 @@ JSON or YAML one); otherwise -d is sent as given, as JSON when it is JSON."
       (if ok
           (print-resp resp output no-color verbose p.select
                       (- (socket.gettime) t0) p.ignore-status)
-          (die (.. "request failed: " (tostring resp)))))))
+          (if (exit? resp) (error resp 0)
+              (die (.. "request failed: " (tostring resp))))))))
 
 ;; ---- mcp ----
 

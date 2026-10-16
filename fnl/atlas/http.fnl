@@ -254,17 +254,29 @@ lines, plus the TLS settings."
       (tset :body payload)
       (tset :timeout req.timeout))))
 
+(fn permanent [err]
+  "err, marked as an error trying again can't fix: tables keep their identity
+(a command's exit, say)."
+  (if (= (type err) :table)
+      (doto err
+        (tset :permanent true))
+      (util.permanent-error (tostring err))))
+
 (fn body-stream [stream]
   "The transport's on_data for req.stream, and the state it keeps: stream
-is asked once, at the first piece of the body, whether it takes this
-response; when it returns a function, that function gets every piece."
+is asked once, at the first piece of the body of a response that isn't a
+redirect, whether it takes it; when it returns a function, that function
+gets every piece. What it raises is never retried."
   (let [state {:asked false :consumer nil}]
     (values (fn [chunk status head]
               (when (not state.asked)
                 (set state.asked true)
-                (set state.consumer (stream status (parse-headers head))))
+                (when (not (. redirect-status status))
+                  (set state.consumer (stream status (parse-headers head)))))
               (when state.consumer
-                (state.consumer chunk)
+                (let [(ok err) (pcall state.consumer chunk)]
+                  (when (not ok)
+                    (error (permanent err) 0)))
                 true)) state)))
 
 (fn send [req]
@@ -334,4 +346,5 @@ with :streamed true and no body."
  : encode-body
  : decode-response
  : json-type?
- : json-lines-type?}
+ : json-lines-type?
+ : yaml-type?}

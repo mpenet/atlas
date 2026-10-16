@@ -403,78 +403,6 @@ values mustn't reach (they stay as they are in files and pipes)."
                                           text))
       fmt (when (not= nil body) (render body fmt use-color)))))
 
-(fn event-stream [on-data]
-  "A consumer of an event stream (text/event-stream): on-data gets the data
-of each event, its data: lines joined, as the event's blank line arrives.
-Other fields and comments are left out."
-  (var pending "")
-
-  (fn event [block]
-    (let [data (icollect [line (: (.. block "\n") :gmatch "([^\n]*)\n")]
-                 (let [value (line:match "^data:(.*)$")]
-                   (when value
-                     (pick-values 1 (value:gsub "^ " "")))))]
-      (when (next data)
-        (on-data (table.concat data "\n")))))
-
-  (fn [chunk]
-    ;; nil: the stream ended; what is left is the last event
-    (set pending (pick-values 1 (: (.. pending (or chunk "\n\n")) :gsub "\r\n?"
-                                   "\n")))
-    (var at (pending:find "\n\n" 1 true))
-    (while at
-      (event (pending:sub 1 (- at 1)))
-      (set pending (pending:sub (+ at 2)))
-      (set at (pending:find "\n\n" 1 true)))))
-
-(fn json-lines [on-record]
-  "A consumer of JSON Lines: on-record gets each non-blank line as it
-completes."
-  (var pending "")
-  (fn [chunk]
-    (set pending (.. pending (or chunk "\n")))
-    (var at (pending:find "\n" 1 true))
-    (while at
-      (let [line (pending:sub 1 (- at 1))]
-        (when (line:match "%S")
-          (on-record (pick-values 1 (line:gsub "\r$" "")))))
-      (set pending (pending:sub (+ at 1)))
-      (set at (pending:find "\n" 1 true)))))
-
-(fn stream-printer [output use-color ?select terminal]
-  "A req.stream that prints successful responses as they arrive: the events
-of an event stream and the records of JSON Lines one by one, ?select applied
-to each (JSON pretty on a terminal, else one compact line), and any body
-but JSON as it comes with output raw. Other responses are left to
-print-resp."
-  (let [record (fn [text]
-                 (let [(json? decoded) (pcall json.decode text true)
-                       v (if json? decoded text)
-                       v (if ?select (select-path v ?select) v)]
-                   (when (not= nil v)
-                     (print (if (or (not json?) (= output :raw))
-                                (if (= (type v) :table) (json.encode v)
-                                    (tostring v))
-                                terminal
-                                (render v (if (= output :yaml) :yaml :json)
-                                        use-color)
-                                (json.encode v)))
-                     (io.stdout:flush))))]
-    (fn [status headers]
-      (when (util.success? status)
-        (let [content-type (: (or (util.header headers "content-type") "")
-                              :lower)]
-          (if (content-type:match "^%s*text/event%-stream")
-              (event-stream record)
-              (http-mod.json-lines-type? content-type)
-              (json-lines record)
-              ;; JSON stays whole: pages of an array are merged
-              (and (= output :raw) (not (http-mod.json-type? content-type)))
-              #(when $
-                 (doto io.stdout
-                   (: :write $)
-                   (: :flush)))))))))
-
 (fn exit-code [status ignore-status]
   "Process exit code for an HTTP status: 4 for 4xx, 5 for 5xx, else 0."
   (if (or ignore-status (< status 400)) 0
@@ -494,7 +422,8 @@ print-resp."
     (when resp.next-page-status
       (io.stderr:write (string.format "warning: stopped after %d page(s): next page returned HTTP %s\n"
                                       resp.pages resp.next-page-status)))
-    (when (or verbose error?)
+    ;; a stream showed them before its body
+    (when (and (or verbose error?) (not resp.streamed))
       (io.stderr:write (.. "HTTP " resp.status timing "\n"))
       (when verbose
         (io.stderr:write (.. (header-lines resp.headers true) "\n\n"))))
@@ -542,6 +471,138 @@ print-resp."
 
 (fn die [msg]
   (exit 1 (strip-location (tostring msg))))
+
+(fn exit? [err]
+  "Whether err is a command's exit (see exit)."
+  (= (getmetatable err) exit-mt))
+
+;; ---- streams ----
+
+;; a line longer than this is not a stream atlas can print
+(local max-line (* 16 1024 1024))
+
+(fn line-reader [on-line on-end]
+  "A consumer of text cut into lines ended by CRLF, LF or CR: on-line gets
+each line as it ends, on-end what is left when the text ends. A CR ending a
+piece may be the first half of a CRLF."
+  (var parts [])
+  (var size 0)
+  (var after-cr false)
+
+  (fn add [text]
+    (when (> (length text) 0)
+      (table.insert parts text)
+      (set size (+ size (length text)))
+      (when (> size max-line)
+        (error "a line of the stream is longer than 16 MB" 0))))
+
+  (fn finish []
+    (let [line (table.concat parts)]
+      (set parts [])
+      (set size 0)
+      (on-line line)))
+
+  (fn [chunk]
+    (if (= nil chunk)
+        (on-end (table.concat parts))
+        (let [chunk (if (and after-cr (= (chunk:sub 1 1) "\n")) (chunk:sub 2)
+                        chunk)]
+          (set after-cr false)
+          (var from 1)
+          (var at (chunk:find "[\r\n]" from))
+          (while at
+            (add (chunk:sub from (- at 1)))
+            (finish)
+            (when (= (chunk:sub at at) "\r")
+              (if (= at (length chunk)) (set after-cr true)
+                  (= (chunk:sub (+ at 1) (+ at 1)) "\n") (set at (+ at 1))))
+            (set from (+ at 1))
+            (set at (chunk:find "[\r\n]" from)))
+          (add (chunk:sub from))))))
+
+(fn event-stream [on-data]
+  "A consumer of an event stream (text/event-stream, as WHATWG defines it):
+on-data gets the data of each event, its data lines joined, at the blank line
+ending it. Other fields and comments are left out, and so is an event the
+stream ends before."
+  (var data [])
+  (var first true)
+  (line-reader (fn [line]
+                 (let [line (if first
+                                (pick-values 1 (line:gsub "^\239\187\191" ""))
+                                line)
+                       (field value) (if (line:find ":" 1 true)
+                                         (line:match "^([^:]*):(.*)$")
+                                         (values line ""))]
+                   (set first false)
+                   (if (= line "")
+                       (when (next data)
+                         (on-data (table.concat data "\n"))
+                         (set data []))
+                       (= field "data")
+                       (table.insert data (pick-values 1 (value:gsub "^ " ""))))))
+               #nil))
+
+(fn json-lines [on-record]
+  "A consumer of JSON Lines: on-record gets each line that isn't blank."
+  (let [record #(when ($:match "%S") (on-record $))]
+    (line-reader record record)))
+
+(fn write-out [text]
+  "text on stdout, flushed: a reader that went away ends the command, with
+the code a SIGPIPE would give (atlas ignores the signal)."
+  (when (not (and (io.stdout:write text) (io.stdout:flush)))
+    (exit 141)))
+
+(fn stream-printer [output use-color ?select terminal verbose]
+  "A req.stream that prints successful responses as they arrive, for output
+json (the default), yaml or raw: the events of an event stream and the
+records of JSON Lines one by one, ?select applied to each (as received
+without a selection, pretty JSON on a terminal), and with output raw and no
+selection any body that isn't JSON or YAML as it comes. Other responses are
+left to print-resp."
+  (let [render-value (fn [v]
+                       (if (= output :raw) (raw-text v)
+                           (= output :yaml) (.. "---\n"
+                                                (render v :yaml use-color))
+                           terminal (render v :json use-color)
+                           (json.encode v)))
+        record (fn [text]
+                 (let [(json? decoded) (pcall json.decode text true)
+                       v (if (and json? ?select) (select-path decoded ?select)
+                             json? decoded)]
+                   (if (and json? (not ?select) (= output :raw))
+                       (write-out (.. text "\n"))
+                       (not json?)
+                       (when (not ?select) (write-out (.. text "\n")))
+                       (and (not ?select) (not terminal) (not= output :yaml))
+                       ;; as received: numbers keep their digits
+                       (write-out (.. (pick-values 1 (text:gsub "\n" " ")) "\n"))
+                       (not= nil v)
+                       (write-out (.. (render-value v) "\n")))))
+        show-head (fn [status headers]
+                    (when verbose
+                      (io.stderr:write (.. "HTTP " status "\n"
+                                           (header-lines headers true) "\n\n"))))]
+    (fn [status headers]
+      (when (and (util.success? status)
+                 (or (= nil output) (= output :json) (= output :yaml)
+                     (= output :raw)))
+        (let [content-type (util.header headers "content-type")
+              lower (: (or content-type "") :lower)
+              consumer (if (lower:match "^%s*text/event%-stream")
+                           (event-stream record)
+                           (http-mod.json-lines-type? lower)
+                           (json-lines record)
+                           ;; only what needs no reading: JSON stays whole
+                           ;; (pages merged), a selection reads the body
+                           (and (= output :raw) (not ?select) content-type
+                                (not (http-mod.json-type? lower))
+                                (not (http-mod.yaml-type? lower)))
+                           #(when $ (write-out $)))]
+          (when consumer
+            (show-head status headers))
+          consumer)))))
 
 (fn executed-steps [result]
   "Step ids in the order they first ran."
@@ -652,4 +713,5 @@ variable shows the value in effect."
  : format-servers
  : print-arazzo-result
  : list-arazzo-workflows
- : stream-printer}
+ : stream-printer
+ : exit?}

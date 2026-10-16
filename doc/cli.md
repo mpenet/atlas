@@ -302,15 +302,15 @@ The selection is printed in the chosen `--output` format; `[]` gives an array. A
 
 ### Streams
 
-Some responses are printed as they arrive rather than once complete:
+With `--output` json (the default), yaml or raw, some responses are printed as they arrive rather than once complete:
 
-- An event stream (`text/event-stream`, server-sent events) prints the data of each event as the event ends. Comments and the other fields (`event:`, `id:`) are left out.
-- JSON Lines (`application/x-ndjson`, `application/jsonl`) prints each record as its line ends.
-- With `--output=raw`, any body but JSON is written as it comes, so a large download isn't held in memory.
+- An event stream (`text/event-stream`, server-sent events) prints the data of each event when the blank line ending it arrives. Comments and the other fields (`event:`, `id:`) are left out, and so is an event the stream ends before finishing.
+- JSON Lines (`application/x-ndjson`, `application/jsonl`) prints each record when its line ends.
+- With `--output=raw` and no `--select`, a body that declares a type other than JSON or YAML is written as it comes, so a large download isn't held in memory.
 
-Each event or record is selected on its own with `--select` and printed as pretty JSON on a terminal, or as one compact JSON line otherwise, ready for `jq` or `while read`. Text that isn't JSON is printed as it is. An error response (4xx, 5xx) is reported as usual, after it is complete.
+Each event or record is printed as received, one per line; with `--select`, the selection of each instead, as pretty JSON on a terminal and compact JSON otherwise. `--output=yaml` prints each as a YAML document (`---`). Text that isn't JSON is printed as it is (and left out by a selection). Other output formats, and error responses (4xx, 5xx), wait for the whole response as usual. `-v` shows the status and headers before the stream.
 
-A request whose `Accept` includes `text/event-stream` (from the spec, or `--h.Accept=…`) may stay silent between events for as long as the server likes; otherwise atlas gives up on a peer silent for 60 seconds. `--timeout` still limits the whole exchange, so leave it out for long streams.
+A request whose `Accept` includes `text/event-stream` (from the spec, or `--h.Accept=…`) may stay silent between events for as long as the server likes; otherwise atlas gives up on a peer silent for 60 seconds. `--timeout` still limits the whole exchange, so leave it out for long streams. When the program reading atlas's output goes away (`atlas … | head -1`), atlas stops with exit code 141, as on a broken pipe.
 
 ```sh
 atlas http https://api.example.com/events --h.Accept=text/event-stream --select=.status

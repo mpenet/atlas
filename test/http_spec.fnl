@@ -741,3 +741,59 @@ c:close()")
                     (close)
                     (assert.is_false ok)
                     (assert.is_true (= true (?. err :permanent))))))))
+
+(describe "streaming, from review"
+          (fn []
+            (it "never retries what the consumer raises"
+                (fn []
+                  (let [(url close) (serve-once [(.. sse-head (chunked "a"))])
+                        (ok err) (pcall http.request
+                                        {:method "GET"
+                                         : url
+                                         :stream #(fn [chunk]
+                                                    (when chunk
+                                                      (error "stop" 0)))})]
+                    (close)
+                    (assert.is_false ok)
+                    (assert.is_true err.permanent)
+                    (assert.are.equal "stop" (tostring err)))))
+            (it "keeps the consumer's own error objects"
+                (fn []
+                  (let [(url close) (serve-once [(.. sse-head (chunked "a"))])
+                        mine {:code 141}
+                        (ok err) (pcall http.request
+                                        {:method "GET"
+                                         : url
+                                         :stream #(fn [chunk]
+                                                    (when chunk
+                                                      (error mine 0)))})]
+                    (close)
+                    (assert.is_false ok)
+                    (assert.are.equal mine err)
+                    (assert.is_true err.permanent))))
+            (it "isn't asked about redirects"
+                (fn []
+                  (let [(url close) (serve-once [(.. "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/x\r\nContent-Type: text/event-stream\r\nContent-Length: 9\r\n\r\n"
+                                                     "data: r\n\n")])
+                        asked []]
+                    (pcall http.request
+                           {:method "GET"
+                            : url
+                            :stream (fn [status]
+                                      (table.insert asked status)
+                                      nil)})
+                    (close)
+                    (assert.are.same [] asked))))
+            (it "refuses a request from inside a callback"
+                (fn []
+                  (let [curl (require :atlas.curl)
+                        (url close) (serve-once [(.. sse-head (chunked "a"))])
+                        (ok err) (pcall curl.perform
+                                        {:method "GET"
+                                         : url
+                                         :on_data #(curl.perform {:method "GET"
+                                                                  : url})})]
+                    (close)
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "already running"
+                                         1 true)))))))

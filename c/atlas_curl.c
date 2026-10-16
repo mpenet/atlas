@@ -10,6 +10,10 @@
 /* One handle for the process, so connections are reused between requests. */
 static CURL *handle = NULL;
 
+/* Set while a transfer runs: an on_data callback must not start another on
+ * the same handle. */
+static int busy = 0;
+
 typedef struct {
   char *data;
   size_t len;
@@ -99,6 +103,7 @@ static const char *opt_string(lua_State *L, int t, const char *key) {
  * the body returned); an error it raises ends the transfer and is raised.
  * idle: true when the peer may stay silent for long (event streams). */
 static int perform(lua_State *L) {
+  if (busy) return luaL_error(L, "a transfer is already running");
   luaL_checktype(L, 1, LUA_TTABLE);
   const char *method = opt_string(L, 1, "method");
   const char *url = opt_string(L, 1, "url");
@@ -224,7 +229,9 @@ static int perform(lua_State *L) {
   if (cert) curl_easy_setopt(handle, CURLOPT_SSLCERT, cert);
   if (key) curl_easy_setopt(handle, CURLOPT_SSLKEY, key);
 
+  busy = 1;
   CURLcode rc = curl_easy_perform(handle);
+  busy = 0;
   curl_slist_free_all(headers);
   /* the handle must not keep pointers to this call's stack */
   curl_easy_setopt(handle, CURLOPT_ERRORBUFFER, NULL);

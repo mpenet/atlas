@@ -27,9 +27,17 @@
                                  (req.stream resp.status resp.headers))]
                   (if consumer
                       (do
-                        (each [_ piece (ipairs (or resp.pieces [resp.raw]))]
-                          (consumer piece))
-                        (consumer nil)
+                        ;; as the transport does: what the consumer raises
+                        ;; is never retried
+                        (each [_ piece (ipairs (doto (icollect [_ p (ipairs (or resp.pieces
+                                                                                [resp.raw]))]
+                                                       p)
+                                                 (table.insert false)))]
+                          (let [(ok err) (pcall consumer (or piece nil))]
+                            (when (not ok)
+                              (when (= (type err) :table)
+                                (set err.permanent true))
+                              (error err 0))))
                         {:status resp.status
                          :headers resp.headers
                          :raw ""
@@ -37,12 +45,12 @@
                       resp)))) requests)))
 
 (fn respond-text [status content-type pieces]
-  "A response whose body is the text of pieces, which a streaming transport
-hands over one by one."
-  {:status status
-   :headers {:content-type content-type}
-   :raw (table.concat pieces)
-   : pieces})
+  "A response whose body is the text of pieces, decoded as the transport
+does, which a streaming transport hands over one by one."
+  (let [http (require :atlas.http)]
+    (doto (http.decode-response status {:content-type content-type}
+                                (table.concat pieces))
+      (tset :pieces pieces))))
 
 (local config {:profiles {:p {:schema "test/fixtures/cli-api.json"
                               :headers {:x-org "o1"}
@@ -62,6 +70,9 @@ hands over one by one."
                                 :profile "yaml"}}})
 
 (var current-config config)
+
+;; a stdout whose reader went away: writes fail as on a closed pipe
+(var stdout-closed false)
 
 (fn with-config [cfg f]
   "Runs f with cfg as the CLI config."
@@ -87,15 +98,20 @@ hands over one by one."
                                                 "\t"))))
     (set io.stderr {:write (fn [_ s] (table.insert err s))})
     (set io.stdout {:write (fn [self s]
-                             (table.insert written s)
-                             self)
-                    :flush #nil})
+                             (if stdout-closed
+                                 (values nil "Broken pipe" 32)
+                                 (do
+                                   (table.insert written s)
+                                   self)))
+                    :flush #true})
     (let [(ok code) (pcall cli.run args {: transport :config current-config})]
       (set _G.print real-print)
       (set io.stderr real-stderr)
       (set io.stdout real-stdout)
+      ;; as print's lines are joined: no newline after the last
       (when (next written)
-        (table.insert out (table.concat written)))
+        (table.insert out
+                      (pick-values 1 (: (table.concat written) :gsub "\n$" ""))))
       (assert ok code)
       {: code :out (table.concat out "\n") :err (table.concat err) : requests})))
 
@@ -1993,7 +2009,7 @@ hands over one by one."
                                                                                  "\nevent: x\r\ndata: {\"n\":2}\r\n\r\n"
                                                                                  ": keep-alive\n\n"
                                                                                  "data: plain\ndata: text\n\n"
-                                                                                 "data: \"s\""])})]
+                                                                                 "data: \"s\"\n\n"])})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "{\"n\":1}\n{\"n\":2}\nplain\ntext\n\"s\""
                                       r.out)
@@ -2131,3 +2147,96 @@ hands over one by one."
                                         {"GET https://d13.test/openapi.json" (respond 200
                                                                                       (fixture-spec))})]
                        (assert.are.equal 0 r.code)))))))
+
+(fn closed-stdout-run [args routes]
+  "atlas-run with a stdout whose reader went away."
+  (set stdout-closed true)
+  (let [(ok r) (pcall atlas-run args routes)]
+    (set stdout-closed false)
+    (assert ok r)
+    r))
+
+(describe "streamed responses, from review"
+          (fn []
+            (it "stops when its reader goes away"
+                (fn []
+                  (let [pieces (fcollect [i 1 50] (.. "data: " i "\n\n"))
+                        sent []
+                        r (closed-stdout-run ["http" "https://h.test/events"]
+                                             {"GET https://h.test/events" (respond-text 200
+                                                                                        "text/event-stream"
+                                                                                        pieces)})]
+                    (assert.are.equal 141 r.code)
+                    (assert.are.equal "" r.err))))
+            (it "keeps a CRLF split between pieces together"
+                (fn []
+                  (let [r (atlas-run ["http" "https://h.test/events"]
+                                     {"GET https://h.test/events" (respond-text 200
+                                                                                "text/event-stream"
+                                                                                ["data: {\"a\":\r"
+                                                                                 "\ndata: 1}\r"
+                                                                                 "\n\r\n"])})]
+                    (assert.are.equal "{\"a\": 1}" r.out))))
+            (it "reads events as the event stream format has them"
+                (fn []
+                  (let [r (atlas-run ["http" "https://h.test/events"]
+                                     {"GET https://h.test/events" (respond-text 200
+                                                                                "text/event-stream"
+                                                                                ["\239\187\191data: first\n\n"
+                                                                                 "data\ndata: x\n\n"
+                                                                                 "data: unfinished"])})]
+                    (assert.are.equal "first\n\nx" r.out))))
+            (it "prints records as they came, without a selection"
+                (fn []
+                  (let [r (atlas-run ["http" "https://h.test/lines"]
+                                     {"GET https://h.test/lines" (respond-text 200
+                                                                               "application/x-ndjson"
+                                                                               ["{\"b\":1,\"a\":2.50,\"big\":12345678901234567890}\n"])})]
+                    (assert.are.equal "{\"b\":1,\"a\":2.50,\"big\":12345678901234567890}"
+                                      r.out))))
+            (it "leaves formats that need the whole body to it"
+                (fn []
+                  (let [routes {"GET https://h.test/lines" (respond-text 200
+                                                                         "application/x-ndjson"
+                                                                         ["{\"a\":1}\n{\"a\":2}\n"])}]
+                    (assert.are.equal "200"
+                                      (. (atlas-run ["http"
+                                                     "https://h.test/lines"
+                                                     "--output=status"]
+                                                    routes)
+                                         :out))
+                    (assert.are.equal "a\n1\n2"
+                                      (. (atlas-run ["http"
+                                                     "https://h.test/lines"
+                                                     "--output=csv"]
+                                                    routes)
+                                         :out)))))
+            (it "streams raw output only for bodies it needn't read"
+                (fn []
+                  (let [untyped {:status 200
+                                 :headers {:link "<https://h.test/u?p=2>; rel=\"next\""}
+                                 :raw "[1]"
+                                 :body [1]
+                                 :pieces ["[1]"]}
+                        r (atlas-run ["http" "https://h.test/u" "--output=raw"]
+                                     {"GET https://h.test/u" untyped
+                                      "GET https://h.test/u?p=2" (respond 200
+                                                                          [2])})]
+                    (assert.are.equal "[1,2]" r.out))
+                  (let [r (atlas-run ["http"
+                                      "https://h.test/y"
+                                      "--output=raw"
+                                      "--select=.a"]
+                                     {"GET https://h.test/y" (respond-text 200
+                                                                           "text/plain"
+                                                                           ["plain"])})]
+                    (assert.are.equal 0 r.code))))
+            (it "shows the status and headers before the stream with -v"
+                (fn []
+                  (let [r (atlas-run ["http" "https://h.test/events" "-v"]
+                                     {"GET https://h.test/events" (respond-text 200
+                                                                                "text/event-stream"
+                                                                                ["data: 1\n\n"])})]
+                    (assert.are.equal "1" r.out)
+                    (let [(_ n) (r.err:gsub "HTTP 200" "")]
+                      (assert.are.equal 1 n)))))))
