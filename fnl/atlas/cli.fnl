@@ -595,14 +595,35 @@ JSON or YAML one); otherwise -d is sent as given, as JSON when it is JSON."
 (local mcp-usage
        "Usage: atlas mcp <profile-or-schema> [--allow-writes] [--arazzo NAME]")
 
+(fn name-pattern [glob]
+  "A Lua pattern matching the whole names glob matches: * is any text."
+  (.. "^" (pick-values 1 (: (glob:gsub "[%^%$%(%)%%%.%[%]%+%-%?]" "%%%0") :gsub
+                            "%*" ".*")) "$"))
+
+(fn listed-operations [c listed]
+  "The operations of c that listed names, as names or * patterns: an
+unknown name, or a pattern that matches nothing, is an error."
+  (let [chosen {}]
+    (each [_ entry (ipairs listed)]
+      (if (entry:find "*" 1 true)
+          (let [pattern (name-pattern entry)
+                matched (icollect [name op (pairs c)]
+                          (when (name:match pattern)
+                            (tset chosen name op)
+                            name))]
+            (when (= nil (next matched))
+              (die (.. "mcp.operations: " entry " matches no operation"))))
+          (tset chosen entry (or (. c entry)
+                                 (die (.. "unknown operation in mcp.operations: "
+                                          entry))))))
+    (icollect [_ op (pairs chosen)] op)))
+
 (fn mcp-operations [c profile p]
   "The operations atlas mcp offers: those the profile's mcp.operations lists,
 else the read-only ones (all with --allow-writes), by name."
   (let [listed (?. profile :mcp :operations)
         ops (if listed
-                (icollect [_ name (ipairs listed)]
-                  (or (. c name)
-                      (die (.. "unknown operation in mcp.operations: " name))))
+                (listed-operations c listed)
                 (icollect [_ op (pairs c)]
                   (when (or p.allow-writes
                             (. {:get true :head true :options true}

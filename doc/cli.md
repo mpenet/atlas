@@ -372,7 +372,7 @@ Settings apply in this order, first found wins: command-line option, profile, to
 | `output` | string | Output format |
 | `no-color` | boolean | Never colour the output |
 | `verbose` | boolean | Always log requests and responses |
-| `mcp` | object | `{"operations": [...]}`: the operations `atlas mcp` offers; see [MCP server](#mcp-server) |
+| `mcp` | object | `{"operations": [...]}`: the operations `atlas mcp` offers, names or `*` patterns; see [MCP server](#mcp-server) |
 
 A profile with `extends` takes every key of the profile it names and overrides them with its own, except `headers`, which are merged key by key. Chains (`a` extends `b` extends `c`) work; a cycle is an error. `atlas profile show NAME` prints the result.
 
@@ -391,12 +391,14 @@ claude mcp add exo -- atlas mcp exo
 
 The second form is the configuration file of Claude Desktop and most other clients. Give the full path of `atlas` if the client doesn't search your `PATH`.
 
-**Which operations.** By default, the read-only ones: GET, HEAD and OPTIONS. `--allow-writes` offers them all. A profile's `mcp.operations` lists exactly the operations to offer, writes included:
+**Which operations.** By default, the read-only ones: GET, HEAD and OPTIONS. `--allow-writes` offers them all. A profile's `mcp.operations` lists exactly the operations to offer, writes included, by name or with `*` for any text:
 
 ```json
 {"profiles": {"exo": {"schema": "https://api.example.com/openapi.json",
-                      "mcp": {"operations": ["list-instances", "get-instance", "start-instance"]}}}}
+                      "mcp": {"operations": ["list-*", "get-instance", "start-instance"]}}}}
 ```
+
+An unknown name, or a pattern that matches no operation, stops `atlas mcp` with an error.
 
 Offer as few as the task needs: every tool's description and schema goes into the agent's context, and above 100 tools atlas warns. A large API (GitHub's read-only operations alone take about 900 KB) needs a list.
 

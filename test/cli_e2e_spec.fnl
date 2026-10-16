@@ -1693,6 +1693,21 @@
                        (assert.are.equal 1 r.code)
                        (assert.is_truthy (r.err:find "mcp.operations must be a list of operation names"
                                                      1 true))))))
+            (it "takes * patterns in mcp.operations"
+                (fn []
+                  (with-config {:profiles {:m {:schema "test/fixtures/cli-api.json"
+                                               :mcp {:operations ["get-*"
+                                                                  "*-pets"
+                                                                  "list-pets"]}}}}
+                    #(assert.are.same ["get-pet" "get-secure" "list-pets"]
+                                      (tool-names (mcp-run ["mcp" "m"]
+                                                           [list-tools]))))
+                  (with-config {:profiles {:m {:schema "test/fixtures/cli-api.json"
+                                               :mcp {:operations ["remove-*"]}}}}
+                    #(let [r (mcp-run ["mcp" "m"] [list-tools])]
+                       (assert.are.equal 1 r.code)
+                       (assert.is_truthy (r.err:find "mcp.operations: remove-* matches no operation"
+                                                     1 true))))))
             (it "calls the API with the profile's auth"
                 (fn []
                   (let [r (mcp-run ["mcp" "p"] [(call 2 "get-pet" {:id "7"})]
