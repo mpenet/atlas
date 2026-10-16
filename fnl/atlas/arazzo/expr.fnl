@@ -1,13 +1,15 @@
-;; ABOUTME: Evaluates Arazzo runtime expressions, templates and criteria
-;; ABOUTME: against a workflow execution context.
-;; Arazzo runtime expression evaluator.
+;; ABOUTME: Evaluates Arazzo runtime expressions, templates, Selector Objects
+;; ABOUTME: and criteria against a workflow execution context.
 ;; Handles: $inputs.x, $steps.id.outputs.x, $statusCode,
 ;;          $response.body#/ptr, $response.header.X,
-;;          $request.body#/ptr, $url,
-;;          $sourceDescriptions.name.operationId,
-;;          template strings "text {$expr} text"
+;;          $request.body#/ptr, $url, $method, $outputs.x, $self,
+;;          $workflows.id.inputs.x, $workflows.id.outputs.x,
+;;          $sourceDescriptions.name.operationId (or .url, .type…),
+;;          template strings "text {$expr} text",
+;;          Selector Objects (JSONPath, JSON Pointer)
 (local util (require :atlas.util))
 (local json (require :atlas.json))
+(local jsonpath (require :atlas.jsonpath))
 
 ;; ---- JSON Pointer ----
 
@@ -110,7 +112,15 @@ parts = [body] or [header|query|path name...]."
               (match (. parts 3)
                 :outputs (named (?. ctx :workflows (. parts 2) :outputs) parts
                                 4 :output expr)
+                :inputs (named (?. ctx :workflows (. parts 2) :inputs) parts 4
+                               :input expr)
                 _ (unknown expr))
+              :outputs
+              (named ctx.outputs parts 2 :output expr)
+              :self
+              ctx.self
+              :message
+              (error (.. expr ": AsyncAPI messages are not supported") 0)
               ;; a sentinel table so the caller can look up the client
               :sourceDescriptions
               ;; source names have no dots, operationIds may
@@ -120,11 +130,17 @@ parts = [body] or [header|query|path name...]."
 
 ;; ---- template substitution ----
 
+(fn source-field [ctx v]
+  "v, or for $sourceDescriptions.NAME.FIELD the source's FIELD (url, type…)."
+  (if (and (= (type v) :table) v.__source)
+      (?. ctx :sources v.__source v.__operationId)
+      v))
+
 (fn eval-template [ctx s]
   "Substitute {$expr} occurrences in s."
   (pick-values 1 (s:gsub "{(%$[^}]+)}"
                          (fn [expr]
-                           (let [v (resolve-expr ctx expr)]
+                           (let [v (source-field ctx (resolve-expr ctx expr))]
                              ;; null is no value, like a missing one;
                              ;; structured values as JSON
                              (if (or (= v nil) (= v json.null)) ""
@@ -132,6 +148,9 @@ parts = [body] or [header|query|path name...]."
                                  (tostring v)))))))
 
 (local roots {:inputs true
+              :outputs true
+              :self true
+              :message true
               :statusCode true
               :url true
               :method true
@@ -146,21 +165,79 @@ parts = [body] or [header|query|path name...]."
   "Whether s is a runtime expression: $ followed by a known root."
   (not= nil (. roots (or (s:match "^%$(%a+)") ""))))
 
-(fn eval [ctx expr]
-  "Evaluate an Arazzo expression, template string, or table (recursively).
-Text that only starts with $ (\"$5\") is not an expression and stays as is."
-  (if (and (= (type expr) :string) (expression? expr)) (resolve-expr ctx expr)
-      (and (= (type expr) :string) (expr:match "{%$")) (eval-template ctx expr)
-      (= expr json.null) expr
-      ;; arrays stay arrays, and an element that resolves to nothing is null,
-      ;; so the others keep their place
-      (json.array? expr) (json.array (fcollect [i 1 (length expr)]
-                                      (match (eval ctx (. expr i))
-                                        nil json.null
-                                        v v)))
-      (= (type expr) :table) (collect [k v (pairs expr)]
-                              k
-                              (eval ctx v)) expr))
+;; ---- Selector Objects ----
+
+(fn expression-type [t]
+  "The kind of a criterion's or Selector Object's type (a name or an
+Expression Type Object): simple, regex, jsonpath or jsonpointer; raises for
+XPath and versions atlas doesn't implement."
+  (let [kind (if (= (type t) :table) t.type t)
+        version (when (= (type t) :table) t.version)]
+    (match kind
+      (where (or :simple :regex)) kind
+      :jsonpath (if (or (= nil version) (= version :rfc9535)) kind
+                    (error (.. "JSONPath version " (tostring version)
+                               " is not supported (rfc9535 is)")
+                           0))
+      :jsonpointer (if (or (= nil version) (= version :rfc6901)) kind
+                       (error (.. "JSON Pointer version " (tostring version)
+                                  " is not supported (rfc6901 is)")
+                              0))
+      :xpath (error "XPath is not supported: atlas reads JSON, not XML" 0)
+      _ (error (.. "unknown expression type: " (tostring kind)) 0))))
+
+(fn selector-object? [v]
+  "Whether v is a Selector Object: context, selector and type, besides x-
+extensions; any other table is data."
+  (and (= (type v) :table) (not= v json.null) (not (json.array? v))
+       (= (type v.context) :string) (= (type v.selector) :string)
+       (not= nil v.type)
+       (accumulate [only true k (pairs v) &until (not only)]
+         (or (= k :context) (= k :selector) (= k :type)
+             (and (= (type k) :string) (k:match "^x%-") true)))))
+
+(var eval nil)
+
+(fn eval-selector [ctx obj]
+  "What a Selector Object selects: a JSONPath query's single node is its value,
+several nodes an array of their values, none nil. Runtime expressions may be
+embedded in the selector with {}, as in conditions."
+  (let [kind (expression-type obj.type)
+        data (eval ctx obj.context)
+        selector (eval-template ctx obj.selector)]
+    (match kind
+      :jsonpath (let [nodes (jsonpath.query selector data)]
+                  (if (= 1 (length nodes)) (. nodes 1 :value)
+                      (< 1 (length nodes))
+                      (json.array (icollect [_ n (ipairs nodes)]
+                                    n.value))))
+      :jsonpointer (util.json-pointer data (selector:gsub "^#" ""))
+      _ (error (.. "a selector can't be of type " kind) 0))))
+
+(set eval (fn [ctx expr]
+            "Evaluate an Arazzo expression, template string, Selector Object or table
+(recursively). Text that only starts with $ (\"$5\") is not an expression
+and stays as is."
+            (if (and (= (type expr) :string) (expression? expr))
+                (resolve-expr ctx expr)
+                (and (= (type expr) :string) (expr:match "{%$"))
+                (eval-template ctx expr)
+                (= expr json.null)
+                expr
+                (selector-object? expr)
+                (eval-selector ctx expr)
+                ;; arrays stay arrays, and an element that resolves to nothing is null,
+                ;; so the others keep their place
+                (json.array? expr)
+                (json.array (fcollect [i 1 (length expr)]
+                              (match (eval ctx (. expr i))
+                                nil json.null
+                                v v)))
+                (= (type expr) :table)
+                (collect [k v (pairs expr)]
+                  k
+                  (eval ctx v))
+                expr)))
 
 ;; ---- simple condition language ----
 ;; Grammar (Arazzo 1.0 "simple" criteria):
@@ -356,27 +433,46 @@ Arazzo spec, a doubled quote stands for the quote itself."
 
 ;; ---- criterion evaluation ----
 
+(fn passes? [ctx criterion kind]
+  ;; runtime expressions in regex and JSONPath conditions are embedded with
+  ;; {} and substituted first; a missing context passes nothing
+  (match kind
+    :simple (eval-condition ctx criterion.condition)
+    :regex (let [v (eval ctx criterion.context)]
+             (and (not= nil v) (not= json.null v)
+                  (not= nil
+                        (: (tostring v) :match
+                           (eval-template ctx criterion.condition)))))
+    :jsonpath (let [v (eval ctx criterion.context)]
+                (and (not= nil v) (not= json.null v)
+                     (< 0 (length (jsonpath.query (eval-template ctx
+                                                                 criterion.condition)
+                                                  v)))))
+    _ (error (.. "a condition can't be of type " kind) 0)))
+
 (fn eval-criterion [ctx criterion]
-  "Evaluate one Criterion Object. Returns true if it passes."
-  (let [typ (or criterion.type :simple)]
-    (match typ
-      :simple
-      (eval-condition ctx criterion.condition)
-      ;; a missing value matches nothing
-      :regex
-      (let [v (eval ctx criterion.context)]
-        (and (not= nil v) (not= json.null v)
-             (not= nil (: (tostring v) :match criterion.condition))))
-      _
-      (error (.. "unsupported criterion type: "
-                 (tostring (if (= (type typ) :table) typ.type typ)))))))
+  "Evaluate one Criterion Object: (passed problem). A condition that can't be
+evaluated (a malformed or misspelled expression) fails, with problem saying
+why, as Arazzo 1.1 requires; an unsupported type raises."
+  (let [kind (expression-type (or criterion.type :simple))
+        (ok result) (pcall passes? ctx criterion kind)]
+    (if ok
+        (values (= true result))
+        (values false
+                (.. "condition '" (tostring criterion.condition)
+                    "' can't be evaluated: " (tostring result))))))
 
 (fn eval-criteria [ctx criteria]
-  "Evaluate all criteria (AND logic). Returns true if all pass."
+  "Whether all criteria pass. Problems evaluating them go to ctx.warn."
   (accumulate [ok true _ c (ipairs (or criteria [])) &until (not ok)]
-    (eval-criterion ctx c)))
+    (let [(passed problem) (eval-criterion ctx c)]
+      (when (and problem ctx.warn)
+        (ctx.warn problem))
+      passed)))
 
 {: eval
+ : expression-type
+ : selector-object?
  : eval-template
  : resolve-expr
  : eval-criterion

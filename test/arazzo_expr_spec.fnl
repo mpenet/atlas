@@ -222,11 +222,15 @@
                   (fn [] (assert.is_true (check "$response.body#/ok"))))
               (it "compares numbers numerically"
                   (fn [] (assert.is_true (check "$response.body#/n < 10"))))
-              (it "raises on malformed conditions"
+              (it "fails malformed conditions, saying why"
                   (fn []
-                    (assert.has.error #(check "$statusCode =="))
-                    (assert.has.error #(check "($statusCode == 200"))
-                    (assert.has.error #(check "$statusCode == 200 junk ==")))))))
+                    (each [_ c (ipairs ["$statusCode =="
+                                        "($statusCode == 200"
+                                        "$statusCode == 200 junk =="])]
+                      (let [(passed why) (expr.eval-criterion ctx
+                                                              {:condition c})]
+                        (assert.is_false passed)
+                        (assert.is_truthy why c))))))))
 
 (describe "ordered comparisons with numeric strings"
           (fn []
@@ -243,9 +247,9 @@
                   (fn [] (assert.is_true (check "$response.body#/n > '3'"))))
               (it "reports a stray null token readably"
                   (fn []
-                    (let [(ok err) (pcall check "$statusCode == 200 null")]
-                      (assert.is_false ok)
-                      (assert.is_truthy (: (tostring err) :find
+                    (let [(passed why) (check "$statusCode == 200 null")]
+                      (assert.is_false passed)
+                      (assert.is_truthy (: (tostring why) :find
                                            "unexpected 'null'" 1 true)))))
               (it "$find accepts a quoted match value"
                   (fn []
@@ -565,9 +569,12 @@
                     (assert.are.equal "7" (expr.eval ctx "$request.path.id"))))
               (it "reject a root that doesn't exist instead of reading nil"
                   (fn []
-                    (assert.has.error #(expr.eval-criterion ctx
-                                                            {:condition "$statuscode == 200"})
-                                      "unknown runtime expression: $statuscode")))
+                    (let [(passed why) (expr.eval-criterion ctx
+                                                            {:condition "$statuscode == 200"})]
+                      (assert.is_false passed)
+                      (assert.is_truthy (: why :find
+                                           "unknown runtime expression: $statuscode"
+                                           1 true)))))
               (it "reject misspelled parts instead of reading nil or too much"
                   (fn []
                     (let [c (doto (collect [k v (pairs ctx)] k v)
@@ -594,3 +601,150 @@
                                      (expr.eval ctx
                                                 {:price "$5"
                                                  :code "$statusCode"})))))))
+
+;; ---- Arazzo 1.1 ----
+
+(fn shop []
+  {:inputs {:sku "b" :limit 2}
+   :response {:status 200
+              :headers {}
+              :body {:items [{:sku "a" :qty 1}
+                             {:sku "b" :qty 5}
+                             {:sku "c" :qty 9}]
+                     :user {:name "Rex"}}}
+   :steps {}
+   :workflows {:prep {:inputs {:zone "de"} :outputs {}}}
+   :outputs {:total 15}
+   :self "https://flows.test/shop.arazzo.yaml"
+   :sources {:shop {:name "shop"
+                    :url "https://api.test/openapi.json"
+                    :type "openapi"}}})
+
+(describe "Selector Objects"
+          (fn []
+            (it "select with JSONPath: one node is its value"
+                (fn []
+                  (assert.are.equal "Rex"
+                                    (expr.eval (shop)
+                                               {:context "$response.body"
+                                                :selector "$.user.name"
+                                                :type "jsonpath"}))))
+            (it "filter by a runtime expression embedded in the selector"
+                (fn []
+                  (assert.are.equal 5
+                                    (expr.eval (shop)
+                                               {:context "$response.body"
+                                                :selector "$.items[?@.sku == '{$inputs.sku}'].qty"
+                                                :type "jsonpath"}))))
+            (it "give an array for several nodes and nothing for none"
+                (fn []
+                  (assert.are.same [5 9]
+                                   (expr.eval (shop)
+                                              {:context "$response.body"
+                                               :selector "$.items[?@.qty > 2].qty"
+                                               :type "jsonpath"}))
+                  (assert.is_nil (expr.eval (shop)
+                                            {:context "$response.body"
+                                             :selector "$.items[?@.qty > 99]"
+                                             :type "jsonpath"}))))
+            (it "select with a JSON Pointer"
+                (fn []
+                  (assert.are.equal "Rex"
+                                    (expr.eval (shop)
+                                               {:context "$response.body"
+                                                :selector "/user/name"
+                                                :type "jsonpointer"}))))
+            (it "take an Expression Type Object, of the versions atlas knows"
+                (fn []
+                  (assert.are.equal "Rex"
+                                    (expr.eval (shop)
+                                               {:context "$response.body"
+                                                :selector "$.user.name"
+                                                :type {:type "jsonpath"
+                                                       :version "rfc9535"}}))
+                  (let [(ok err) (pcall expr.eval (shop)
+                                        {:context "$response.body"
+                                         :selector "$.user.name"
+                                         :type {:type "jsonpath"
+                                                :version "draft-goessner-dispatch-jsonpath-00"}})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "not supported" 1
+                                         true)))
+                  (let [(ok err) (pcall expr.eval (shop)
+                                        {:context "$response.body"
+                                         :selector "/root"
+                                         :type "xpath"})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "XPath" 1 true)))))
+            (it "work inside payloads, and tables that aren't selectors stay data"
+                (fn []
+                  (assert.are.same {:name "Rex"
+                                    :plain {:context "x" :type "y"}}
+                                   (expr.eval (shop)
+                                              {:name {:context "$response.body"
+                                                      :selector "$.user.name"
+                                                      :type "jsonpath"}
+                                               :plain {:context "x" :type "y"}}))))))
+
+(describe "JSONPath criteria"
+          (fn []
+            (let [check #(expr.eval-criterion (shop)
+                                              {:context "$response.body"
+                                               :condition $1
+                                               :type (or $2 "jsonpath")})]
+              (it "pass when the query selects something"
+                  (fn []
+                    (assert.is_true (check "$.items[?@.qty > 8]"))
+                    (assert.is_false (check "$.items[?@.qty > 99]"))
+                    (assert.is_true (check "$[?count(@.*) > 2]"))))
+              (it "embed runtime expressions"
+                  (fn []
+                    (assert.is_true (check "$.items[?@.sku == '{$inputs.sku}']"))))
+              (it "take an Expression Type Object"
+                  (fn []
+                    (assert.is_true (check "$.user"
+                                           {:type "jsonpath"
+                                            :version "rfc9535"}))))
+              (it "fail on a missing context or a malformed query, saying why"
+                  (fn []
+                    (let [(passed why) (check "$.items[?@.qty >]")]
+                      (assert.is_false passed)
+                      (assert.is_truthy (: (tostring why) :find
+                                           "invalid JSONPath" 1 true)))
+                    (assert.is_false (expr.eval-criterion (shop)
+                                                          {:context "$response.body#/nope"
+                                                           :condition "$"
+                                                           :type "jsonpath"}))))
+              (it "report what fails through the context's warn"
+                  (fn []
+                    (let [warnings []
+                          ctx (doto (shop)
+                                (tset :warn #(table.insert warnings $)))]
+                      (assert.is_false (expr.eval-criteria ctx
+                                                           [{:condition "$statuscode == 200"}]))
+                      (assert.are.equal 1 (length warnings))))))))
+
+(describe "Arazzo 1.1 expressions"
+          (fn []
+            (it "embed runtime expressions in regex conditions"
+                (fn []
+                  (assert.is_true (expr.eval-criterion (shop)
+                                                       {:context "$response.body#/user/name"
+                                                        :condition "^{$response.body#/user/name}$"
+                                                        :type :regex}))))
+            (it "resolve $outputs, $workflows inputs, $self and source fields"
+                (fn []
+                  (assert.are.equal 15 (expr.eval (shop) "$outputs.total"))
+                  (assert.are.equal "de"
+                                    (expr.eval (shop)
+                                               "$workflows.prep.inputs.zone"))
+                  (assert.are.equal "https://flows.test/shop.arazzo.yaml"
+                                    (expr.eval (shop) "$self"))
+                  (assert.are.equal "https://api.test/openapi.json/x"
+                                    (expr.eval (shop)
+                                               "{$sourceDescriptions.shop.url}/x"))))
+            (it "refuse AsyncAPI messages"
+                (fn []
+                  (let [(ok err) (pcall expr.eval (shop) "$message.payload")]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "AsyncAPI" 1 true)))))))
