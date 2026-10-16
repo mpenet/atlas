@@ -297,6 +297,9 @@ returns them. The clients of its sources are built on first use."
     (set run-opts.on-step ?on-step)
     (set run-opts.max-gotos p.max-gotos)
     (set run-opts.max-wait (. (retry-options profile p env.config) :max-wait))
+    ;; conditions that can't be evaluated fail; this says why
+    (set run-opts.warn #(io.stderr:write (.. "warning: " (util.printable $)
+                                             "\n")))
     (fn [wf inputs]
       (pcall #(do
                 (when (not clients)

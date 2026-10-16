@@ -1,5 +1,5 @@
-;; ABOUTME: Executes Arazzo 1.0 workflows: resolves source clients and operations,
-;; ABOUTME: runs steps, evaluates criteria and applies success/failure actions.
+;; ABOUTME: Executes Arazzo 1.0 and 1.1 workflows: resolves source clients and
+;; ABOUTME: operations, runs steps, evaluates criteria and applies actions.
 (local atlas (require :atlas))
 
 (local expr (require :atlas.arazzo.expr))
@@ -17,6 +17,8 @@
 
 (local refs (require :atlas.refs))
 
+(local jsonpath (require :atlas.jsonpath))
+
 ;; ---- loading ----
 
 ;; where each loaded document came from and how it was fetched
@@ -30,10 +32,23 @@ refers to."
   (let [fetch-opts {:ssl (?. ?opts :ssl) :timeout (?. ?opts :timeout)}
         (ok parsed) (pcall yaml.decode (http-mod.fetch-text path fetch-opts))]
     (assert ok (.. "failed to parse arazzo document: " (tostring parsed)))
+    (let [version (?. parsed :arazzo)]
+      (when (not (and (= (type version) :string)
+                      (or (version:match "^1%.0%.") (version:match "^1%.1%."))))
+        (error (.. "Arazzo version " (tostring version)
+                   " is not supported (1.0 and 1.1 are)") 0)))
     (when (= (type parsed) :table)
       (tset doc-sources parsed
             {:location path :ssl fetch-opts.ssl :timeout fetch-opts.timeout}))
     parsed))
+
+(fn base-uri [doc ?location]
+  "The URI relative references in doc resolve against: its $self, itself
+relative to where doc came from, else that location."
+  (let [location (or ?location (?. doc-sources doc :location))
+        self (. doc "$self")]
+    (if (and self location) (util.resolve-reference location self)
+        (or self location))))
 
 (fn doc-resolver [doc]
   "$ref resolver for doc, references into other files resolved from its
@@ -88,9 +103,12 @@ declares; records the variables it used in used."
   "Returns {sourceName → atlas-client} for openapi sourceDescriptions.
 Relative source URLs resolve against ?location, the document's own path or URL."
   (let [clients {}
+        base (base-uri doc ?location)
         sources (icollect [_ src (ipairs (or doc.sourceDescriptions []))]
-                  ;; type is optional: anything but arazzo is an OpenAPI source
-                  (when (not= src.type :arazzo) src))]
+                  ;; type is optional: anything but arazzo and asyncapi is an
+                  ;; OpenAPI source
+                  (when (and (not= src.type :arazzo) (not= src.type :asyncapi))
+                    src))]
     (when (and (?. ?opts :base-url) (> (length sources) 1))
       (error (.. "base-url override is ambiguous: the document has "
                  (length sources) " openapi sources") 0))
@@ -100,8 +118,7 @@ Relative source URLs resolve against ?location, the document's own path or URL."
     (let [server-vars (or (?. ?opts :server-vars) {})
           used {}]
       (each [_ src (ipairs sources)]
-        (let [url (if ?location (util.resolve-reference ?location src.url)
-                      src.url)
+        (let [url (if base (util.resolve-reference base src.url) src.url)
               (ok c) (pcall source-client url (or ?opts {}) server-vars used)]
           (when (not ok)
             (error (.. "source '" src.name "': " (tostring c)) 0))
@@ -178,6 +195,7 @@ Expression format: '{$sourceDescriptions.NAME.url}#/paths/~1foo/method'"
           :path (tset result.path p.name v)
           :query (tset result.query p.name v)
           :header (tset result.headers (p.name:lower) v)
+          :querystring (tset result :querystring (tostring v))
           :cookie (table.insert cookies
                                 (.. p.name "="
                                     (tostring (http-mod.header-value (.. "cookie "
@@ -212,6 +230,31 @@ way are created)."
     (tset node (slot node last pointer) new)
     value))
 
+(fn set-at-path [value path new]
+  "value with the node at path (member names and 0-based indexes, as JSONPath
+gives them) set to new."
+  (var node value)
+  (for [i 1 (- (length path) 1)]
+    (let [k (. path i)]
+      (set node (. node (if (= (type k) :number) (+ k 1) k)))))
+  (let [k (. path (length path))]
+    (if (= nil k) new (do
+                        (tset node (if (= (type k) :number) (+ k 1) k) new)
+                        value))))
+
+(fn replace [body r value]
+  "body with replacement r's value set at its target: a JSON Pointer, or with
+targetSelectorType jsonpath every node the query selects."
+  (match (expr.expression-type (or r.targetSelectorType :jsonpointer))
+    :jsonpointer (set-at-pointer body r.target value)
+    :jsonpath (let [nodes (jsonpath.query r.target body)]
+                (when (= nil (next nodes))
+                  (error (.. "replacement target " r.target " selects nothing")
+                         0))
+                (accumulate [b body _ node (ipairs nodes)]
+                  (set-at-path b node.path value)))
+    kind (error (.. "a replacement target can't be of type " kind) 0)))
+
 (fn copy [v]
   "A deep copy of decoded JSON v, arrays still arrays."
   (if (or (not= (type v) :table) (= v json.null)) v
@@ -221,11 +264,11 @@ way are created)."
   "The step's body: the evaluated payload with its replacements applied (to
 a copy: the payload may be an input or another step's data)."
   (let [body (copy (expr.eval ctx request-body.payload))]
-    (each [_ r (ipairs (or request-body.replacements []))]
-      (assert (= (type body) :table)
-              "requestBody replacements need a structured payload")
-      (set-at-pointer body r.target (expr.eval ctx r.value)))
-    body))
+    (accumulate [b body _ r (ipairs (or request-body.replacements []))]
+      (do
+        (assert (= (type b) :table)
+                "requestBody replacements need a structured payload")
+        (replace b r (expr.eval ctx r.value))))))
 
 (fn resolve-outputs [ctx outputs]
   (let [result {}]
@@ -252,7 +295,9 @@ Returns the response, or (nil message) when the request failed in transport."
                                   (?. step :requestBody :contentType)))
                  :path resolved.path
                  :query (when (next resolved.query) resolved.query)
-                 :timeout step.timeout}]
+                 :querystring resolved.querystring
+                 ;; milliseconds in Arazzo, seconds for requests
+                 :timeout (when step.timeout (/ step.timeout 1000))}]
     (when (not op)
       (error (.. "step '" step-id "': operation not found: " (tostring op-ref))))
     (tset request :method (op.method:upper))
@@ -401,6 +446,15 @@ must succeed."
       (error (.. "step '" retried.stepId "': retry step "
                  (failure-message step-id outcome)) 0))))
 
+(fn action-inputs [run action]
+  "The inputs of the workflow an action goes to: its parameters, else the
+current workflow's inputs."
+  (if action.parameters
+      (collect [_ p (ipairs (expand-references run.doc action.parameters))]
+        p.name
+        (expr.eval run.ctx p.value))
+      run.inputs))
+
 (fn goto-action [run action step]
   "Index of the step a goto action continues at."
   (let [target (or action.stepId action.workflowId)
@@ -413,7 +467,7 @@ must succeed."
         (or (. run.step-index action.stepId)
             (error (.. "goto: unknown step: " action.stepId) 0))
         (do
-          (run.run-sub action.workflowId run.inputs)
+          (run.run-sub action.workflowId (action-inputs run action))
           (+ (length run.steps) 1)))))
 
 (fn retry-action [run action i step]
@@ -423,7 +477,7 @@ must succeed."
       (tset run.retry-counts step.stepId n)
       (wait-before-retry run action.retryAfter)
       (when action.workflowId
-        (run.run-sub action.workflowId run.inputs))
+        (run.run-sub action.workflowId (action-inputs run action)))
       (when action.stepId
         (run-step-first run action.stepId step))
       i)))
@@ -463,12 +517,48 @@ nil when a failure is left unhandled."
         (tset given name prop.default)))
     given))
 
+(fn check-steps [doc wf]
+  "Raise for steps atlas can't run: AsyncAPI ones (sending and receiving
+messages), and a dependsOn that sequential execution can't satisfy."
+  (let [index (collect [i s (ipairs (or wf.steps []))]
+                s.stepId
+                i)
+        async-sources (collect [_ src (ipairs (or doc.sourceDescriptions []))]
+                        (when (= src.type :asyncapi) (values src.name true)))]
+    (each [i step (ipairs (or wf.steps []))]
+      (let [source (when (= (type step.operationId) :string)
+                     (step.operationId:match "^%$sourceDescriptions%.([^%.]+)%."))]
+        (when (or step.action step.channelPath step.correlationId
+                  (and source (. async-sources source)))
+          (error (.. "step '" (tostring step.stepId)
+                     "': AsyncAPI steps are not supported") 0)))
+      (each [_ dep (ipairs (or step.dependsOn []))]
+        ;; steps of other workflows or documents are referred to with $
+        (when (not (dep:match "^%$"))
+          (let [j (or (. index dep)
+                      (error (.. "step '" step.stepId
+                                 "' depends on unknown step '" dep "'")
+                             0))]
+            (when (> j i)
+              (error (.. "step '" step.stepId "' depends on step '" dep
+                         "', which runs after it") 0))))))))
+
 (fn run-workflow [doc workflow-id given-inputs clients ?opts]
   (let [wf (or (find-workflow doc workflow-id)
                (error (.. "workflow not found: " workflow-id) 0))
         opts (enter-workflow workflow-id ?opts)
+        _ (check-steps doc wf)
         inputs (with-input-defaults doc wf given-inputs)
-        ctx {:inputs inputs :request nil :response nil :steps {} :workflows {}}
+        ctx {:inputs inputs
+             :request nil
+             :response nil
+             :steps {}
+             :workflows {}
+             :warn opts.warn
+             :self (base-uri doc)
+             :sources (collect [_ src (ipairs (or doc.sourceDescriptions []))]
+                        src.name
+                        src)}
         run {: doc
              : wf
              : clients
@@ -489,7 +579,8 @@ nil when a failure is left unhandled."
                                                 opts)]
                           (each [k v (pairs sub.ctx.workflows)]
                             (tset ctx.workflows k v))
-                          (tset ctx.workflows sub-id {:outputs sub.outputs})
+                          (tset ctx.workflows sub-id
+                                {:outputs sub.outputs :inputs sub.inputs})
                           sub))}
         step-order []]
     ;; workflows listed in dependsOn run first, once each, with the same inputs
@@ -511,10 +602,11 @@ nil when a failure is left unhandled."
         (set i
              (or (next-index run i step success?)
                  (error (failure-message step.stepId outcome) 0)))))
-    {: ctx
-     :outputs (resolve-outputs ctx wf.outputs)
-     :steps ctx.steps
-     : step-order}))
+    ;; $outputs refers to the workflow's own outputs
+    (set ctx.outputs {})
+    (each [k v (pairs (or wf.outputs {}))]
+      (tset ctx.outputs k (expr.eval ctx v)))
+    {: ctx : inputs :outputs ctx.outputs :steps ctx.steps : step-order}))
 
 ;; ---- introspection ----
 

@@ -904,3 +904,18 @@
                     (assert.is_false ok)
                     (assert.is_truthy (: (tostring err) :find
                                          "unknown server variable 'nope'" 1 true)))))))
+
+(describe "querystring"
+          (fn []
+            (it "is sent as the whole query string"
+                (fn []
+                  (let [(http calls) (mock-http)
+                        c (atlas.client (schema {"/items" {:get {:operationId "listItems"}}}
+                                                "https://api.test")
+                                        {:http-fn http})]
+                    (c.list-items.invoke {:querystring "a=1&b=x%20y"})
+                    (assert.are.equal "https://api.test/items?a=1&b=x%20y"
+                                      (. calls 1 :url))
+                    (assert.is_nil (. calls 1 :query))
+                    (assert.are.equal "https://api.test/items?a=1&b=x%20y"
+                                      (c.list-items.url-for {:querystring "a=1&b=x%20y"})))))))

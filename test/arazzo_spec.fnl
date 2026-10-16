@@ -1451,3 +1451,187 @@
                     (assert.is_false ok)
                     (assert.is_truthy (: (tostring err) :find
                                          "workflow cycle: w -> w" 1 true)))))))
+
+;; ---- Arazzo 1.1 ----
+
+(fn recording-client [routes]
+  "A fake client whose operations answer from routes {operationId (fn [req])}
+and record their requests in the returned list."
+  (let [seen []]
+    (values (collect [id f (pairs routes)]
+              (.. "op-" id)
+              {:operation-id id
+               :method "get"
+               :url-for #(.. "https://api.test/" id)
+               :invoke (fn [req]
+                         (table.insert seen [id req])
+                         (f req))}) seen)))
+
+(describe "Arazzo 1.1 workflows"
+          (fn []
+            (it "look up an id by name with a selector, then use it"
+                (fn []
+                  (let [(client seen) (recording-client {:listTemplates #(ok-resp {:templates [{:id "t1"
+                                                                                                :name "Debian"}
+                                                                                               {:id "t2"
+                                                                                                :name "Ubuntu"}]})
+                                                         :create #(ok-resp {:id "vm1"})})
+                        doc {:arazzo "1.1.0"
+                             :info {}
+                             :workflows [{:workflowId "wf"
+                                          :steps [{:stepId "find"
+                                                   :operationId "listTemplates"
+                                                   :outputs {:id {:context "$response.body"
+                                                                  :selector "$.templates[?@.name == '{$inputs.template}'].id"
+                                                                  :type "jsonpath"}}}
+                                                  {:stepId "make"
+                                                   :operationId "create"
+                                                   :requestBody {:payload {:template {:id "$steps.find.outputs.id"}}}}]
+                                          :outputs {:vm "$steps.make.outputs.vm"}}]}]
+                    (arazzo.run-workflow doc "wf" {:template "Ubuntu"}
+                                         {:api client} {})
+                    (assert.are.same {:template {:id "t2"}} (. seen 2 2 :body)))))
+            (it "replace with a JSONPath target, every node it selects"
+                (fn []
+                  (let [(client seen) (recording-client {:op #(ok-resp {})})
+                        json (require :atlas.json)]
+                    (arazzo.run-workflow (one-step-doc {:operationId "op"
+                                                        :requestBody {:payload {:items (json.array [{:sku "a"
+                                                                                                     :qty 1}
+                                                                                                    {:sku "b"
+                                                                                                     :qty 2}])}
+                                                                      :replacements [{:target "$.items[?@.sku == 'b'].qty"
+                                                                                      :targetSelectorType "jsonpath"
+                                                                                      :value 7}]}})
+                                         "wf" {} {:api client} {})
+                    (assert.are.same [{:sku "a" :qty 1} {:sku "b" :qty 7}]
+                                     (. seen 1 2 :body :items))
+                    (let [(ok err) (pcall arazzo.run-workflow
+                                          (one-step-doc {:operationId "op"
+                                                         :requestBody {:payload {:a 1}
+                                                                       :replacements [{:target "$.nope"
+                                                                                       :targetSelectorType "jsonpath"
+                                                                                       :value 7}]}})
+                                          "wf" {} {:api client} {})]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "selects nothing" 1 true))))))
+            (it "pass parameters to the workflow an action goes to"
+                (fn []
+                  (let [(client seen) (recording-client {:op #(ok-resp {} 503)
+                                                         :other #(ok-resp {})})
+                        doc {:arazzo "1.1.0"
+                             :info {}
+                             :workflows [{:workflowId "wf"
+                                          :steps [{:stepId "s1"
+                                                   :operationId "op"
+                                                   :successCriteria [{:condition "$statusCode == 200"}]
+                                                   :onFailure [{:name "fallback"
+                                                                :type :goto
+                                                                :workflowId "other"
+                                                                :parameters [{:name "reason"
+                                                                              :value "$statusCode"}]}]}]}
+                                         {:workflowId "other"
+                                          :steps [{:stepId "o1"
+                                                   :operationId "other"
+                                                   :parameters [{:name "why"
+                                                                 :in "query"
+                                                                 :value "$inputs.reason"}]}]}]}]
+                    (arazzo.run-workflow doc "wf" {} {:api client} {})
+                    (assert.are.same {:why 503} (. seen 2 2 :query)))))
+            (it "send a querystring parameter as the whole query"
+                (fn []
+                  (let [(client seen) (recording-client {:op #(ok-resp {})})]
+                    (arazzo.run-workflow (one-step-doc {:operationId "op"
+                                                        :parameters [{:name "q"
+                                                                      :in "querystring"
+                                                                      :value "a=1&b={$inputs.b}"}]})
+                                         "wf" {:b "x y"} {:api client} {})
+                    (assert.are.equal "a=1&b=x y" (. seen 1 2 :querystring)))))
+            (it "take a step's timeout in milliseconds"
+                (fn []
+                  (let [(client seen) (recording-client {:op #(ok-resp {})})]
+                    (arazzo.run-workflow (one-step-doc {:operationId "op"
+                                                        :timeout 1500})
+                                         "wf" {} {:api client} {})
+                    (assert.are.equal 1.5 (. seen 1 2 :timeout)))))
+            (it "refuse a step that depends on a later step"
+                (fn []
+                  (let [(client) (recording-client {:op #(ok-resp {})})
+                        doc {:arazzo "1.1.0"
+                             :info {}
+                             :workflows [{:workflowId "wf"
+                                          :steps [{:stepId "a"
+                                                   :operationId "op"
+                                                   :dependsOn ["b"]}
+                                                  {:stepId "b"
+                                                   :operationId "op"}]}]}
+                        (ok err) (pcall arazzo.run-workflow doc "wf" {}
+                                        {:api client} {})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "depends on step 'b', which runs after it"
+                                         1 true)))))
+            (it "refuse AsyncAPI steps"
+                (fn []
+                  (let [(client) (recording-client {:op #(ok-resp {})})
+                        (ok err) (pcall arazzo.run-workflow
+                                        (one-step-doc {:operationId "op"
+                                                       :action "send"})
+                                        "wf" {} {:api client} {})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find "AsyncAPI" 1 true)))))
+            (it "report conditions that can't be evaluated through :warn"
+                (fn []
+                  (let [(client) (recording-client {:op #(ok-resp {})})
+                        warnings []
+                        doc (one-step-doc {:operationId "op"})]
+                    (set (. doc.workflows 1 :steps 1 :successCriteria)
+                         [{:condition "$statuscode == 200"}])
+                    (assert.is_false (pcall arazzo.run-workflow doc "wf" {}
+                                            {:api client}
+                                            {:warn #(table.insert warnings $)}))
+                    (assert.are.equal 1 (length warnings)))))))
+
+(describe "Arazzo documents"
+          (fn []
+            (it "load versions 1.0 and 1.1 only"
+                (fn []
+                  (each [version ok (pairs {"1.0.1" true
+                                            "1.1.0" true
+                                            "1.1.7" true
+                                            "2.0.0" false
+                                            "0.9" false})]
+                    (let [file (.. (os.tmpname) ".json")]
+                      (with-open [f (io.open file :w)]
+                        (f:write (.. "{\"arazzo\":\"" version
+                                     "\",\"info\":{},\"sourceDescriptions\":[],\"workflows\":[]}")))
+                      (let [(loaded err) (pcall arazzo.load-doc file)]
+                        (os.remove file)
+                        (assert.are.equal ok loaded version)
+                        (when (not ok)
+                          (assert.is_truthy (: (tostring err) :find
+                                               "not supported" 1 true))))))))
+            (it "resolve sources against $self"
+                (fn []
+                  (let [doc {:arazzo "1.1.0"
+                             ;; absolute: it is the base whatever the location
+                             "$self" (.. (os.getenv "PWD")
+                                         "/test/fixtures/flow.arazzo.json")
+                             :info {}
+                             :sourceDescriptions [{:name "pets"
+                                                   :type "openapi"
+                                                   :url "./petstore.yaml"}]
+                             :workflows []}]
+                    (assert.is_not_nil (. (arazzo.build-clients doc {}
+                                                                "elsewhere/x.json")
+                                          :pets)))))
+            (it "leave AsyncAPI sources out of the clients"
+                (fn []
+                  (let [doc {:arazzo "1.1.0"
+                             :info {}
+                             :sourceDescriptions [{:name "events"
+                                                   :type "asyncapi"
+                                                   :url "./nowhere.yaml"}]
+                             :workflows []}]
+                    (assert.are.same {} (arazzo.build-clients doc {})))))))

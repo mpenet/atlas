@@ -97,13 +97,15 @@ then the body when the operation has one, then an opts table."
                                   ;; declared with content instead of schema
                                   :json (util.json-content? p)})))
         url-for (fn [?req]
-                  "Full request URL for {:path {name v} :query {}}."
-                  (let [req (or ?req {})]
-                    (util.append-query (operation-url client-opts.base-url path
-                                                      req)
-                                       (or req.query {}) query-styles)))
+                  "Full request URL for {:path {name v} :query {}}, or with
+:querystring the whole query string as given."
+                  (let [req (or ?req {})
+                        url (operation-url client-opts.base-url path req)]
+                    (if req.querystring (.. url "?" req.querystring)
+                        (util.append-query url (or req.query {}) query-styles))))
         invoke (fn [?req]
-                 "Call the operation with {:path {name v} :query {} :headers {} :body v :timeout n}."
+                 "Call the operation with {:path {name v} :query {} :headers {} :body v :timeout n},
+or :querystring for the whole query string (OpenAPI 3.2)."
                  (let [req (or ?req {})]
                    (client-opts.http-fn {:body req.body
                                          ;; no Content-Type without a body
@@ -116,13 +118,19 @@ then the body when the operation has one, then an opts table."
                                                                  (or req.headers
                                                                      {}))
                                          :method (method:upper)
-                                         :query req.query
+                                         ;; a querystring is the whole query
+                                         :query (when (not req.querystring)
+                                                  req.query)
                                          : query-styles
                                          :ssl client-opts.ssl
                                          :timeout (or req.timeout
                                                       client-opts.timeout)
-                                         :url (operation-url client-opts.base-url
-                                                             path req)})))
+                                         :url (if req.querystring
+                                                  (.. (operation-url client-opts.base-url
+                                                                     path req)
+                                                      "?" req.querystring)
+                                                  (operation-url client-opts.base-url
+                                                                 path req))})))
         param-names (util.extract-path-params path)]
     (setmetatable {:body-schema (?. op-spec :requestBody :content declared-type
                                     :schema)

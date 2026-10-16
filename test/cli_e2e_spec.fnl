@@ -641,6 +641,25 @@ does, which a streaming transport hands over one by one."
                                                                              {:name "Rex"})})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "name: Rex" r.out))))
+            (it "says why a condition can't be evaluated"
+                (fn []
+                  (let [json (require :atlas.json)
+                        flow (with-open [f (io.open "test/fixtures/cli-flow.arazzo.json")]
+                               (json.decode (f:read :*a)))
+                        file (.. (os.tmpname) ".json")]
+                    (set (. flow :workflows 1 :steps 1 :successCriteria)
+                         [{:condition "$statuscode == 200"}])
+                    (set (. flow :sourceDescriptions 1 :url)
+                         (.. (os.getenv "PWD") "/test/fixtures/cli-api.json"))
+                    (with-open [f (io.open file :w)]
+                      (f:write (json.encode flow)))
+                    (let [r (atlas-run ["az" file "fetchPet" "-i" "id=7"]
+                                       {"GET https://api.test/pets/7" (respond 200
+                                                                               {:name "Rex"})})]
+                      (os.remove file)
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find "warning: condition '$statuscode == 200' can't be evaluated"
+                                                    1 true))))))
             (it "prints outputs as a table row"
                 (fn []
                   (let [r (atlas-run ["az"
