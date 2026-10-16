@@ -6,10 +6,10 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 
 ### Changed
 
-- `--arazzo-output progress` prints a line per step once its success criteria are checked: `✓` or `✗`, its position (`2/5`), what it calls, its time and the response's status. A step polled with `goto` or `retry` stays on one `↻` line with the wait and the criterion that failed, then ends with the number of attempts and the total time; the steps of a workflow run by a step are indented. On a terminal, lines are updated in place and fit its width. Step outputs are no longer printed there; `steps` and `full` print them.
-- A failed workflow says which criterion failed and the values it compared: `step 'find' failed: $statusCode == 200 ($statusCode is 404); HTTP 404 {…}`, the body shortened to 500 characters.
+- `--arazzo-output progress` prints a line per step once its success criteria are checked: `✓` or `✗`, its position (`2/5`), what it calls, its time and the response's status. A step polled with `goto` or `retry` stays on one `↻` line with the wait and the criterion that failed, then ends with the number of attempts and the total time; the steps of a workflow run by another one are indented. On a terminal, lines are updated in place and fit its width. Step outputs are no longer printed there; `steps` and `full` print them.
+- A failed workflow says which criterion failed and the values it compared: `step 'find' failed: $statusCode == 200 ($statusCode is 404); HTTP 404 {…}`, the body shortened to 500 characters. Warnings no longer land on a step's line while it is updated in place.
 - The library's `on-step` events: `:workflow` when a workflow starts, `:running`, `:done` after the step's criteria are checked (with `:passed`, `:failure` and `:error`) and `:action`; each carries the workflow, its depth, and the step's index, count and attempt.
-- In an Arazzo payload, an object whose members all resolve to nothing (inputs that aren't given) is left out, like a single member, rather than sent empty; an object written as `{}` is still sent.
+- In an Arazzo payload, an object member whose own members all resolve to nothing (inputs that aren't given) is left out, like a single member, rather than sent empty. The payload itself, array elements and objects written as `{}` stay objects.
 
 ### Fixed
 

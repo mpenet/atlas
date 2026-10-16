@@ -34,6 +34,11 @@ GET /pets/{id} for an operationPath, workflow ID for a workflow."
                  (pick-values 1 (: (path:gsub "~1" "/") :gsub "~0" "~")))
         ref)))
 
+(fn one-line [s]
+  "s made safe for a line of progress: control characters escaped, and line
+breaks and tabs as spaces, so a line rewritten in place stays one line."
+  (pick-values 1 (: (util.printable (tostring s)) :gsub "[\n\t]" " ")))
+
 (fn pad [s n]
   (.. s (string.rep " " (- n (width.of s)))))
 
@@ -77,9 +82,9 @@ free; color codes are kept and take no room."
             (.. "goto workflow " (tostring a.workflowId))))))
 
 (fn reporter [{: write : tty : color : columns : clock}]
-  "{:on-step :finish}: on-step takes the events of atlas.arazzo's :on-step and
-writes their progress with write; finish (ok workflow-id seconds) ends with
-the workflow's line. On a terminal (tty), the line of a running or polled step
+  "{:on-step :warn :finish}: on-step takes the events of atlas.arazzo's
+:on-step and writes their progress with write; warn writes a warning on a line
+of its own; finish (ok workflow-id seconds) ends with the workflow's line. On a terminal (tty), the line of a running or polled step
 is rewritten in place, cut to the terminal's columns when given."
   (let [clock (or clock socket.gettime)
         paint #(pretty.paint $1 $2 color)
@@ -89,13 +94,18 @@ is rewritten in place, cut to the terminal's columns when given."
     (var held nil)
     (var pending nil)
 
+    (fn end-pending []
+      "End the line kept on a terminal, leaving its header."
+      (when pending
+        (write (.. "\r\27[K" pending.header "\n"))
+        (set pending nil)))
+
     (fn show [text slot ?header]
       "Write a line; with ?header, a line kept on a terminal until the next
 one, which replaces it when it is about the same step (slot), and otherwise
 leaves ?header in its place."
       (when (and pending (not= pending.slot slot))
-        (write (.. "\r\27[K" pending.header "\n"))
-        (set pending nil))
+        (end-pending))
       (if (not tty) (write (.. text "\n")) ?header
           (do
             (write (.. "\r\27[K" (if columns (fit text columns) text)))
@@ -109,8 +119,8 @@ leaves ?header in its place."
             n (tostring e.count)]
         (.. (string.rep "  " (or e.depth 0)) mark " "
             (string.rep " " (- (length n) (length (tostring e.index)))) e.index
-            "/" n " " (pad (util.printable (tostring e.step)) w.id) "  "
-            (pad (util.printable (op-name e.op-ref e.calls)) w.op))))
+            "/" n " " (pad (one-line e.step) w.id) "  "
+            (pad (one-line (op-name e.op-ref e.calls)) w.op))))
 
     (fn status-text [e]
       (let [status (?. e :response :status)]
@@ -147,9 +157,9 @@ leaves ?header in its place."
             done (when (and held (= (.. held.workflow ":" held.step) slot))
                    held)
             again (same-step-again? e)
-            extra (util.printable (if (?. done :failure)
-                                      (.. (action-text e) " · " done.failure)
-                                      (action-text e)))]
+            extra (one-line (if (?. done :failure)
+                                (.. (action-text e) " · " done.failure)
+                                (action-text e)))]
         (if done
             (do
               (set held nil)
@@ -178,17 +188,17 @@ leaves ?header in its place."
             (do
               (tset streaks slot {:start e.at :first e.attempt})
               (when tty
-                (let [header (head e (paint :dim "→"))]
-                  (show (.. header "  …") slot header)))))
+                (let [line (head e (paint :dim "→"))]
+                  (show (.. line "  …") slot
+                        (pick-values 1 (line:gsub "%s+$" "")))))))
         (tset looping slot nil)))
 
     {:on-step (fn [e]
                 (match e.status
                   :workflow (let [names (icollect [_ s (ipairs e.steps)]
-                                          (util.printable (tostring s.step)))
+                                          (one-line s.step))
                                   ops (icollect [_ s (ipairs e.steps)]
-                                        (util.printable (op-name s.op-ref
-                                                                 s.calls)))]
+                                        (one-line (op-name s.op-ref s.calls)))]
                               (tset widths e.workflow
                                     {:id (accumulate [m 0 _ s (ipairs names)]
                                            (math.max m (width.of s)))
@@ -204,13 +214,14 @@ leaves ?header in its place."
                   :action (do
                             (set e.at (clock))
                             (on-action e))))
+     :warn (fn [message]
+             (end-pending)
+             (write (.. "warning: " (util.printable (tostring message)) "\n")))
      :finish (fn [ok workflow-id seconds]
                (flush-held)
-               (when pending
-                 (write (.. "\r\27[K" pending.header "\n"))
-                 (set pending nil))
+               (end-pending)
                (write (.. (if ok (paint :ok "✓") (paint :fail "✗"))
-                          " workflow " (util.printable (tostring workflow-id))
+                          " workflow " (one-line workflow-id)
                           (if ok "" " failed") "  " (duration seconds) "\n")))}))
 
 {: reporter : duration}

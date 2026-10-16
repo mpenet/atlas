@@ -555,6 +555,18 @@
                                       :n "$inputs.n"})]
                     (assert.are.equal "{\"ids\":[1,2],\"n\":1,\"tags\":[]}"
                                       (json.encode v)))))
+            (it "keeps a whole payload, and array elements, whose members resolve to nothing"
+                (fn []
+                  (assert.are.equal "{}"
+                                    (json.encode (expr.eval {:inputs {}}
+                                                            {:name "$inputs.name"})))
+                  (assert.are.equal "[{}]"
+                                    (json.encode (expr.eval {:inputs {}}
+                                                            (json.array [{:name "$inputs.tag"}]))))))
+            (it "cuts long text between characters"
+                (fn []
+                  (assert.are.equal "éé…" (expr.cut "ééé" 2))
+                  (assert.are.equal "éé" (expr.cut "éé" 2))))
             (it "leaves out an object whose members all resolve to nothing"
                 (fn []
                   (let [v (expr.eval {:inputs {:n 1}}

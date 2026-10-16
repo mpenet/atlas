@@ -261,9 +261,10 @@ another origin); files directly."
                                     client-opts.authorize)})
         (atlas.load-schema location opts))))
 
-(fn workflow-runner [{: doc : file : profile-name : profile} p env ?on-step]
+(fn workflow-runner [{: doc : file : profile-name : profile} p env ?reporter]
   "A function running a workflow of doc with its inputs: (ok result) as pcall
-returns them. The clients of its sources are built on first use."
+returns them, reporting progress to ?reporter. The clients of its sources are
+built on first use."
   (let [
         ;; merged pages would change what step expressions like $response.body#/0 refer to
         p (doto (collect [k v (pairs p)] k v)
@@ -273,12 +274,13 @@ returns them. The clients of its sources are built on first use."
                                  env.transport)]
     (var clients nil)
     (set run-opts.load-schema (source-schema-loader env run-opts verbose))
-    (set run-opts.on-step ?on-step)
+    (set run-opts.on-step (?. ?reporter :on-step))
     (set run-opts.max-gotos p.max-gotos)
     (set run-opts.max-wait (. (retry-options profile p env.config) :max-wait))
     ;; conditions that can't be evaluated fail; this says why
-    (set run-opts.warn #(io.stderr:write (.. "warning: " (util.printable $)
-                                             "\n")))
+    (set run-opts.warn (or (?. ?reporter :warn)
+                           #(io.stderr:write (.. "warning: " (util.printable $)
+                                                 "\n"))))
     (fn [wf inputs]
       (pcall #(do
                 (when (not clients)
@@ -295,11 +297,14 @@ returns them. The clients of its sources are built on first use."
         reporter (when (or (= mode :progress) (= mode :full))
                    (progress.reporter {:write #(io.stderr:write $)
                                        :tty (and stderr-terminal (not verbose))
+                                       ;; unknown, a common width: the
+                                       ;; lines rewritten in place must not wrap
                                        :columns (when stderr-terminal
-                                                  (util.terminal-columns))
+                                                  (or (util.terminal-columns)
+                                                      80))
                                        :color (and stderr-terminal
                                                    (not no-color))}))
-        run (workflow-runner context p env (?. reporter :on-step))]
+        run (workflow-runner context p env reporter)]
     (let [t0 (socket.gettime)
           (ok result) (run wf inputs)]
       (when reporter

@@ -90,7 +90,7 @@ Each line gives the step's position, its id, what it calls, how long it took and
 ✓ 4/5 wait  get-operation  7 attempts · 21.4s  200
 ```
 
-On a terminal, a step's line is updated in place while it runs and while it polls, cut to the terminal's width; in a log, each attempt gets its own line. The steps of a workflow run by a step are indented under it.
+On a terminal, a step's line is updated in place while it runs and while it polls, cut to the terminal's width; in a log, each attempt gets its own line. The steps of a workflow run by another one (a step, `dependsOn` or a `goto`) are indented.
 
 A failed workflow ends with `✗ workflow NAME failed` and the reason: the step, the criterion that failed with the values it compared, and the response's status and body (shortened). atlas exits 1. `-v` shows progress as well and logs every request, credentials redacted. Outputs use the `--output` format.
 
@@ -124,7 +124,7 @@ A short reference of what atlas supports. The [Arazzo specification](https://spe
 
 ### Steps
 
-A step calls an operation, named by `operationId` (written `$sourceDescriptions.NAME.ID` when several sources define the same id) or `operationPath`, or runs another workflow with `workflowId`. Its `parameters` fill path, query, header and cookie parameters (`in` is required), or the whole query string with `in: querystring`; step parameters replace workflow-level parameters with the same `name` and `in`. `requestBody` gives the body: `payload` (with runtime expressions anywhere inside), `contentType` to override the operation's, and `replacements`, each setting the value at a JSON pointer `target` in the payload, or at every node a JSONPath `target` selects with `targetSelectorType: jsonpath` (one that selects nothing is an error). A `null` in a payload array is sent as `null`; an object member written as `null` in the document is left out, and so is a member whose expression resolves to nothing (an input that isn't given), or an object whose members all do: `ssh-key: {name: $inputs.ssh-key}` is left out without an `ssh-key` input. An object written as `{}` is sent as `{}`.
+A step calls an operation, named by `operationId` (written `$sourceDescriptions.NAME.ID` when several sources define the same id) or `operationPath`, or runs another workflow with `workflowId`. Its `parameters` fill path, query, header and cookie parameters (`in` is required), or the whole query string with `in: querystring`; step parameters replace workflow-level parameters with the same `name` and `in`. `requestBody` gives the body: `payload` (with runtime expressions anywhere inside), `contentType` to override the operation's, and `replacements`, each setting the value at a JSON pointer `target` in the payload, or at every node a JSONPath `target` selects with `targetSelectorType: jsonpath` (one that selects nothing is an error). A `null` in a payload array is sent as `null`; an object member written as `null` in the document is left out, and so is a member whose expression resolves to nothing (an input that isn't given), or a member object whose own members all do: `ssh-key: {name: $inputs.ssh-key}` is left out without an `ssh-key` input. The payload itself, array elements and objects written as `{}` stay objects (`{}`).
 
 `timeout` is the step's request timeout in milliseconds. `dependsOn` lists steps that must run before this one; steps run in order, so a step depending on a later one is an error.
 

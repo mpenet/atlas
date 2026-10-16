@@ -199,6 +199,16 @@ extensions; any other table is data."
 
 (var eval nil)
 
+(fn eval-member [ctx v]
+  "The value of an object member: an object whose members all resolve to
+nothing is nothing too, so optional inputs can fill nested objects. A
+payload, an array element and an object written as {} stay objects."
+  (let [value (eval ctx v)]
+    (when (not (and (= (type v) :table) (not= v json.null)
+                    (not (json.array? v)) (not (selector-object? v)) (next v)
+                    (= (type value) :table) (= nil (next value))))
+      value)))
+
 (fn eval-selector [ctx obj]
   "What a Selector Object selects: a JSONPath query's single node is its value,
 several nodes an array of their values, none nil. Runtime expressions may be
@@ -234,14 +244,10 @@ and stays as is."
                               (match (eval ctx (. expr i))
                                 nil json.null
                                 v v)))
-                ;; an object whose members all resolve to nothing is nothing
-                ;; too, so optional inputs can fill nested objects; {} stays
                 (= (type expr) :table)
-                (let [v (collect [k v (pairs expr)]
-                          k
-                          (eval ctx v))]
-                  (when (or (next v) (not (next expr)))
-                    v))
+                (collect [k v (pairs expr)]
+                  k
+                  (eval-member ctx v))
                 expr)))
 
 ;; ---- simple condition language ----
@@ -486,18 +492,18 @@ go to ctx.warn."
 ;; values longer than this are cut in explanations
 (local shown-length 60)
 
+(fn cut [text max-length]
+  "text cut to max-length characters with …, between characters (bytes when
+it isn't UTF-8)."
+  (let [n (utf8.len text)]
+    (if (<= (or n (length text)) max-length) text
+        (.. (text:sub 1 (if n (- (utf8.offset text (+ max-length 1)) 1)
+                            max-length)) "…"))))
+
 (fn brief [v ?max-length]
   "v as JSON text of at most ?max-length characters (60 by default), cut with
 …, for a person reading why a criterion failed; missing for nil."
-  (let [max-length (or ?max-length shown-length)]
-    (if (= v nil) "missing"
-        (let [text (json.encode v)
-              ;; cut between characters, or bytes when it isn't UTF-8
-              cut (if (utf8.len text)
-                      (when (> (utf8.len text) max-length)
-                        (- (utf8.offset text (+ max-length 1)) 1))
-                      (when (> (length text) max-length) max-length))]
-          (if cut (.. (text:sub 1 cut) "…") text)))))
+  (if (= v nil) "missing" (cut (json.encode v) (or ?max-length shown-length))))
 
 (fn explain-criterion [ctx criterion]
   "Why criterion doesn't pass, for a person: a simple condition with the values
@@ -527,5 +533,6 @@ value, or why it can't be evaluated."
  : failing-criterion
  : explain-criterion
  : brief
+ : cut
  : eval-criteria
  : json-pointer}

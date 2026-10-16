@@ -376,6 +376,36 @@ lines ended so far, then the current one if it isn't empty."
                       (assert.is_truthy (visible:find "…$"))
                       ;; colors are closed
                       (assert.is_truthy (line:find "\027%[0m$"))))))
+            (it "keeps a line rewritten in place on one line"
+                (fn []
+                  (let [term (screen)
+                        reporter (progress.reporter {:write term.write
+                                                     :tty true
+                                                     :clock #0})]
+                    (reporter.on-step (. polling 1))
+                    (reporter.on-step (. polling 2))
+                    (reporter.on-step (doto (collect [k v (pairs (. polling 3))]
+                                              k
+                                              v)
+                                        (tset :failure
+                                              "$statusCode == 201\n\tand more")))
+                    (reporter.on-step (. polling 4))
+                    (let [[line & more] (term.lines)]
+                      (assert.are.same [] more)
+                      (assert.is_truthy (line:find "$statusCode == 201  and more"
+                                                   1 true))))))
+            (it "ends the line it is rewriting before a warning"
+                (fn []
+                  (let [term (screen)
+                        reporter (progress.reporter {:write term.write
+                                                     :tty true
+                                                     :clock #0})]
+                    (reporter.on-step (. two-steps 1))
+                    (reporter.on-step (. two-steps 2))
+                    (reporter.warn "condition 'x' can't be evaluated")
+                    (assert.are.same ["→ 1/2 template       list-templates"
+                                      "warning: condition 'x' can't be evaluated"]
+                                     (term.lines)))))
             (it "keeps the line of a step whose sub-workflow prints its own"
                 (fn []
                   (let [term (screen)

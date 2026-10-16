@@ -361,9 +361,7 @@ response's status and body."
       (let [resp outcome.response
             b (?. resp :body)
             body (if (= nil b) "" (= (type b) :string)
-                     (.. " "
-                         (if (<= (length b) message-body-length) b
-                             (.. (b:sub 1 message-body-length) "…")))
+                     (.. " " (expr.cut b message-body-length))
                      (.. " " (expr.brief b message-body-length)))]
         (.. "step '" step-id "' failed: " (tostring failure) "; HTTP "
             (tostring (or (?. resp :status) "?")) body))))

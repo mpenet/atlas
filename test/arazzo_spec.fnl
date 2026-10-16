@@ -490,6 +490,40 @@
                       (assert.are.equal 2 run2.attempt)
                       (assert.is_true pass.passed)
                       (assert.is_nil pass.failure)))))
+            (it "sends a payload whose members are all missing as an empty object, with its replacements"
+                (fn []
+                  (let [sent []
+                        clients {:api (make-client {:op (fn [req]
+                                                          (table.insert sent
+                                                                        req.body)
+                                                          (ok-resp {}))})}
+                        doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "wf"
+                                          :steps [{:stepId "s1"
+                                                   :operationId "op"
+                                                   :requestBody {:payload {:name "$inputs.name"}
+                                                                 :replacements [{:target "/size"
+                                                                                 :value 1}]}}]}]}]
+                    (arazzo.run-workflow doc "wf" {} clients {})
+                    (assert.are.same [{:size 1}] sent))))
+            (it "cuts a long text body between characters"
+                (fn []
+                  (let [clients {:api (make-client {:op (fn []
+                                                          (ok-resp (string.rep "é"
+                                                                               600)
+                                                                   500))})}
+                        doc {:arazzo "1.0.0"
+                             :info {}
+                             :workflows [{:workflowId "wf"
+                                          :steps [{:stepId "s1"
+                                                   :operationId "op"
+                                                   :successCriteria [{:condition "$statusCode == 200"}]}]}]}
+                        (_ err) (pcall arazzo.run-workflow doc "wf" {} clients
+                                       {})]
+                    (assert.is_truthy (utf8.len err))
+                    (assert.is_truthy (err:find (.. (string.rep "é" 500) "…")
+                                                1 true)))))
             (it "reports a request that fails in transport"
                 (fn []
                   (let [events []
