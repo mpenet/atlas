@@ -1770,6 +1770,16 @@ answers candidates; one reply per line, each followed by |."
                                                          :body {:x (json.array [])}
                                                          :raw "{}"}
                                                         :raw false ".x")))))
+              (it "escapes control characters in csv and tsv on a terminal only"
+                  (fn []
+                    (let [r {:status 200 :headers {} :body [{:a "x\27[2J"}]}]
+                      (each [_ fmt (ipairs [:csv :tsv])]
+                        (assert.is_nil (: (cli.format-output r fmt false nil
+                                                             true)
+                                          :find "\27" 1 true))
+                        (assert.is_truthy (: (cli.format-output r fmt false nil
+                                                                false)
+                                             :find "\27" 1 true))))))
               (it "raw prints a list of values one per line"
                   (fn []
                     (assert.are.equal "a\n1\ntrue"

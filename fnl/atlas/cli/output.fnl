@@ -352,8 +352,10 @@ line, objects as JSON."
                       (if (= x json.null) "null" (tostring x)))
                     "\n") (render v :json false)))
 
-(fn format-output [resp output use-color ?select]
-  "Text to print for a successful response, or nil when there is nothing to show."
+(fn format-output [resp output use-color ?select ?terminal]
+  "Text to print for a successful response, or nil when there is nothing to
+show. ?terminal: stdout is a terminal, whose control characters csv and tsv
+values mustn't reach (they stay as they are in files and pipes)."
   (let [body (if (and ?select resp.body) (select-path resp.body ?select)
                  resp.body)]
     (match (or output :json)
@@ -364,9 +366,12 @@ line, objects as JSON."
                  (raw-text body))
                (when (and resp.raw (> (length resp.raw) 0))
                  resp.raw))
-      (where (or :table :csv :tsv)) (when (not= nil body)
-                                      (tabulate body output
-                                                (selected-fields ?select)))
+      (where (or :table :csv :tsv)) (let [text (when (not= nil body)
+                                                 (tabulate body output
+                                                           (selected-fields ?select)))]
+                                      (if (and text ?terminal)
+                                          (util.printable text)
+                                          text))
       fmt (when (not= nil body) (render body fmt use-color)))))
 
 (fn exit-code [status ignore-status]
@@ -402,7 +407,8 @@ line, objects as JSON."
                                              (and use-color (util.terminal? 2)))
                                      "\n"))))
           (exit-code resp.status false))
-        (let [text (format-output resp output use-color ?select)]
+        (let [text (format-output resp output use-color ?select
+                                  (util.terminal? 1))]
           (if text
               (print text)
               (when (not verbose)
