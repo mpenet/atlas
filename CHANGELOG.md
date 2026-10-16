@@ -15,7 +15,12 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 
 - An Arazzo condition that can't be evaluated fails, with a warning on stderr saying why, instead of failing the workflow.
 - Arazzo `regex` conditions are ECMAScript regular expressions, as in the specification's examples (`^2\d{2}$`), rather than Lua patterns; they run in linear time, so back-references and lookaround are refused.
+- The binaries are about a quarter smaller (1.5 MB on macOS, 1.9 MB on Linux): the program is embedded as stripped Lua bytecode, the C libraries are optimized for size, and the linker drops the code nothing calls.
 - An Arazzo step's `timeout` is in milliseconds, as Arazzo 1.1 defines it, rather than seconds.
+
+### Fixed
+
+- Ctrl-C ends the binary at once, with the usual signal status; it could be taken for an error, caught, and atlas would go on, then exit 0.
 
 ## [1.0.0-beta5] - 2026-10-16
 

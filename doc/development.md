@@ -21,7 +21,7 @@ make install
 
 ## The standalone binary
 
-`make binary` requires a C compiler, `fennel`, `lua`, `luarocks`, `libyaml`, `pkg-config`, `unzip` and `curl`. It downloads the mbedTLS and libcurl sources (checked against pinned checksums) and statically links Lua, luasocket, libcurl, mbedTLS, lyaml and libyaml: the binary is less than 2 MB and depends only on system libraries. `make check-binary` runs it with Lua's module paths emptied and checks what it links.
+`make binary` requires a C compiler, `fennel`, `lua`, `luarocks`, `libyaml`, `pkg-config`, `unzip` and `curl`. It downloads the mbedTLS and libcurl sources (checked against pinned checksums) and statically links Lua, luasocket, libcurl, mbedTLS, lyaml and libyaml, optimized for size, with the Lua modules embedded as stripped bytecode: the binary is less than 2 MB and depends only on system libraries. `make check-binary` runs it with Lua's module paths emptied and checks what it links.
 
 `make binary STATIC_LDFLAGS=-static` links the system libraries too; the Linux release binaries are built that way against musl (see the `Dockerfile`), so they run on any distribution. `make binary DEPS_FROM_SOURCE=1` also builds Lua and libyaml from pinned sources for `MACOSX_DEPLOYMENT_TARGET` (default 12.0), which the macOS release binaries use.
 

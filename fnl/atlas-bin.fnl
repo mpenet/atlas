@@ -1,8 +1,8 @@
 ;; ABOUTME: Entry point for the standalone atlas binary: preloads every bundled
 ;; ABOUTME: module so the static build can resolve them, then runs the CLI.
-;; fennel --compile-binary cannot follow transitive requires,
-;; so every dependency must be required directly from the entry point,
-;; and before any module that requires it.
+;; fennel --require-as-include cannot follow the requires of the modules it
+;; includes, so every dependency must be required directly from the entry
+;; point, and before any module that requires it.
 (require :lunajson.decoder)
 
 (require :lunajson.encoder)

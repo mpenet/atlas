@@ -60,6 +60,18 @@ _ZLIB_LIBDIR    := $(shell pkg-config --variable=libdir zlib 2>/dev/null)
 # with musl (the Linux release build), wrong with glibc, whose resolver
 # needs its shared libraries.
 STATIC_LDFLAGS ?=
+
+# The native code of the binary is optimized for size, and the linker drops
+# whatever nothing calls: per symbol on macOS, per section elsewhere.
+NATIVE_OPT = -Os
+ifeq ($(UNAME_S),Darwin)
+  NATIVE_CFLAGS = $(NATIVE_OPT)
+  DEAD_STRIP = -Wl,-dead_strip
+else
+  NATIVE_CFLAGS = $(NATIVE_OPT) -ffunction-sections -fdata-sections
+  DEAD_STRIP = -Wl,--gc-sections
+endif
+
 ifeq ($(UNAME_S),Darwin)
   SYSTEM_LDFLAGS = -framework CoreFoundation -framework Security -framework SystemConfiguration
   # zlib ships with macOS
@@ -76,10 +88,10 @@ TLS_LDFLAGS = $(MBEDTLS_PREFIX)/lib/libmbedtls.a $(MBEDTLS_PREFIX)/lib/libmbedx5
               $(MBEDTLS_PREFIX)/lib/libmbedcrypto.a
 LIBYAML_LDFLAGS ?= -L$(_LIBYAML_LIBDIR) $(or $(wildcard $(_LIBYAML_LIBDIR)/libyaml.a),-lyaml)
 
-SOCKET_CFLAGS = -O2 $(SOCKET_CFLAGS_EXTRA) -DLUASOCKET_NODEBUG \
+SOCKET_CFLAGS = $(NATIVE_CFLAGS) $(SOCKET_CFLAGS_EXTRA) -DLUASOCKET_NODEBUG \
                 -I$(LUA_INC) -I$(SOCKET_SRC)
 LYAML_VERSION = 6.2.9
-LYAML_CFLAGS  = -O2 -DVERSION=\"$(LYAML_VERSION)\" -I$(LUA_INC) -I$(LIBYAML_INC) -I$(LYAML_SRC)
+LYAML_CFLAGS  = $(NATIVE_CFLAGS) -DVERSION=\"$(LYAML_VERSION)\" -I$(LUA_INC) -I$(LIBYAML_INC) -I$(LYAML_SRC)
 
 SOCKET_CORE_SRCS = luasocket.c timeout.c buffer.c io.c auxiliar.c compat.c \
                    options.c inet.c usocket.c except.c select.c tcp.c udp.c
@@ -149,11 +161,11 @@ install: binary
 
 # ---- standalone binary ----
 
-# the stamp names the libcurl and mbedTLS versions, so changing either
+# the stamps name the versions and the optimization, so changing either
 # rebuilds the libraries
-NATIVE_STAMP = $(NATIVE_BUILD)/.stamp-curl-$(CURL_VERSION)-mbedtls-$(MBEDTLS_VERSION)
+NATIVE_STAMP = $(NATIVE_BUILD)/.stamp-curl-$(CURL_VERSION)-mbedtls-$(MBEDTLS_VERSION)$(NATIVE_OPT)
 
-DEPS_STAMP = $(NATIVE_BUILD)/.deps-lua-$(LUA_VERSION)-yaml-$(LIBYAML_VERSION)
+DEPS_STAMP = $(NATIVE_BUILD)/.deps-lua-$(LUA_VERSION)-yaml-$(LIBYAML_VERSION)$(NATIVE_OPT)
 
 native-libs: $(NATIVE_STAMP) $(NATIVE_BUILD)/libatlas_curl.a
 
@@ -164,10 +176,10 @@ $(DEPS_STAMP):
 	@echo "Building Lua $(LUA_VERSION) and libyaml $(LIBYAML_VERSION) for macOS $(MACOSX_DEPLOYMENT_TARGET)..."
 	rm -rf $(NATIVE_BUILD)/deps-src && mkdir -p $(NATIVE_BUILD)/deps-src
 	cd $(NATIVE_BUILD)/deps-src && $(call fetch,https://www.lua.org/ftp/lua-$(LUA_VERSION).tar.gz,lua.tar.gz,$(LUA_SHA256)) && tar xzf lua.tar.gz
-	$(MAKE) -C $(NATIVE_BUILD)/deps-src/lua-$(LUA_VERSION) $(if $(filter Darwin,$(UNAME_S)),macosx,linux) > /dev/null
+	$(MAKE) -C $(NATIVE_BUILD)/deps-src/lua-$(LUA_VERSION) $(if $(filter Darwin,$(UNAME_S)),macosx,linux) MYCFLAGS="$(NATIVE_CFLAGS)" > /dev/null
 	$(MAKE) -C $(NATIVE_BUILD)/deps-src/lua-$(LUA_VERSION) install INSTALL_TOP=$(DEPS_PREFIX) > /dev/null
 	cd $(NATIVE_BUILD)/deps-src && $(call fetch,https://pyyaml.org/download/libyaml/yaml-$(LIBYAML_VERSION).tar.gz,yaml.tar.gz,$(LIBYAML_SHA256)) && tar xzf yaml.tar.gz
-	cd $(NATIVE_BUILD)/deps-src/yaml-$(LIBYAML_VERSION) && CFLAGS="-O2 -fPIC" ./configure --prefix=$(DEPS_PREFIX) --disable-shared --enable-static > configure.log 2>&1 || { tail -30 configure.log; exit 1; }
+	cd $(NATIVE_BUILD)/deps-src/yaml-$(LIBYAML_VERSION) && CFLAGS="$(NATIVE_CFLAGS) -fPIC" ./configure --prefix=$(DEPS_PREFIX) --disable-shared --enable-static > configure.log 2>&1 || { tail -30 configure.log; exit 1; }
 	$(MAKE) -C $(NATIVE_BUILD)/deps-src/yaml-$(LIBYAML_VERSION) install > /dev/null
 	@touch $@
 
@@ -205,7 +217,7 @@ $(NATIVE_STAMP): $(if $(DEPS_FROM_SOURCE),$(DEPS_STAMP))
 	rm -rf $(NATIVE_BUILD)/mbedtls-src $(MBEDTLS_PREFIX) && mkdir -p $(NATIVE_BUILD)/mbedtls-src $(MBEDTLS_PREFIX)/lib
 	cd $(NATIVE_BUILD) && $(call fetch,https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$(MBEDTLS_VERSION)/mbedtls-$(MBEDTLS_VERSION).tar.bz2,mbedtls.tar.bz2,$(MBEDTLS_SHA256))
 	tar xjf $(NATIVE_BUILD)/mbedtls.tar.bz2 -C $(NATIVE_BUILD)/mbedtls-src --strip-components 1
-	$(MAKE) -C $(NATIVE_BUILD)/mbedtls-src lib CFLAGS="-O2 -fPIC" > /dev/null
+	$(MAKE) -C $(NATIVE_BUILD)/mbedtls-src lib CFLAGS="$(NATIVE_CFLAGS) -fPIC" > /dev/null
 	cp -R $(NATIVE_BUILD)/mbedtls-src/include $(MBEDTLS_PREFIX)/
 	cp $(NATIVE_BUILD)/mbedtls-src/library/libmbedtls.a $(NATIVE_BUILD)/mbedtls-src/library/libmbedx509.a $(NATIVE_BUILD)/mbedtls-src/library/libmbedcrypto.a $(MBEDTLS_PREFIX)/lib/
 	@# build libcurl, verified against its published checksum
@@ -214,7 +226,7 @@ $(NATIVE_STAMP): $(if $(DEPS_FROM_SOURCE),$(DEPS_STAMP))
 	echo "$(CURL_SHA256)  $(NATIVE_BUILD)/curl.tar.gz" | $(SHA256) -c -
 	rm -rf $(NATIVE_BUILD)/curl-src && mkdir -p $(NATIVE_BUILD)/curl-src
 	tar xzf $(NATIVE_BUILD)/curl.tar.gz -C $(NATIVE_BUILD)/curl-src --strip-components 1
-	cd $(NATIVE_BUILD)/curl-src && CFLAGS="-O2 -fPIC" ./configure --prefix=$(CURL_PREFIX) $(CURL_CONFIGURE_FLAGS) > configure.log 2>&1 || { tail -30 configure.log; exit 1; }
+	cd $(NATIVE_BUILD)/curl-src && CFLAGS="$(NATIVE_CFLAGS) -fPIC" ./configure --prefix=$(CURL_PREFIX) $(CURL_CONFIGURE_FLAGS) > configure.log 2>&1 || { tail -30 configure.log; exit 1; }
 	$(MAKE) -C $(NATIVE_BUILD)/curl-src/lib > /dev/null
 	$(MAKE) -C $(NATIVE_BUILD)/curl-src/lib install > /dev/null
 	$(MAKE) -C $(NATIVE_BUILD)/curl-src/include install > /dev/null
@@ -222,19 +234,29 @@ $(NATIVE_STAMP): $(if $(DEPS_FROM_SOURCE),$(DEPS_STAMP))
 
 # the atlas.curl binding, against that libcurl
 $(NATIVE_BUILD)/libatlas_curl.a: c/atlas_curl.c $(NATIVE_STAMP)
-	$(CC) -O2 -Wall -DCURL_STATICLIB -I$(LUA_INC) -I$(CURL_PREFIX)/include -c c/atlas_curl.c -o $(NATIVE_BUILD)/atlas_curl.o
+	$(CC) $(NATIVE_CFLAGS) -Wall -DCURL_STATICLIB -I$(LUA_INC) -I$(CURL_PREFIX)/include -c c/atlas_curl.c -o $(NATIVE_BUILD)/atlas_curl.o
 	ar rcs $@ $(NATIVE_BUILD)/atlas_curl.o
 
-binary: $(LUA_TARGETS) native-libs
+# The program: every module in one Lua chunk, compiled to stripped bytecode
+# by c/embed.c, which links the binary's Lua so the bytecode matches it.
+$(NATIVE_BUILD)/atlas-bin.lua: $(LUA_TARGETS) fnl/atlas-bin.fnl
+	@mkdir -p $(NATIVE_BUILD)
 	LUA_PATH="./$(LUA_DIR)/?.lua;./$(LUA_DIR)/?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" \
-	CC_OPTS="$(CURL_PREFIX)/lib/libcurl.a $(TLS_LDFLAGS) $(ZLIB_LDFLAGS) $(LIBYAML_LDFLAGS) $(SYSTEM_LDFLAGS) $(STATIC_LDFLAGS)" \
-	$(FENNEL) --compile-binary fnl/atlas-bin.fnl \
-	  bin/atlas-bin \
-	  $(LUA_LIB) \
-	  $(LUA_INC) \
-	  --native-module $(NATIVE_BUILD)/libsocket_core.a \
-	  --native-module $(NATIVE_BUILD)/libatlas_curl.a \
-	  --native-module $(NATIVE_BUILD)/liblyaml_ext.a
+	$(FENNEL) --require-as-include --compile fnl/atlas-bin.fnl > $@
+
+$(NATIVE_BUILD)/embed: c/embed.c $(if $(DEPS_FROM_SOURCE),$(DEPS_STAMP))
+	@mkdir -p $(NATIVE_BUILD)
+	$(CC) -O2 -Wall -I$(LUA_INC) c/embed.c $(LUA_LIB) -lm $(if $(filter Darwin,$(UNAME_S)),,-ldl) -o $@
+
+$(NATIVE_BUILD)/atlas_program.c: $(NATIVE_BUILD)/atlas-bin.lua $(NATIVE_BUILD)/embed
+	$(NATIVE_BUILD)/embed $(NATIVE_BUILD)/atlas-bin.lua $@
+
+binary: $(NATIVE_BUILD)/atlas_program.c c/atlas_main.c native-libs
+	@mkdir -p bin
+	$(CC) $(NATIVE_CFLAGS) -Wall -I$(LUA_INC) c/atlas_main.c $(NATIVE_BUILD)/atlas_program.c \
+	  $(NATIVE_BUILD)/libsocket_core.a $(NATIVE_BUILD)/libatlas_curl.a $(NATIVE_BUILD)/liblyaml_ext.a \
+	  $(CURL_PREFIX)/lib/libcurl.a $(TLS_LDFLAGS) $(ZLIB_LDFLAGS) $(LIBYAML_LDFLAGS) \
+	  $(LUA_LIB) -lm $(SYSTEM_LDFLAGS) $(STATIC_LDFLAGS) $(DEAD_STRIP) -o bin/atlas-bin
 	strip bin/atlas-bin
 
 # Every module must be installed by the rockspec and bundled in the binary,
@@ -327,4 +349,4 @@ check-binary-tls:
 
 clean:
 	rm -f $(LUA_TARGETS)
-	rm -rf build bin/atlas-bin fnl/atlas-bin.fnl_binary.c
+	rm -rf build bin/atlas-bin
