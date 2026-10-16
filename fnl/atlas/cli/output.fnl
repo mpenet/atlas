@@ -132,7 +132,9 @@ says whether an element matches."
         field (or lhs (condition:match "^%s*(.-)%s*$"))
         compare (when op (or (. comparisons op) (fail)))
         rest (path:sub (+ close 1))]
+    ;; a field is a name or a dotted path, never a search (..)
     (when (not (and (field:match "^%.?[%w_%-]+[%w_%-%.]*$")
+                    (not (field:find ".." 1 true)) (not (field:find "%.$"))
                     (or (= rest "") (rest:match "^[%.%[{]"))))
       (fail))
     (values (if compare
@@ -206,13 +208,21 @@ nil when the path doesn't match."
           (select-path (. data key) rest)))))
 
 (fn check-select [path]
-  "Raise for a malformed filter anywhere in path, before anything is sent."
+  "Raise for a malformed filter anywhere in path, or a .. without a field
+name, before anything is sent."
   (var rest path)
+  ;; path without its filters, whose values may hold anything
+  (var outside "")
   (var at (path:find "[?" 1 true))
   (while at
+    (set outside (.. outside (rest:sub 1 (- at 1))))
     (let [(_ after) (parse-filter (rest:sub at) select-path)]
       (set rest after)
-      (set at (rest:find "[?" 1 true)))))
+      (set at (rest:find "[?" 1 true))))
+  (set outside (.. outside rest))
+  (when (or (outside:find "%.%.%.") (outside:find "%.%.$")
+            (outside:find "%.%.[^%w_%-]"))
+    (error "--select: .. must be followed by a field name, as in ..id" 0)))
 
 (fn request-text [req]
   "Human-readable request, credentials redacted."

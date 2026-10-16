@@ -74,12 +74,19 @@ dashes (getPetById → get-pet-by-id, projects/list_cards → projects-list-card
 
 (fn printable [s]
   "s with control characters other than newline and tab written as \\xHH, so
-that text from a spec can't drive the terminal (escape sequences)."
-  (pick-values 1
-               (s:gsub "%c"
-                       (fn [c]
-                         (when (and (not= c "\n") (not= c "\t"))
-                           (string.format "\\x%02X" (string.byte c)))))))
+that text from a spec can't drive the terminal (escape sequences); C1
+controls and the overrides that reorder text on screen as \\u{HHHH}."
+  (let [ascii (pick-values 1
+                           (s:gsub "%c"
+                                   (fn [c]
+                                     (when (and (not= c "\n") (not= c "\t"))
+                                       (string.format "\\x%02X" (string.byte c))))))
+        code #(string.format "\\u{%04X}" (utf8.codepoint $))]
+    ;; U+0080-009F; U+202A-202E and U+2066-2069 (bidirectional overrides)
+    (accumulate [text ascii _ pattern (ipairs ["\194[\128-\159]"
+                                               "\226\128[\170-\174]"
+                                               "\226\129[\166-\169]"])]
+      (pick-values 1 (text:gsub pattern code)))))
 
 (fn terminal? [fd]
   "Whether file descriptor fd (1 stdout, 2 stderr) is a terminal."

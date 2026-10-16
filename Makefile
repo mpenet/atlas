@@ -288,7 +288,8 @@ unicode-width:
 	mkdir -p $(UNICODE_DIR)
 	curl -fsSL -o $(UNICODE_DIR)/EastAsianWidth.txt https://www.unicode.org/Public/$(UNICODE_VERSION)/ucd/EastAsianWidth.txt
 	curl -fsSL -o $(UNICODE_DIR)/DerivedGeneralCategory.txt https://www.unicode.org/Public/$(UNICODE_VERSION)/ucd/extracted/DerivedGeneralCategory.txt
-	lua tools/unicode-width.lua $(UNICODE_VERSION) $(UNICODE_DIR)/EastAsianWidth.txt $(UNICODE_DIR)/DerivedGeneralCategory.txt > fnl/atlas/cli/width.fnl
+	lua tools/unicode-width.lua $(UNICODE_VERSION) $(UNICODE_DIR)/EastAsianWidth.txt $(UNICODE_DIR)/DerivedGeneralCategory.txt > $(UNICODE_DIR)/width.fnl
+	mv $(UNICODE_DIR)/width.fnl fnl/atlas/cli/width.fnl
 
 # Over the network: real-world specs (test/corpus/specs.txt) must load and
 # every operation must build, render help and pass the request checks.

@@ -23,3 +23,22 @@
             (it "counts bytes that aren't UTF-8 as one column each"
                 (fn []
                   (assert.are.equal 3 (width.of "a\255b"))))))
+
+(describe "width.of emoji sequences"
+          (fn []
+            (it "widens a character shown as emoji"
+                (fn []
+                  (assert.are.equal 2 (width.of "\u{2764}\u{FE0F}"))))
+            (it "counts a joined sequence as its first emoji"
+                (fn []
+                  (assert.are.equal 2
+                                    (width.of "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"))))
+            (it "counts nothing for a skin tone"
+                (fn []
+                  (assert.are.equal 2 (width.of "\u{1F44D}\u{1F3FD}"))))
+            (it "counts a flag as two columns"
+                (fn []
+                  (assert.are.equal 2 (width.of "\u{1F1EB}\u{1F1F7}"))))
+            (it "counts nothing for the medial and final jamo of Extended-B"
+                (fn []
+                  (assert.are.equal 2 (width.of "\u{1100}\u{D7B0}"))))))

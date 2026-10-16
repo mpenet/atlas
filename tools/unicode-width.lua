@@ -43,6 +43,7 @@ end
 -- soft hyphen (a format character) is shown as a hyphen
 local zero = ranges(category_file, {Mn = true, Me = true, Cf = true})
 table.insert(zero, {0x1160, 0x11FF}) -- Hangul medial vowels and final consonants
+table.insert(zero, {0xD7B0, 0xD7FF}) -- and their Extended-B forms
 table.insert(zero, {0x200B, 0x200B}) -- zero width space
 local zero_ranges = {}
 for _, r in ipairs(merged(zero)) do
@@ -105,14 +106,35 @@ io.write(string.format([=[
           (set found true))))
   found)
 
+(fn char-width [cp last joined]
+  "Columns cp takes after a character of width last; joined: cp follows a
+zero width joiner after an emoji."
+  (if joined 0
+      (= cp 0xFE0F) (if (= last 1) 1 0)
+      (and (<= 0x1F3FB cp) (<= cp 0x1F3FF) (> last 0)) 0
+      (in-ranges? zero cp) 0
+      (in-ranges? wide cp) 2
+      1))
+
+(fn sequence-width [s]
+  (var n 0)
+  (var last 0)
+  (var joined false)
+  (each [_ cp (utf8.codes s)]
+    (let [w (char-width cp last joined)]
+      ;; joiners join emoji; between letters they hide nothing
+      (set joined (and (= cp 0x200D) (= last 2)))
+      (set n (+ n w))
+      (when (> w 0)
+        (set last (if (= cp 0xFE0F) 2 w)))))
+  n)
+
 (fn of [s]
   "Columns s takes in a terminal; text that isn't UTF-8 counts a column a
-byte."
-  (if (not (utf8.len s)) (length s)
-      (accumulate [n 0 _ cp (utf8.codes s)]
-        (+ n (if (in-ranges? zero cp) 0
-                 (in-ranges? wide cp) 2
-                 1)))))
+byte. As terminals show emoji sequences: U+FE0F makes the character before it
+an emoji, two columns; what a zero width joiner joins, and skin tones, add
+nothing."
+  (if (utf8.len s) (sequence-width s) (length s)))
 
 {: of}
 ]=], version, hex_lines(zero_ranges), hex_lines(wide_ranges)))

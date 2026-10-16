@@ -1836,6 +1836,25 @@ answers candidates; one reply per line, each followed by |."
                   (fn []
                     (assert.are.same [{:a {:a 1}} {:a 1} 1]
                                      (cli.select-path {:a {:a {:a 1}}} "..a"))))
+              (it "needs a field name after .."
+                  (fn []
+                    (each [_ path (ipairs [".."
+                                           "..[0]"
+                                           "..{id}"
+                                           "...id"
+                                           ".a.."])]
+                      (let [(ok err) (pcall cli.check-select path)]
+                        (assert.is_false ok)
+                        (assert.is_truthy (: (tostring err) :find
+                                             "must be followed by a field name"
+                                             1 true))))
+                    (cli.check-select "..id[?name==\"a..b\"].x")))
+              (it "refuses .. in a filter's field"
+                  (fn []
+                    (let [(ok err) (pcall cli.check-select "[?tags..env]")]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "invalid filter" 1 true)))))
               (it "finds nothing as an empty array"
                   (fn []
                     (let [json (require :atlas.json)

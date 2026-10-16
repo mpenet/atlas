@@ -445,3 +445,10 @@
                       (assert.is_truthy (: (tostring err) :find
                                            "nested objects and arrays can't be sent"
                                            1 true))))))))
+
+(describe "printable and other controls"
+          (fn []
+            (it "escapes C1 controls and bidirectional overrides"
+                (fn []
+                  (assert.are.equal "a\\u{202E}b\\u{009B}c\\u{2066}d é"
+                                    (util.printable "a\u{202E}b\u{9B}c\u{2066}d é"))))))

@@ -435,6 +435,27 @@ invalid body unless --no-validate."
                       (- (socket.gettime) t0) p.ignore-status)
           (die (.. "request failed: " (tostring resp)))))))
 
+(fn discovered-api-schema [profile-name profile p opts env verbose]
+  "(location schema) of the spec discovery finds for the profile's base URL;
+a remembered location that no longer works is looked for again."
+  (let [fetch-opts (schema-fetch-options profile p opts env verbose)
+        find #(let [(location doc reasons) (discover-schema opts.base-url $)]
+                (when (not location)
+                  (die (.. "no OpenAPI description found for "
+                           (util.redact-url opts.base-url)
+                           ": set \"schema\" in profile " profile-name "\n  "
+                           (table.concat (icollect [_ r (ipairs reasons)]
+                                           (strip-location r))
+                                         "\n  "))))
+                (values location doc))
+        (location doc) (find fetch-opts)]
+    (if doc (values location doc)
+        (let [(ok schema) (pcall load-op-schema location profile p opts env
+                                 verbose)]
+          (if ok (values location schema)
+              (find (doto (collect [k v (pairs fetch-opts)] k v)
+                      (tset :reload true))))))))
+
 (fn api-setup [p env usage]
   "{:profile :schema :opts} for a command naming a profile or a spec
 (p.schema): the profile, the spec (parsed when fetched, else its path) and
@@ -446,20 +467,22 @@ the client options."
     (let [profile (find-profile config p.schema)
           opts (client-options p.schema profile p config env.transport)
           verbose (. (display-options profile p config) :verbose)
-          raw-schema (if (not profile) p.schema profile.schema profile.schema
-                         ;; no schema: the API may say where its spec is
-                         opts.base-url
-                         (or (discover-schema opts.base-url
-                                              (schema-fetch-options profile p
-                                                                    opts env
-                                                                    verbose))
-                             (die (.. "no OpenAPI description found at "
-                                      opts.base-url
-                                      " (its Link headers, openapi.json, openapi.yaml, the URL itself): set \"schema\" in profile "
-                                      p.schema)))
-                         (die (.. "profile " p.schema
-                                  " has no schema: set \"schema\" to the spec's URL or path, or \"base-url\" to find it")))
-          schema (load-op-schema raw-schema profile p opts env verbose)]
+          (raw-schema schema) (if (not profile)
+                                  (values p.schema
+                                          (load-op-schema p.schema profile p
+                                                          opts env verbose))
+                                  profile.schema
+                                  (values profile.schema
+                                          (load-op-schema profile.schema
+                                                          profile p opts env
+                                                          verbose))
+                                  ;; no schema: the API may say where its
+                                  ;; spec is
+                                  opts.base-url
+                                  (discovered-api-schema p.schema profile p
+                                                         opts env verbose)
+                                  (die (.. "profile " p.schema
+                                           " has no schema: set \"schema\" to the spec's URL or path, or \"base-url\" to find it")))]
       (when (= (type schema) :table)
         (set opts.source-url raw-schema))
       ;; documents the spec refers to: through the transport, with the same

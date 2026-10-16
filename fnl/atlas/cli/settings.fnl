@@ -392,27 +392,57 @@ opts: fetch-schema options plus {:ttl seconds :reload bool :cache bool}"
                          :service-doc true
                          :describedby true})
 
+(fn spec? [doc]
+  (and (= (type doc) :table) (not= nil (or doc.openapi doc.swagger))))
+
+(fn under [base file]
+  "base with file appended to its path, its query kept, its fragment left."
+  (let [(path query) (base:match "^([^?#]*)(%??[^#]*)")]
+    (.. (pick-values 1 (path:gsub "/+$" "")) "/" file query)))
+
 (fn find-schema [base opts]
-  "Location of the OpenAPI description of the API at base, or nil: a
-same-origin Link of the base URL (service-desc, service-doc, describedby),
-openapi.json and openapi.yaml under it, then the base URL itself."
-  (let [(ok resp) (pcall fetch-document base opts)
-        candidates (icollect [_ ref (ipairs (if ok
+  "(location doc) of the OpenAPI description of the API at base, or (nil
+reasons), what each place answered: a same-origin Link of the base URL
+(service-desc, service-doc, describedby), openapi.json and openapi.yaml under
+it, the base URL itself, then openapi.json and openapi.yaml at the origin's
+root. Nothing is cached here."
+  (let [reasons []
+        (reached resp) (pcall fetch-document base opts)
+        candidates (icollect [_ ref (ipairs (if reached
                                                 (util.link-urls resp.headers
                                                                 description-rels)
                                                 []))]
                      (let [url (util.resolve-reference base ref)]
                        ;; a link elsewhere could hand atlas any API
                        (when (= (util.origin url) (util.origin base)) url)))
-        root (pick-values 1 (base:gsub "/+$" ""))]
-    (each [_ url (ipairs [(.. root "/openapi.json")
-                          (.. root "/openapi.yaml")
+        root (base:match "^(%a[%w+.-]*://[^/?#]*)")
+        path (or (base:match "^%a[%w+.-]*://[^/?#]*([^?#]*)") "")]
+    (each [_ url (ipairs [(under base "openapi.json")
+                          (under base "openapi.yaml")
                           base])]
       (table.insert candidates url))
-    (accumulate [found nil _ url (ipairs candidates) &until found]
-      (let [(loaded doc) (pcall load-schema-cached url opts)]
-        (when (and loaded (= (type doc) :table) (or doc.openapi doc.swagger))
-          url)))))
+    (when (and root (not= (path:gsub "/+$" "") ""))
+      (table.insert candidates (.. root "/openapi.json"))
+      (table.insert candidates (.. root "/openapi.yaml")))
+    (var found nil)
+    (each [_ url (ipairs candidates) &until found]
+      (let [(fetched doc) (if (not= url base) (pcall fetch-schema url opts)
+                              ;; the base URL was fetched already
+                              (not reached) (values false resp)
+                              (not (util.success? resp.status))
+                              (values false
+                                      (string.format "HTTP %s fetching %s"
+                                                     resp.status
+                                                     (util.redact-url base)))
+                              (pcall atlas.parse-schema (or resp.raw "") base))]
+        (if (and fetched (spec? doc)) (set found [url doc]) fetched
+            (table.insert reasons
+                          (.. (util.redact-url url)
+                              " is not an OpenAPI document"))
+            (table.insert reasons (tostring doc)))))
+    (if found
+        (values (. found 1) (. found 2))
+        (values nil reasons))))
 
 (fn discovery-key [base]
   (.. "discovery " base))
@@ -423,16 +453,22 @@ knows, else nil."
   (?. (cache.get (discovery-key base) ttl) :location))
 
 (fn discover-schema [base opts]
-  "Location of the OpenAPI description of the API at base (see
-find-schema), remembered in the cache like specs are. opts:
-load-schema-cached's."
+  "(location doc) of the OpenAPI description of the API at base (see
+find-schema): doc when it was just fetched, nil when the location comes from
+the cache; or (nil nil reasons). What is found is cached like specs."
   (let [use-cache (not= opts.cache false)
         known (when (and use-cache (not opts.reload))
                 (discovered-schema base (or opts.ttl 3600)))]
-    (or known (let [found (find-schema base opts)]
-                (when (and found use-cache)
-                  (cache.put (discovery-key base) {:location found}))
-                found))))
+    (if known
+        (values known nil)
+        (let [(location found) (find-schema base opts)]
+          (if location
+              (do
+                (when use-cache
+                  (cache.put (discovery-key base) {: location})
+                  (cache.put location found))
+                (values location found))
+              (values nil nil found))))))
 
 {: config-path
  : colors-wanted?

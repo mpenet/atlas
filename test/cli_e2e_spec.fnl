@@ -1978,7 +1978,7 @@ hands over one by one."
                   (with-config (discovering "https://d7.test/api")
                     #(let [r (atlas-run ["op" "d" "--list"])]
                        (assert.are.equal 1 r.code)
-                       (assert.is_truthy (r.err:find "no OpenAPI description found at https://d7.test/api"
+                       (assert.is_truthy (r.err:find "no OpenAPI description found for https://d7.test/api"
                                                      1 true))
                        (assert.is_truthy (r.err:find "\"schema\"" 1 true))))))))
 
@@ -2071,3 +2071,63 @@ hands over one by one."
                       (os.remove spec)
                       (assert.are.equal 0 r.code)
                       (assert.are.equal "1" r.out)))))))
+
+(describe "spec discovery, from review"
+          (fn []
+            (it "redacts the base URL and says what each place answered"
+                (fn []
+                  (with-config (discovering "https://bob:hunter2@d8.test/q?api_key=topsecret")
+                    #(let [r (atlas-run ["op" "d" "--list"]
+                                        {"GET https://bob:hunter2@d8.test/q/openapi.json?api_key=topsecret" (respond 403
+                                                                                                                     {})})]
+                       (assert.are.equal 1 r.code)
+                       (assert.is_nil (r.err:find "hunter2" 1 true))
+                       (assert.is_nil (r.err:find "topsecret" 1 true))
+                       (assert.is_truthy (r.err:find "HTTP 403" 1 true))))))
+            (it "puts the file name before the base URL's query"
+                (fn []
+                  (with-config (discovering "https://d9.test/v1?k=1")
+                    #(let [r (atlas-run ["op" "d" "--list"]
+                                        {"GET https://d9.test/v1/openapi.json?k=1" (respond 200
+                                                                                            (fixture-spec))})]
+                       (assert.are.equal 0 r.code)))))
+            (it "doesn't cache what isn't a spec"
+                (fn []
+                  (with-config (discovering "https://d10.test/api")
+                    #(let [first (atlas-run ["op" "d" "--list"]
+                                            {"GET https://d10.test/api/openapi.json" (respond 200
+                                                                                              {:error "nothing"})})
+                           again (atlas-run ["op" "d" "--list"]
+                                            {"GET https://d10.test/api/openapi.json" (respond 200
+                                                                                              (fixture-spec))})]
+                       (assert.are.equal 1 first.code)
+                       (assert.are.equal 0 again.code)))))
+            (it "fetches the spec it found once"
+                (fn []
+                  (with-config (discovering "https://d11.test")
+                    #(let [r (atlas-run ["op" "d" "--list" "--reload"]
+                                        {"GET https://d11.test/openapi.json" (respond 200
+                                                                                      (fixture-spec))})]
+                       (assert.are.equal 0 r.code)
+                       ;; the base URL's Link header, then the spec
+                       (assert.are.equal 2 (length r.requests))))))
+            (it "looks again when the spec it remembered is gone"
+                (fn []
+                  (with-config (discovering "https://d12.test")
+                    #(let [first (atlas-run ["op" "d" "--list"]
+                                            {"GET https://d12.test/openapi.json" (respond 200
+                                                                                          (fixture-spec))})
+                           cache (require :atlas.cache)
+                           _ (cache.put "https://d12.test/openapi.json" nil)
+                           again (atlas-run ["op" "d" "--list"]
+                                            {"GET https://d12.test/openapi.yaml" (respond 200
+                                                                                          (fixture-spec))})]
+                       (assert.are.equal 0 first.code)
+                       (assert.are.equal 0 again.code)))))
+            (it "also tries the origin's root under a base path"
+                (fn []
+                  (with-config (discovering "https://d13.test/v2/ops")
+                    #(let [r (atlas-run ["op" "d" "--list"]
+                                        {"GET https://d13.test/openapi.json" (respond 200
+                                                                                      (fixture-spec))})]
+                       (assert.are.equal 0 r.code)))))))
