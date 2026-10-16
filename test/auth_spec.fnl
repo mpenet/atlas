@@ -605,6 +605,90 @@
 
 ;; ---- request signing ----
 
+(describe "plugin signing"
+          (fn []
+            (it "signs the request that goes on the wire with the plugin's function"
+                (fn []
+                  (let [(http calls) (seq-mock (ok-resp {}))
+                        auth (reload-auth http)
+                        seen {}
+                        wrapped (auth.wrap-http-fn {:name "exo"
+                                                    :params {:key "k1"}
+                                                    :sign (fn [req
+                                                               params
+                                                               atlas]
+                                                            (set seen.req req)
+                                                            (set seen.params
+                                                                 params)
+                                                            (set seen.atlas
+                                                                 atlas)
+                                                            {:headers {:authorization (.. "SIG "
+                                                                                          req.method
+                                                                                          " "
+                                                                                          req.url
+                                                                                          " "
+                                                                                          req.body)}})}
+                                                   http.request)]
+                    (wrapped {:method "POST"
+                              :url "https://api.example.com/items"
+                              :query {:b "2" :a "x y"}
+                              :headers {:content-type "application/json"}
+                              :body {:n 1}})
+                    (assert.are.equal "https://api.example.com/items?a=x%20y&b=2"
+                                      seen.req.url)
+                    (assert.are.equal "{\"n\":1}" seen.req.body)
+                    (assert.are.equal "k1" seen.params.key)
+                    (assert.are.equal :function (type seen.atlas.hmac_sha256))
+                    (assert.are.equal "SIG POST https://api.example.com/items?a=x%20y&b=2 {\"n\":1}"
+                                      (. calls 1 :headers :authorization))
+                    ;; what the plugin adds is a credential
+                    (assert.is_truthy (accumulate [found false _ n (ipairs (. calls
+                                                                              1
+                                                                              :sensitive-headers))]
+                                        (or found (= n :authorization)))))))
+            (it "reads env: parameters when it signs"
+                (fn []
+                  (let [(http) (seq-mock (ok-resp {}))
+                        auth (reload-auth http)
+                        seen {}
+                        wrapped (auth.wrap-http-fn {:name "exo"
+                                                    :params {:home "env:HOME"}
+                                                    :sign (fn [_ params]
+                                                            (set seen.home
+                                                                 params.home)
+                                                            {:headers {}})}
+                                                   http.request)]
+                    (wrapped {:method "GET"
+                              :url "https://api.example.com/"
+                              :headers {}})
+                    (assert.are.equal (os.getenv :HOME) seen.home))))
+            (it "refuses to send a request the plugin failed to sign"
+                (fn []
+                  (each [_ sign (ipairs [#(error "no secret")
+                                         #"not a table"
+                                         #{:headers "no"}])]
+                    (let [(http calls) (seq-mock (ok-resp {}))
+                          auth (reload-auth http)
+                          wrapped (auth.wrap-http-fn {:name "exo" : sign}
+                                                     http.request)
+                          (ok err) (pcall wrapped
+                                          {:method "GET"
+                                           :url "https://api.example.com/"
+                                           :headers {}})]
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring (or (?. err :message) err))
+                                           :find "auth plugin 'exo'" 1 true))
+                      (assert.are.equal 0 (length calls))))))
+            (it "has no header to add up front, and no parameter it requires"
+                (fn []
+                  (let [auth (reload-auth real-http)]
+                    (assert.are.same []
+                                     (auth.header-names {:name "exo" :sign #{}}))
+                    (assert.are.same {}
+                                     (auth.get-headers "p"
+                                                       {:name "exo" :sign #{}}
+                                                       {})))))))
+
 (describe "external-tool signing"
           (fn []
             (it "signs and sends the full URL including the query string"

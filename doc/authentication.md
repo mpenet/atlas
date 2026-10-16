@@ -74,3 +74,40 @@ and prints the headers to add on stdout:
 ```
 
 With `"output": "bearer-token"`, the command runs once per atlas invocation, receives nothing, and prints a token; atlas sends `Authorization: Bearer <token>`.
+
+## Plugins
+
+A plugin is a Lua or Fennel file that provides authentication methods, used by name like the built-in ones. It runs inside atlas: no process is started for each request, and a Fennel file needs nothing installed, since atlas carries the Fennel compiler. List plugins in the [configuration](configuration.md):
+
+```json
+{
+  "plugins": ["~/.config/atlas/plugins/exoscale.fnl"],
+  "profiles": {
+    "exo": {
+      "schema": "https://openapi-v2.exoscale.com/source.json",
+      "auth": {"name": "exoscale",
+               "params": {"key": "env:EXOSCALE_API_KEY", "secret": "env:EXOSCALE_API_SECRET"}}
+    }
+  }
+}
+```
+
+The file returns a table whose `auth` maps names to functions. A function gets each request as it is sent, `{:method :url :headers :body}` (the URL with its query string, the body encoded), the profile's `params` (`env:NAME` values read from the environment), and helpers; it returns the headers to add, which atlas treats as credentials (redacted in logs, never sent to another origin):
+
+```fennel
+{:auth {:example (fn [req params atlas]
+                   {:headers {:x-signature (atlas.hex (atlas.hmac_sha256 params.secret
+                                                                         (.. req.method " " req.url)))}})}}
+```
+
+| Helper | |
+|--------|---|
+| `sha256(text)`, `hmac_sha256(key, text)` | Digests, as raw bytes |
+| `base64(bytes)`, `unbase64(text)`, `hex(bytes)` | Encodings |
+| `json.encode`, `json.decode` | JSON |
+| `url.parse(url)` | `{scheme, host, port, path, query}` |
+| `url.query(query)` | The query string's parameters, decoded, in order: `[[name, value], ...]` |
+
+[`examples/plugins/exoscale.fnl`](examples/plugins/exoscale.fnl) signs Exoscale's API requests, about 40 lines. The digests are computed in Lua: signing takes well under a millisecond for an API request, but about half a second for a 1 MB body.
+
+Plugins are loaded only when a profile uses a name atlas doesn't provide. A plugin runs with your credentials, so atlas refuses one that isn't yours or that others can change (`chmod go-w`), and refuses a name provided by two plugins or by atlas itself. `atlas auth PROFILE` says which plugin signs its requests; `--dry-run` doesn't run it.

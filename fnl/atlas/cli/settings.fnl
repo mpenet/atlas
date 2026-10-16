@@ -2,6 +2,7 @@
 ;; ABOUTME: pagination settings, and the client options shared by op and az.
 (local atlas (require :atlas))
 (local auth (require :atlas.auth))
+(local plugins (require :atlas.cli.plugins))
 (local cache (require :atlas.cache))
 (local retry (require :atlas.retry))
 (local paginate (require :atlas.paginate))
@@ -70,6 +71,13 @@ winning."
   (each [_ k (ipairs [:profiles :arazzo :retry])]
     (when (not (or (= nil (. config k)) (object? (. config k))))
       (error (.. "config: " k " must be an object") 0)))
+  (when (not (or (= nil config.plugins)
+                 (and (= (type config.plugins) :table)
+                      (not (object? config.plugins))
+                      (accumulate [ok true _ p (ipairs config.plugins)
+                                   &until (not ok)]
+                        (= (type p) :string)))))
+    (error "config: plugins must be a list of file paths" 0))
   (each [name context (pairs (or config.arazzo {}))]
     (when (not (and (object? context) (= (type context.file) :string)))
       (error (.. "config: arazzo " name
@@ -256,7 +264,8 @@ request signing, logging, and the transport (or dry-run printing)."
   (let [ssl (merge-ssl profile p.ssl)
         verbose (. (display-options profile p config) :verbose)
         auth-cfg (let [a (?. profile :auth)]
-                   (when (and a a.name (not= a.name "")) a))
+                   (when (and a a.name (not= a.name ""))
+                     (plugins.resolve-auth config a)))
         auth-names (if auth-cfg (auth.header-names auth-cfg) [])
         dry-run (and p.dry-run (not p.curl))
         auth-headers (when auth-cfg
@@ -274,7 +283,7 @@ request signing, logging, and the transport (or dry-run printing)."
         logged (if verbose (wrap-log-request transport)
                    p.timing (wrap-log-timing transport)
                    transport)
-        ;; nor run a signing tool or read a query key
+        ;; nor run a signing tool or plugin, or read a query key
         wrapper-cfg (if (and dry-run auth-cfg (auth.api-key-in-query? auth-cfg))
                         (doto (collect [k v (pairs auth-cfg)] k v)
                           (tset :params
@@ -284,7 +293,8 @@ request signing, logging, and the transport (or dry-run printing)."
                         auth-cfg)
         signed (or (when (and wrapper-cfg
                               (not (and dry-run
-                                        (= wrapper-cfg.name "external-tool"))))
+                                        (or (= wrapper-cfg.name "external-tool")
+                                            wrapper-cfg.sign))))
                      (auth.wrap-http-fn wrapper-cfg logged))
                    logged)
         retrying (retry.wrap signed (retry-options profile p config))

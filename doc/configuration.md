@@ -27,6 +27,7 @@ Settings apply in this order, first found wins: command-line option, profile, to
 |-----|------|-------------|
 | `profiles` | object | Profiles by name; see below |
 | `arazzo` | object | Named workflow documents; see [Arazzo](arazzo.md#named-workflow-documents) |
+| `plugins` | array | Lua or Fennel files providing authentication methods; see [Plugins](authentication.md#plugins) |
 | `output` | string | Default output format |
 | `no-color` | boolean | Never colour the output |
 | `verbose` | boolean | Always log requests and responses |

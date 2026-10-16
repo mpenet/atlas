@@ -1,5 +1,5 @@
-;; ABOUTME: SHA-256 (FIPS 180-4), base64 and base64url in pure Lua 5.4,
-;; ABOUTME: used for OAuth PKCE S256 challenges and HTTP Basic credentials.
+;; ABOUTME: SHA-256, HMAC-SHA256, base64, base64url and hex in pure Lua 5.4: for
+;; ABOUTME: OAuth PKCE, HTTP Basic credentials, and auth plugins signing requests.
 
 (local k [0x428a2f98
           0x71374491
@@ -141,8 +141,42 @@
                  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
                  false))
 
+(local base64-values (collect [i c (string.gmatch "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+                                                  "()(.)")]
+                       c
+                       (- i 1)))
+
+(fn unbase64 [text]
+  "The bytes standard, padded base64 text encodes (RFC 4648 §4); raises for
+anything else."
+  (when (or (not= 0 (% (length text) 4)) (not (text:match "^[%w+/]*=?=?$")))
+    (error "invalid base64" 2))
+  (let [out []]
+    (for [i 1 (length text) 4]
+      (let [quad (text:sub i (+ i 3))
+            pads (length (or (quad:match "=+$") ""))
+            n (accumulate [n 0 c (quad:gmatch ".")]
+                (bor (lshift n 6) (or (. base64-values c) 0)))
+            bytes (string.char (band (rshift n 16) 255) (band (rshift n 8) 255)
+                               (band n 255))]
+        (table.insert out (bytes:sub 1 (- 3 pads)))))
+    (table.concat out)))
+
+(fn xor-bytes [s byte]
+  (pick-values 1 (s:gsub "." #(string.char (bxor (string.byte $) byte)))))
+
+(fn hmac-sha256 [key message]
+  "Raw 32-byte HMAC-SHA256 of message with key (RFC 2104)."
+  (let [key (if (> (length key) 64) (sha256 key) key)
+        key (.. key (string.rep "\0" (- 64 (length key))))]
+    (sha256 (.. (xor-bytes key 0x5c) (sha256 (.. (xor-bytes key 0x36) message))))))
+
+(fn hex [bytes]
+  "bytes as lowercase hexadecimal."
+  (pick-values 1 (bytes:gsub "." #(string.format "%02x" (string.byte $)))))
+
 (fn pkce-challenge [verifier]
   "S256 code challenge for an OAuth PKCE code verifier (RFC 7636)."
   (base64url (sha256 verifier)))
 
-{: sha256 : base64 : base64url : pkce-challenge}
+{: sha256 : hmac-sha256 : base64 : unbase64 : base64url : hex : pkce-challenge}

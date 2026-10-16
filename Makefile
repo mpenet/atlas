@@ -246,14 +246,22 @@ $(NATIVE_BUILD)/atlas-bin.lua: $(LUA_TARGETS) fnl/atlas-bin.fnl
 
 $(NATIVE_BUILD)/embed: c/embed.c $(if $(DEPS_FROM_SOURCE),$(DEPS_STAMP))
 	@mkdir -p $(NATIVE_BUILD)
-	$(CC) -O2 -Wall -I$(LUA_INC) c/embed.c $(LUA_LIB) -lm $(if $(filter Darwin,$(UNAME_S)),,-ldl) -o $@
+	$(CC) -O2 -Wall -I$(LUA_INC) c/embed.c $(LUA_LIB) $(ZLIB_LDFLAGS) -lm $(if $(filter Darwin,$(UNAME_S)),,-ldl) -o $@
 
 $(NATIVE_BUILD)/atlas_program.c: $(NATIVE_BUILD)/atlas-bin.lua $(NATIVE_BUILD)/embed
 	$(NATIVE_BUILD)/embed $(NATIVE_BUILD)/atlas-bin.lua $@
 
-binary: $(NATIVE_BUILD)/atlas_program.c c/atlas_main.c native-libs
+# The Fennel compiler, for auth plugins written in Fennel: deflated, and
+# inflated only when one is loaded.
+FENNEL_LUA ?= $(shell LUA_PATH="$(shell luarocks path --lr-path 2>/dev/null)" lua -e 'print(package.searchpath("fennel", package.path) or "")')
+
+$(NATIVE_BUILD)/fennel_source.c: $(FENNEL_LUA) $(NATIVE_BUILD)/embed
+	@test -n "$(FENNEL_LUA)" || { echo "fennel.lua not found: install fennel with luarocks, or set FENNEL_LUA"; exit 1; }
+	$(NATIVE_BUILD)/embed --deflated fennel_source $(FENNEL_LUA) $@
+
+binary: $(NATIVE_BUILD)/atlas_program.c $(NATIVE_BUILD)/fennel_source.c c/atlas_main.c native-libs
 	@mkdir -p bin
-	$(CC) $(NATIVE_CFLAGS) -Wall -I$(LUA_INC) c/atlas_main.c $(NATIVE_BUILD)/atlas_program.c \
+	$(CC) $(NATIVE_CFLAGS) -Wall -I$(LUA_INC) c/atlas_main.c $(NATIVE_BUILD)/atlas_program.c $(NATIVE_BUILD)/fennel_source.c \
 	  $(NATIVE_BUILD)/libsocket_core.a $(NATIVE_BUILD)/libatlas_curl.a $(NATIVE_BUILD)/liblyaml_ext.a \
 	  $(CURL_PREFIX)/lib/libcurl.a $(TLS_LDFLAGS) $(ZLIB_LDFLAGS) $(LIBYAML_LDFLAGS) \
 	  $(LUA_LIB) -lm $(SYSTEM_LDFLAGS) $(STATIC_LDFLAGS) $(DEAD_STRIP) -o bin/atlas-bin

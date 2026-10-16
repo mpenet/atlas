@@ -1,5 +1,5 @@
 ;; ABOUTME: Profile authentication: OAuth 2.0 flows with a token cache, and
-;; ABOUTME: external-tool bearer tokens or per-request signing.
+;; ABOUTME: per-request signing by an external tool or a plugin's function.
 (local json (require :atlas.json))
 (local http (require :atlas.http))
 (local util (require :atlas.util))
@@ -46,6 +46,10 @@
         :oauth-device-authorization [:device_authorization_url
                                      :token_url
                                      :client_id]})
+
+(fn built-in? [name]
+  "Whether atlas itself provides authentication method name."
+  (not= nil (. required-params name)))
 
 (fn check-params [auth-config]
   "Raise naming the first parameter auth-config's method needs and lacks;
@@ -464,9 +468,11 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
   api-key in the query string: returns {} — the parameter is added via wrap-http-fn.
   For external-tool with output=bearer-token: runs command once, returns Authorization header.
   For external-tool signing mode: returns {} — per-request headers come via wrap-http-fn.
-  OAuth types: returns {:authorization 'Bearer <token>'}."
+  OAuth types: returns {:authorization 'Bearer <token>'}.
+  A plugin's signing function (:sign): returns {} — it signs each request."
   (check-params auth-config)
-  (match auth-config.name
+  (match (if auth-config.sign :plugin auth-config.name)
+    :plugin {}
     "bearer" {:authorization (.. "Bearer " (required-param auth-config :token))}
     "basic" {:authorization (.. "Basic "
                                 (digest.base64 (.. (required-param auth-config
@@ -487,8 +493,10 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
 
 (fn header-names [auth-config]
   "Lowercased names of the headers get-headers will supply, without running
-any auth flow; signing tools and query api-keys supply none up front."
-  (match auth-config.name
+any auth flow; signing tools and plugins, and query api-keys, supply none up
+front."
+  (match (if auth-config.sign :plugin auth-config.name)
+    :plugin []
     "api-key" (match (?. auth-config :params :in)
                 :query []
                 :cookie [:cookie]
@@ -528,43 +536,90 @@ doesn't go away by trying again."
                (table.insert name)))
         (base-fn out)))))
 
+(fn wrap-signer [sign base-fn]
+  "base-fn sending each request with the headers (sign request) returns, a
+request whose URL has its query string and whose body is encoded, so the
+signature covers what goes on the wire."
+  (fn [caller-req]
+    ;; signing rewrites url, body and headers: work on a copy
+    (local req (collect [k v (pairs caller-req)] k v))
+    (tset req :headers (collect [k v (pairs (or req.headers {}))]
+                         k
+                         v))
+    (as-permanent #(do
+                     ;; sign the URL that goes on the wire, query string
+                     ;; included
+                     (when req.query
+                       (tset req :url
+                             (util.append-query req.url req.query
+                                                req.query-styles))
+                       (tset req :query nil))
+                     ;; pre-encode body so signing and wire use identical
+                     ;; bytes
+                     (when (and req.body (not req.raw-body))
+                       (let [(_ payload headers) (http.encode-request req)]
+                         (tset req :raw-body payload)
+                         (tset req :headers headers)
+                         (tset req :body nil)))))
+    (let [extra (as-permanent sign req)]
+      (when extra
+        ;; what the signer adds is a credential, whatever its name
+        (set req.sensitive-headers (icollect [_ n (ipairs (or req.sensitive-headers
+                                                              []))]
+                                     n))
+        (each [k vs (pairs extra)]
+          (tset req.headers k (if (= (type vs) :table) (. vs 1) vs))
+          (table.insert req.sensitive-headers k)))
+      (base-fn req))))
+
+;; what plugins get to sign requests with
+(local plugin-helpers
+       {:sha256 digest.sha256
+        :hmac_sha256 digest.hmac-sha256
+        :base64 digest.base64
+        :unbase64 digest.unbase64
+        :hex digest.hex
+        :json {:encode json.encode :decode json.decode}
+        :url {:parse (. (require :socket.url) :parse)
+              ;; [[name value] ...] in order, decoded
+              :query (fn [query]
+                       (icollect [pair (string.gmatch (or query "") "[^&]+")]
+                         (let [(name value) (pair:match "^([^=]*)=?(.*)$")]
+                           [(util.url-decode name) (util.url-decode value)])))}})
+
+(fn plugin-headers [auth-config req]
+  "The headers auth-config's plugin function adds to req: it gets the request
+as sent ({:method :url :headers :body}), the auth parameters (env: values
+read) and the helpers, and returns {:headers {name value}}."
+  (let [params (collect [k v (pairs (or auth-config.params {}))]
+                 k
+                 (expand-env v))
+        (ok result) (pcall auth-config.sign
+                           {:method req.method
+                            :url req.url
+                            :headers (collect [k v (pairs req.headers)] k v)
+                            :body req.raw-body}
+                           params plugin-helpers)
+        fail #(error (.. "auth plugin '" (tostring auth-config.name)
+                         "' failed: " $) 0)]
+    (when (not ok)
+      (fail (tostring result)))
+    (when (not (and (= (type result) :table)
+                    (or (= nil result.headers) (= (type result.headers) :table))))
+      (fail "it must return a table with the headers to add, like {:headers {...}}"))
+    result.headers))
+
 (fn wrap-signing [auth-config base-fn]
-  (when (and (= auth-config.name "external-tool")
-             (not= (?. auth-config :params :output) "bearer-token"))
-    (let [params auth-config.params]
-      (fn [caller-req]
-        ;; signing rewrites url, body and headers: work on a copy
-        (local req (collect [k v (pairs caller-req)] k v))
-        (tset req :headers (collect [k v (pairs (or req.headers {}))]
-                             k
-                             v))
-        (as-permanent #(do
-                         ;; sign the URL that goes on the wire, query string
-                         ;; included
-                         (when req.query
-                           (tset req :url
-                                 (util.append-query req.url req.query
-                                                    req.query-styles))
-                           (tset req :query nil))
-                         ;; pre-encode body so signing and wire use identical
-                         ;; bytes
-                         (when (and req.body (not req.raw-body))
-                           (let [(_ payload headers) (http.encode-request req)]
-                             (tset req :raw-body payload)
-                             (tset req :headers headers)
-                             (tset req :body nil)))))
-        (let [extra (as-permanent #(do
-                                     (check-params auth-config)
-                                     (external-signing-headers params req)))]
-          (when extra
-            ;; what the tool adds is a credential, whatever its name
-            (set req.sensitive-headers
-                 (icollect [_ n (ipairs (or req.sensitive-headers []))]
-                   n))
-            (each [k vs (pairs extra)]
-              (tset req.headers k (if (= (type vs) :table) (. vs 1) vs))
-              (table.insert req.sensitive-headers k)))
-          (base-fn req))))))
+  "base-fn signing each request when auth-config signs requests: with a
+plugin's function, or an external tool."
+  (if auth-config.sign
+      (wrap-signer #(plugin-headers auth-config $) base-fn)
+      (and (= auth-config.name "external-tool")
+           (not= (?. auth-config :params :output) "bearer-token"))
+      (wrap-signer #(do
+                      (check-params auth-config)
+                      (external-signing-headers auth-config.params $))
+                   base-fn)))
 
 (fn wrap-http-fn [auth-config base-fn]
   "Returns a per-request wrapper (query api-key or signing), or nil if not needed."
@@ -573,6 +628,7 @@ doesn't go away by trying again."
       (wrap-signing auth-config base-fn)))
 
 {: get-headers
+ : built-in?
  : header-names
  : wrap-http-fn
  : api-key-in-query?

@@ -1506,6 +1506,29 @@ does, which a streaming transport hands over one by one."
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find "nope/restish.json" 1 true))))))))
 
+(describe "auth plugins"
+          (fn []
+            (it "sign each request of a profile whose auth a plugin provides"
+                (fn []
+                  (let [path (.. (os.tmpname) ".fnl")]
+                    (with-open [f (io.open path :w)]
+                      (f:write "{:auth {:demo (fn [req params atlas] {:headers {:authorization (.. \"Demo \" (atlas.hex (atlas.sha256 req.url)) \" \" params.key)}})}}"))
+                    (os.execute (.. "chmod 600 " path))
+                    (let [r (with-config {:plugins [path]
+                                          :profiles {:p {:base-url "https://api.test"
+                                                         :auth {:name "demo"
+                                                                :params {:key "k1"}}}}}
+                              #(atlas-run ["http" "/pets/7" "--profile=p"]
+                                          {"GET https://api.test/pets/7" (respond 200
+                                                                                  {})}))
+                          digest (require :atlas.digest)]
+                      (os.remove path)
+                      (assert.are.equal 0 r.code)
+                      (assert.are.equal (.. "Demo "
+                                            (digest.hex (digest.sha256 "https://api.test/pets/7"))
+                                            " k1")
+                                        (. r.requests 1 :headers :authorization))))))))
+
 (describe "atlas http"
           (fn []
             (it "says how long each exchange took with --timing"

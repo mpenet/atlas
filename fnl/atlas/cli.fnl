@@ -18,6 +18,7 @@
         : check-body} (require :atlas.cli.request))
 
 (local {: parse-args} (require :atlas.cli.args))
+(local plugins (require :atlas.cli.plugins))
 (local restish (require :atlas.cli.restish))
 (local json (require :atlas.json))
 (local {: list-ops
@@ -166,9 +167,11 @@ profiles are kept. --dry-run prints the converted profiles instead."
     (die "Usage: atlas auth <profile> [--logout]"))
   (let [profile (or (find-profile config profile-name)
                     (die (.. "Profile not found: " profile-name)))
-        auth-cfg (?. profile :auth)]
-    (when (not (and auth-cfg auth-cfg.name (not= auth-cfg.name "")))
-      (die (.. "No auth configured for profile: " profile-name)))
+        auth-cfg (let [a (?. profile :auth)]
+                   (when (not (and a a.name (not= a.name "")))
+                     (die (.. "No auth configured for profile: " profile-name)))
+                   (let [(ok resolved) (pcall plugins.resolve-auth config a)]
+                     (if ok resolved (die (tostring resolved)))))]
     (let [net {:ssl (merge-ssl profile p.ssl)
                :timeout (request-timeout profile p config)}
           headers #(let [(ok h) (pcall auth.get-headers profile-name auth-cfg
@@ -178,6 +181,9 @@ profiles are kept. --dry-run prints the converted profiles instead."
           (do
             (auth.clear-token profile-name)
             (print (.. "Logged out: " profile-name)))
+          auth-cfg.sign
+          (print (.. "signs each request with auth " auth-cfg.name
+                     " from plugin " auth-cfg.plugin))
           (. {:external-tool true :bearer true :basic true :api-key true}
              auth-cfg.name)
           (let [h (headers)

@@ -47,6 +47,8 @@
 
 (require :atlas.auth)
 
+(require :atlas.cli.plugins)
+
 (require :atlas)
 
 (require :atlas.unicode-categories)
