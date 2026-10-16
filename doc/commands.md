@@ -52,6 +52,7 @@ Options go anywhere after the command. `--name=value` and `--name value` are equ
 | `--output=FORMAT` | `json` (default), `yaml`, `raw`, `table`, `csv`, `tsv`, `status` or `headers` (anything else is an error); see [Output formats](output.md#output-formats) |
 | `--no-color` | Never colour the output (colours are only used on a terminal anyway) |
 | `-v`, `--verbose` | Log the request and the response status and headers on stderr |
+| `--timing` | Log a line per request on stderr: method, URL, status, and how long each phase took (`dns 3ms · tcp 17ms · tls 25ms · server 75ms · download 5ms · total 126ms`); phases a reused connection skips are left out. `-v` shows the same timings |
 | `--dry-run` | Print the request instead of sending it; credentials redacted |
 | `--curl` | Print an equivalent `curl` command instead of sending (credentials included) |
 | `--no-validate` | Send even when the request doesn't match the spec; see [Checks](requests.md#checks-before-sending) |

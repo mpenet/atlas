@@ -8,8 +8,11 @@
 (local util (require :atlas.util))
 (local http-mod (require :atlas.http))
 (local json (require :atlas.json))
-(local {: wrap-log-request : request-text : curl-command : printing-transport}
-       (require :atlas.cli.output))
+(local {: wrap-log-request
+        : wrap-log-timing
+        : request-text
+        : curl-command
+        : printing-transport} (require :atlas.cli.output))
 
 (fn config-path []
   (.. (util.config-dir) "/config.json"))
@@ -268,7 +271,9 @@ request signing, logging, and the transport (or dry-run printing)."
         transport (if p.curl (printing-transport curl-command) p.dry-run
                       (printing-transport request-text)
                       (or ?transport http-mod.request))
-        logged (if verbose (wrap-log-request transport) transport)
+        logged (if verbose (wrap-log-request transport)
+                   p.timing (wrap-log-timing transport)
+                   transport)
         ;; nor run a signing tool or read a query key
         wrapper-cfg (if (and dry-run auth-cfg (auth.api-key-in-query? auth-cfg))
                         (doto (collect [k v (pairs auth-cfg)] k v)

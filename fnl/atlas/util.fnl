@@ -92,6 +92,17 @@ controls and the overrides that reorder text on screen as \\u{HHHH}."
   "Whether file descriptor fd (1 stdout, 2 stderr) is a terminal."
   (= true (os.execute (.. "test -t " fd))))
 
+(fn duration [seconds]
+  "seconds for a person: 205ms, 1.50s, 12.3s, 2m03s."
+  (if (< seconds 1)
+      (string.format "%dms" (math.floor (+ (* seconds 1000) 0.5)))
+      (< seconds 10)
+      (string.format "%.2fs" seconds)
+      (< seconds 60)
+      (string.format "%.1fs" seconds)
+      (string.format "%dm%02ds" (math.floor (/ seconds 60))
+                     (math.floor (% seconds 60)))))
+
 (fn terminal-columns []
   "Columns of the terminal on stderr, else $COLUMNS, else nil."
   (let [h (io.popen "stty size <&2 2>/dev/null")
@@ -417,6 +428,7 @@ inside them are safe."
  : json-content?
  : terminal?
  : terminal-columns
+ : duration
  : query-has?
  : permanent-error
  : secret-name?

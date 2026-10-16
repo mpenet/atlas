@@ -30,7 +30,7 @@ The function receives a single table and must return a `{:status :headers :body}
   {:status 200 :headers {} :body {:ok true}})
 ```
 
-A response may also carry `:raw`, the body's text; pagination merges pages from it when present, from `:body` otherwise.
+A response may also carry `:raw`, the body's text; pagination merges pages from it when present, from `:body` otherwise. Responses from `atlas.http.request` carry `:timings`: the seconds from the start of the exchange to the end of each phase, as libcurl measures them (`:namelookup`, `:connect`, `:appconnect` for TLS, `:pretransfer`, `:starttransfer` for the first byte, `:total`).
 
 The default `atlas.http.request` function handles query-string encoding, content-type aware body encoding, timeouts and TLS options — your replacement must handle all of these itself.
 

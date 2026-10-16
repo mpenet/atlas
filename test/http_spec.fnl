@@ -655,6 +655,30 @@ c:close()")
 (local sse-head
        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
 
+(describe "timings"
+          (fn []
+            (it "says how long each part of an exchange took"
+                (fn []
+                  (let [http (require :atlas.http)
+                        (url close) (serve-once ["HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n"
+                                                 "ok"]
+                                                0.05)
+                        resp (http.request {:method "GET" : url})
+                        t resp.timings]
+                    (close)
+                    (assert.are.equal 200 resp.status)
+                    (each [_ k (ipairs [:namelookup
+                                        :connect
+                                        :appconnect
+                                        :pretransfer
+                                        :starttransfer
+                                        :total])]
+                      (assert.are.equal :number (type (. t k)) k))
+                    (assert.is_true (<= t.connect t.starttransfer))
+                    (assert.is_true (<= t.starttransfer t.total))
+                    ;; the body came 50ms after the headers
+                    (assert.is_true (>= (- t.total t.starttransfer) 0.03)))))))
+
 (describe "streaming"
           (fn []
             (it "hands the body over as it arrives"

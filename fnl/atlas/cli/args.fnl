@@ -137,6 +137,10 @@
          :scope :any
          :also [:mcp]
          :help "Show status, headers and requests"}
+        {:names ["--timing"]
+         :key :timing
+         :scope :any
+         :help "Show how long each request took, phase by phase"}
         {:names ["--reload"]
          :key :reload
          :scope :op

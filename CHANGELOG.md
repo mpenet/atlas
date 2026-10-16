@@ -2,6 +2,12 @@
 
 All notable changes to atlas. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `--timing` logs a line per request: method, URL, status and how long each phase took (dns, tcp, tls, server, download, total). `-v` shows the same timings for each exchange, and the library's responses carry them as `:timings`.
+
 ## [1.0.0-beta7] - 2026-10-16
 
 ### Changed

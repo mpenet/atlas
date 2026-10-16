@@ -36,13 +36,40 @@ headers in the set ?names (lowercase)."
 from specs and servers."
   (io.stderr:write (.. (util.printable text) "\n")))
 
+(fn timing-text [t]
+  "How long the phases of an exchange took, from libcurl's timings (seconds
+since its start): dns, tcp, tls, server (until the first byte), download and
+total; phases that took no time (a reused connection's) are left out."
+  (let [phases [[:dns t.namelookup]
+                [:tcp (- t.connect t.namelookup)]
+                [:tls (if (> t.appconnect 0) (- t.appconnect t.connect) 0)]
+                [:server (- t.starttransfer t.pretransfer)]
+                [:download (- t.total t.starttransfer)]]
+        parts (icollect [_ [name seconds] (ipairs phases)]
+                ;; less than half a millisecond shows as 0ms: noise
+                (when (>= seconds 0.0005)
+                  (.. name " " (util.duration seconds))))]
+    (table.insert parts (.. "total " (util.duration t.total)))
+    (table.concat parts " · ")))
+
+(fn exchange-url [req]
+  "The URL a request went to, its secret query parameters redacted."
+  (util.redact-url (util.append-query (or req.url "?") (or req.query {})
+                                      req.query-styles)
+                   req.sensitive-query))
+
+(fn wrap-log-timing [http-fn]
+  "http-fn logging a line per exchange: method, URL, status and timing."
+  (fn [req]
+    (let [resp (http-fn req)]
+      (when (and resp resp.timings)
+        (log (.. (or req.method "?") " " (exchange-url req) "  "
+                 (tostring resp.status) "  " (timing-text resp.timings))))
+      resp)))
+
 (fn wrap-log-request [http-fn]
   (fn [req]
-    (log (.. "> " (or req.method "?") " "
-             (util.redact-url (util.append-query (or req.url "?")
-                                                 (or req.query {})
-                                                 req.query-styles)
-                              req.sensitive-query)))
+    (log (.. "> " (or req.method "?") " " (exchange-url req)))
     (when req.body
       (log (.. "> body: " (if (= (type req.body) :table)
                               (json.encode req.body)
@@ -54,6 +81,8 @@ from specs and servers."
     (let [resp (http-fn req)
           asked (util.append-query (or req.url "") (or req.query {})
                                    req.query-styles)]
+      (when (and resp resp.timings)
+        (log (.. "< " (tostring resp.status) "  " (timing-text resp.timings))))
       ;; redirects are followed below: say where the answer came from
       (when (and resp resp.url (not= resp.url asked))
         (log (.. "< redirected to "
@@ -690,6 +719,8 @@ variable shows the value in effect."
 
 {: redact-header
  : wrap-log-request
+ : wrap-log-timing
+ : timing-text
  : op?
  : list-ops
  : select-path

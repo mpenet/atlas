@@ -1508,6 +1508,24 @@ does, which a streaming transport hands over one by one."
 
 (describe "atlas http"
           (fn []
+            (it "says how long each exchange took with --timing"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "GET"
+                                      "https://api.test/pets/7"
+                                      "--timing"]
+                                     {"GET https://api.test/pets/7" (doto (respond 200
+                                                                                   {:name "Rex"})
+                                                                      (tset :timings
+                                                                            {:namelookup 0.001
+                                                                             :connect 0.002
+                                                                             :appconnect 0.003
+                                                                             :pretransfer 0.003
+                                                                             :starttransfer 0.01
+                                                                             :total 0.011}))})]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "GET https://api.test/pets/7  200  dns 1ms · tcp 1ms · tls 1ms · server 7ms · download 1ms · total 11ms\n"
+                                      r.err))))
             (it "sends a request with the profile's headers and auth"
                 (fn []
                   (let [r (atlas-run ["http"

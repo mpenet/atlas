@@ -220,6 +220,56 @@
                                                               nil 0.5))]
                     (assert.are.equal "{\n  \"x\": 1\n}" out)
                     (assert.are.equal "HTTP 200  0.500s\na: 1\nb: 2\n\n" err))))
+            (it "logs how long each phase of an exchange took"
+                (fn []
+                  (let [(_ _ err) (capture #((cli.wrap-log-request (fn [_]
+                                                                     {:status 200
+                                                                      :headers {}
+                                                                      :timings {:namelookup 0.003
+                                                                                :connect 0.02
+                                                                                :appconnect 0.045
+                                                                                :pretransfer 0.046
+                                                                                :starttransfer 0.121
+                                                                                :total 0.126}})) {:method "GET"
+                                                                                                  :url "https://api.test/x"
+                                                                                                  :headers {}}))]
+                    (assert.is_truthy (err:find "< 200  dns 3ms · tcp 17ms · tls 25ms · server 75ms · download 5ms · total 126ms"
+                                                1 true)
+                                      err))))
+            (it "leaves out the phases of a connection it reused"
+                (fn []
+                  (assert.are.equal "server 50ms · download 1ms · total 51ms"
+                                    (cli.timing-text {:namelookup 0
+                                                      :connect 0
+                                                      :appconnect 0
+                                                      :pretransfer 0.0001
+                                                      :starttransfer 0.05
+                                                      :total 0.051}))
+                  ;; plain HTTP has no TLS handshake
+                  (assert.are.equal "dns 1ms · tcp 2ms · server 7ms · total 10ms"
+                                    (cli.timing-text {:namelookup 0.001
+                                                      :connect 0.003
+                                                      :appconnect 0
+                                                      :pretransfer 0.003
+                                                      :starttransfer 0.01
+                                                      :total 0.01}))))
+            (it "logs only each exchange's line and timing with --timing"
+                (fn []
+                  (let [(_ _ err) (capture #((cli.wrap-log-timing (fn [_]
+                                                                    {:status 404
+                                                                     :headers {}
+                                                                     :timings {:namelookup 0
+                                                                               :connect 0
+                                                                               :appconnect 0
+                                                                               :pretransfer 0
+                                                                               :starttransfer 0.02
+                                                                               :total 0.02}})) {:method "GET"
+                                                                                                :url "https://api.test/x"
+                                                                                                :query {:token "s3cret"}
+                                                                                                :sensitive-query [:token]
+                                                                                                :headers {:authorization "Bearer no"}}))]
+                    (assert.are.equal "GET https://api.test/x?token=<redacted>  404  server 20ms · total 20ms\n"
+                                      err))))
             (it "logs where a redirected request ended"
                 (fn []
                   (let [(_ _ err) (capture #((cli.wrap-log-request (fn [_]

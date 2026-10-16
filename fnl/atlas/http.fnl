@@ -283,7 +283,9 @@ gets every piece. What it raises is never retried."
   "One HTTP exchange; redirects are followed by request, not by the transport.
 With req.stream (fn [status headers] consumer-or-nil), a response the
 consumer takes is handed to it piece by piece (then nil), and comes back
-with :streamed true and no body."
+with :streamed true and no body. The response's :timings are the seconds from
+the start to the end of each phase: :namelookup :connect :appconnect (TLS)
+:pretransfer :starttransfer (first byte) :total."
   (let [(ok url payload headers) (pcall encode-request req)
         _ (when (not ok)
             (error (util.permanent-error (tostring url))))
@@ -296,7 +298,7 @@ with :streamed true and no body."
                      (not= nil
                            (: (or (util.header headers "accept") "") :find
                               "text/event-stream" 1 true))))
-        (status head body) (curl.perform args)
+        (status head body timings) (curl.perform args)
         failure (when (not status)
                   (string.format "%s %s failed: %s" req.method
                                  (util.redact-url url req.sensitive-query)
@@ -306,12 +308,13 @@ with :streamed true and no body."
       ;; repeat it
       (error (if (?. stream :consumer) (util.permanent-error failure) failure)
              0))
-    (if (?. stream :consumer)
-        (do
-          (stream.consumer nil)
-          (doto (decode-response status (parse-headers head) "")
-            (tset :streamed true)))
-        (decode-response status (parse-headers head) body))))
+    (doto (if (?. stream :consumer)
+              (do
+                (stream.consumer nil)
+                (doto (decode-response status (parse-headers head) "")
+                  (tset :streamed true)))
+              (decode-response status (parse-headers head) body))
+      (tset :timings timings))))
 
 (fn request [req]
   (follow-redirects send req))

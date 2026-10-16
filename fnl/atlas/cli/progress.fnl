@@ -5,20 +5,9 @@
 (local width (require :atlas.cli.width))
 (local pretty (require :atlas.pretty))
 
-(fn duration [seconds]
-  "seconds for a person: 205ms, 1.50s, 12.3s, 2m03s."
-  (if (< seconds 1)
-      (string.format "%dms" (math.floor (+ (* seconds 1000) 0.5)))
-      (< seconds 10)
-      (string.format "%.2fs" seconds)
-      (< seconds 60)
-      (string.format "%.1fs" seconds)
-      (string.format "%dm%02ds" (math.floor (/ seconds 60))
-                     (math.floor (% seconds 60)))))
-
 (fn wait-text [seconds]
   "A wait before running a step again: 3s, 0.5s, 1m30s."
-  (if (>= seconds 60) (duration seconds)
+  (if (>= seconds 60) (util.duration seconds)
       (= seconds (math.floor seconds)) (string.format "%ds" seconds)
       (string.format "%.1fs" seconds)))
 
@@ -135,8 +124,8 @@ leaves ?header in its place."
             attempts (if streak (+ 1 (- e.attempt streak.first)) 1)
             timing (if (> attempts 1)
                        (.. attempts " attempts · "
-                           (duration (- e.at streak.start)))
-                       (duration (or e.elapsed 0)))
+                           (util.duration (- e.at streak.start)))
+                       (util.duration (or e.elapsed 0)))
             status (status-text e)]
         (.. (head e mark) "  " timing (if status (.. "  " status) "")
             (if ?extra (.. "  " ?extra) ""))))
@@ -182,8 +171,8 @@ leaves ?header in its place."
         (if (and streak (. looping slot))
             (when tty
               (let [line (.. (head e (paint :warn "↻")) "  attempt "
-                             e.attempt " · " (duration (- e.at streak.start))
-                             " …")]
+                             e.attempt " · "
+                             (util.duration (- e.at streak.start)) " …")]
                 (show line slot line)))
             (do
               (tset streaks slot {:start e.at :first e.attempt})
@@ -222,6 +211,6 @@ leaves ?header in its place."
                (end-pending)
                (write (.. (if ok (paint :ok "✓") (paint :fail "✗"))
                           " workflow " (one-line workflow-id)
-                          (if ok "" " failed") "  " (duration seconds) "\n")))}))
+                          (if ok "" " failed") "  " (util.duration seconds) "\n")))}))
 
-{: reporter : duration}
+{: reporter}

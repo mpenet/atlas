@@ -95,9 +95,30 @@ static const char *opt_string(lua_State *L, int t, const char *key) {
   return s;
 }
 
+/* Seconds from the start of the exchange to the end of each of its
+ * phases, as libcurl measures them: name lookup, TCP connect, TLS
+ * handshake, ready to send, first byte of the response, and done. */
+static void push_timings(lua_State *L) {
+  static const struct { const char *name; CURLINFO info; } phases[] = {
+    {"namelookup", CURLINFO_NAMELOOKUP_TIME_T},
+    {"connect", CURLINFO_CONNECT_TIME_T},
+    {"appconnect", CURLINFO_APPCONNECT_TIME_T},
+    {"pretransfer", CURLINFO_PRETRANSFER_TIME_T},
+    {"starttransfer", CURLINFO_STARTTRANSFER_TIME_T},
+    {"total", CURLINFO_TOTAL_TIME_T},
+  };
+  lua_createtable(L, 0, sizeof phases / sizeof phases[0]);
+  for (size_t i = 0; i < sizeof phases / sizeof phases[0]; i++) {
+    curl_off_t us = 0;
+    curl_easy_getinfo(handle, phases[i].info, &us);
+    lua_pushnumber(L, (lua_Number)us / 1e6);
+    lua_setfield(L, -2, phases[i].name);
+  }
+}
+
 /* perform{method, url, headers = {"Name: value", ...}, body, timeout,
  *         verify, cafile, capath, cert, key, idle, on_data}
- * -> status, header_text, body | nil, message
+ * -> status, header_text, body, timings | nil, message
  * on_data(chunk, status, header_text), when given, sees each piece of the
  * body as it arrives and returns true when it took it (else it is kept in
  * the body returned); an error it raises ends the transfer and is raised.
@@ -260,9 +281,10 @@ static int perform(lua_State *L) {
   lua_pushinteger(L, status);
   lua_pushlstring(L, head.data ? head.data : "", head.len);
   lua_pushlstring(L, out.data ? out.data : "", out.len);
+  push_timings(L);
   free(head.data);
   free(out.data);
-  return 3;
+  return 4;
 }
 
 static int version(lua_State *L) {
