@@ -1,15 +1,23 @@
-;; ABOUTME: I-Regexp (RFC 9485), the regular expressions of JSONPath: compiles a
-;; ABOUTME: pattern to a program run as a Pike VM, in time linear in the text.
+;; ABOUTME: I-Regexp (RFC 9485), the regular expressions of JSONPath, and an ECMAScript
+;; ABOUTME: subset: compiles a pattern to a Pike VM program, linear in the text.
 (local categories (require :atlas.unicode-categories))
 
 ;; a pattern is compiled to instructions:
 ;;   {:op :char :test (fn [cp] bool)}  consume one code point that passes
 ;;   {:op :split :x pc :y pc}           go on at both
 ;;   {:op :jmp :x pc}                   go on at x
+;;   {:op :assert :test (fn [prev cur])} go on if the code points around the
+;;                                      position (nil at the ends) pass
 ;;   {:op :match}                       the pattern matched
 ;; and run by advancing every possible position in the program together, one
 ;; code point at a time: no backtracking, so no pattern can take exponential
 ;; time (I-Regexp has no back-references, which would need it).
+;;
+;; With {:ecmascript true}, compile also reads the ECMAScript syntax that fits
+;; this machine: ^ and $ (of the whole text), \b and \B, \d \D \w \W \s \S,
+;; \f \v \xHH \uHHHH, escaped punctuation, (?:…) and (?<name>…) groups and
+;; lazy quantifiers (the same as greedy ones when only asking whether a text
+;; matches). Back-references, lookaround and flags are refused.
 
 ;; a bound on the program, so {m,n} can't make one too large to run
 (local max-instructions 20000)
@@ -51,6 +59,44 @@
                 :n "\n"
                 :r "\r"
                 :t "\t"})
+
+(fn ascii-punctuation? [c]
+  (and c (c:match "^%p$") true))
+
+(fn digit? [cp]
+  (and (<= 48 cp) (<= cp 57)))
+
+(fn word? [cp]
+  (if cp
+      (or (digit? cp) (and (<= 65 cp) (<= cp 90)) (and (<= 97 cp) (<= cp 122))
+          (= cp 95))
+      false))
+
+(local spaces {9 true
+               10 true
+               11 true
+               12 true
+               13 true
+               32 true
+               160 true
+               5760 true
+               8232 true
+               8233 true
+               8239 true
+               8287 true
+               12288 true
+               65279 true})
+
+(fn space? [cp]
+  (or (. spaces cp) (and (<= 8192 cp) (<= cp 8202))))
+
+;; ECMAScript class escapes
+(local shorthands {:d digit?
+                   :D #(not (digit? $))
+                   :w word?
+                   :W #(not (word? $))
+                   :s space?
+                   :S #(not (space? $))})
 
 (local category-names {:L true
                        :Ll true
@@ -121,6 +167,37 @@
     (let [test (in-category name)]
       (if complement #(not (test $)) test))))
 
+(fn hex-escape [p digits]
+  "The code point of the digits hex digits that follow."
+  (var text "")
+  (for [_ 1 digits]
+    (let [c (take p)]
+      (when (not (and c (c:match "^%x$")))
+        (fail p.pattern "bad hexadecimal escape"))
+      (set text (.. text c))))
+  (tonumber text 16))
+
+(fn ecmascript-escape [p c]
+  "(kind value) of an ECMAScript-only escape c, or nil."
+  (if (. shorthands c) (do
+                         (take p)
+                         (values :test (. shorthands c)))
+      (= c "f") (do
+                  (take p)
+                  (values :char 12))
+      (= c "v") (do
+                  (take p)
+                  (values :char 11))
+      (= c "x") (do
+                  (take p)
+                  (values :char (hex-escape p 2)))
+      (= c "u") (do
+                  (take p)
+                  (values :char (hex-escape p 4)))
+      (ascii-punctuation? c) (do
+                               (take p)
+                               (values :char (utf8.codepoint c)))))
+
 (fn escape [p]
   "After a backslash: (:char code-point) or (:test function)."
   (let [c (peek p)]
@@ -129,7 +206,10 @@
         (do
           (take p)
           (values :char (utf8.codepoint (. escapes c))))
-        (fail p.pattern (.. "unknown escape \\" (tostring c))))))
+        (let [(kind v) (when p.ecmascript
+                         (ecmascript-escape p c))]
+          (if kind (values kind v)
+              (fail p.pattern (.. "unknown escape \\" (tostring c))))))))
 
 (fn class-char [p]
   "A class character, or nil when the next one isn't one (CCchar)."
@@ -181,14 +261,45 @@
 
 (var parse-alternatives nil)
 
+(fn group-prefix [p]
+  "Read what follows ( in an ECMAScript pattern: (?:…) and (?<name>…) are
+groups like (…); lookaround and flags are refused."
+  (when (= (peek p) "?")
+    (take p)
+    (let [c (take p)]
+      (if (= c ":") nil (and (= c "<") (peek p) (: (peek p) :match "^[%a_$]$"))
+          (do
+            (while (and (peek p) (not= (peek p) ">"))
+              (take p))
+            (expect p ">"))
+          (fail p.pattern "lookaround and flags are not supported")))))
+
+(fn line-end? [cp]
+  (or (= cp 10) (= cp 13) (= cp 8232) (= cp 8233)))
+
+(local assertions {"^" #(= $1 nil)
+                   "$" #(= $2 nil)
+                   :b #(not= (word? $1) (word? $2))
+                   :B #(= (word? $1) (word? $2))})
+
 (fn atom [p]
-  "One atom as a node: {:kind :test :test f} or a group's alternatives."
+  "One atom as a node: {:kind :test :test f}, {:kind :assert :test f} or a
+group's alternatives."
   (let [c (take p)]
-    (if (= c nil) (fail p.pattern "unexpected end") (= c "(")
-        (let [node (parse-alternatives p)]
-          (expect p ")")
-          node) (= c ".")
-        {:kind :test :test #(and (not= $ 10) (not= $ 13))} (= c "[")
+    (if (= c nil) (fail p.pattern "unexpected end")
+        (and p.ecmascript (or (= c "^") (= c "$")))
+        {:kind :assert :test (. assertions c)}
+        (and p.ecmascript (= c "\\") (or (= (peek p) "b") (= (peek p) "B")))
+        {:kind :assert :test (. assertions (take p))} (= c "(")
+        (do
+          (when p.ecmascript
+            (group-prefix p))
+          (let [node (parse-alternatives p)]
+            (expect p ")")
+            node)) (= c ".")
+        {:kind :test
+         :test (if p.ecmascript #(not (line-end? $))
+                   #(and (not= $ 10) (not= $ 13)))} (= c "[")
         {:kind :test :test (class-expr p)} (= c "\\")
         (let [(kind v) (escape p)]
           (if (= kind :test)
@@ -232,12 +343,25 @@ when none does."
               (fail p.pattern "{m,n} with n < m"))
             (values low high))) (values 1 1))))
 
+(fn lazy [p]
+  "Skip the ? of a lazy ECMAScript quantifier: whether a text matches doesn't
+depend on it."
+  (when (and p.ecmascript (= (peek p) "?"))
+    (take p)))
+
 (fn branch [p]
   (let [pieces []]
     (while (and (peek p) (not= (peek p) "|") (not= (peek p) ")"))
-      (let [node (atom p)
-            (low high) (quantifier p)]
-        (table.insert pieces {:kind :repeat : node :min low :max high})))
+      (let [node (atom p)]
+        ;; an assertion can't be repeated: a quantifier after it is refused
+        ;; as an atom
+        (if (= node.kind :assert)
+            (table.insert pieces node)
+            (let [before p.pos
+                  (low high) (quantifier p)]
+              (when (not= before p.pos)
+                (lazy p))
+              (table.insert pieces {:kind :repeat : node :min low :max high})))))
     {:kind :sequence : pieces}))
 
 (set parse-alternatives
@@ -248,13 +372,13 @@ when none does."
            (table.insert branches (branch p)))
          {:kind :alternatives : branches})))
 
-(fn parse [pattern]
+(fn parse [pattern ecmascript]
   (let [chars []]
     (when (not (utf8.len pattern))
       (fail pattern "not UTF-8"))
     (each [_ cp (utf8.codes pattern)]
       (table.insert chars (utf8.char cp)))
-    (let [p {: chars :pos 1 : pattern}
+    (let [p {: chars :pos 1 : pattern : ecmascript}
           node (parse-alternatives p)]
       (when (peek p)
         (fail pattern (.. "unexpected " (peek p))))
@@ -292,6 +416,7 @@ when none does."
      (fn [prog pattern node]
        (match node.kind
          :test (emit prog pattern {:op :char :test node.test})
+         :assert (emit prog pattern {:op :assert :test node.test})
          :repeat (compile-repeat prog pattern node)
          :sequence (each [_ piece (ipairs node.pieces)]
                      (compile-node prog pattern piece))
@@ -308,18 +433,20 @@ when none does."
                          (each [_ j (ipairs jumps)]
                            (set (. prog j :x) (+ (length prog) 1)))))))
 
-(fn compile [pattern]
+(fn compile [pattern ?opts]
   "The program of I-Regexp pattern; raises \"invalid regular expression: …\"
-for anything RFC 9485 doesn't allow."
+for anything RFC 9485 doesn't allow. ?opts: {:ecmascript true} to read the
+ECMAScript subset described above instead."
   (let [prog []]
-    (compile-node prog pattern (parse pattern))
+    (compile-node prog pattern (parse pattern (?. ?opts :ecmascript)))
     (emit prog pattern {:op :match})
     prog))
 
 ;; ---- running ----
 
-(fn add-thread [prog threads seen pc]
-  "Add pc to threads, following jumps and splits, each pc once."
+(fn add-thread [prog threads seen pc prev cur]
+  "Add pc to threads, following jumps, splits and the assertions that hold
+between code points prev and cur, each pc once."
   (let [stack [pc]]
     (while (next stack)
       (let [at (table.remove stack)]
@@ -334,6 +461,9 @@ for anything RFC 9485 doesn't allow."
               (do
                 (table.insert stack ins.y)
                 (table.insert stack ins.x))
+              :assert
+              (when (ins.test prev cur)
+                (table.insert stack (+ at 1)))
               _
               (table.insert threads at))))))))
 
@@ -343,7 +473,7 @@ for anything RFC 9485 doesn't allow."
       false
       (let [cps (icollect [_ cp (utf8.codes s)] cp)]
         (var threads [])
-        (add-thread prog threads {} 1)
+        (add-thread prog threads {} 1 nil (. cps 1))
         (var matched false)
         (for [i 1 (+ (length cps) 1) &until matched]
           (when (accumulate [found false _ pc (ipairs threads) &until found]
@@ -357,10 +487,11 @@ for anything RFC 9485 doesn't allow."
               (each [_ pc (ipairs threads)]
                 (let [ins (. prog pc)]
                   (when (and (= ins.op :char) (ins.test cp))
-                    (add-thread prog next-threads seen (+ pc 1)))))
+                    (add-thread prog next-threads seen (+ pc 1) cp
+                                (. cps (+ i 1))))))
               ;; searching: a match may also start at the next code point
               (when anywhere
-                (add-thread prog next-threads seen 1))
+                (add-thread prog next-threads seen 1 cp (. cps (+ i 1))))
               (set threads next-threads))))
         matched)))
 

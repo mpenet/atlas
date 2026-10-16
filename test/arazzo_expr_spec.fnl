@@ -164,6 +164,31 @@
                                                                   {:type :regex
                                                                    :context "$statusCode"
                                                                    :condition "^4"}))))))
+          (describe "eval-criterion regex syntax"
+                    (fn []
+                      (it "reads ECMAScript-style patterns, as the spec's examples are"
+                          (fn []
+                            (assert.is_true (expr.eval-criterion (ctx)
+                                                                 {:type :regex
+                                                                  :context "$statusCode"
+                                                                  :condition "^2\\d{2}$"}))
+                            (assert.is_true (expr.eval-criterion (ctx)
+                                                                 {:type :regex
+                                                                  :context "$statusCode"
+                                                                  :condition "^(200|201)$"}))
+                            (assert.is_false (expr.eval-criterion (ctx)
+                                                                  {:type :regex
+                                                                   :context "$statusCode"
+                                                                   :condition "^2%d%d$"}))))
+                      (it "fails with a problem for a malformed pattern"
+                          (fn []
+                            (let [(passed problem) (expr.eval-criterion (ctx)
+                                                                        {:type :regex
+                                                                         :context "$statusCode"
+                                                                         :condition "(2"})]
+                              (assert.is_false passed)
+                              (assert.is_truthy (problem:find "invalid regular expression"
+                                                              1 true)))))))
           ;; ---- eval-criteria ----
           (describe "eval-criteria"
                     (fn []

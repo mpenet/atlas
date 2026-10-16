@@ -86,6 +86,63 @@
                     (assert.is_false (matches? "(a|a)*b" (string.rep "a" 40)))
                     (assert.is_true (< (- (os.clock) t0) 1)))))))
 
+(fn ecma-finds? [pattern s]
+  (iregexp.search? (iregexp.compile pattern {:ecmascript true}) s))
+
+(describe "iregexp ECMAScript syntax"
+          (fn []
+            (it "anchors with ^ and $"
+                (fn []
+                  (assert.is_true (ecma-finds? "^2\\d{2}$" "204"))
+                  (assert.is_false (ecma-finds? "^2\\d{2}$" "2040"))
+                  (assert.is_false (ecma-finds? "^2\\d{2}$" "1204"))
+                  (assert.is_true (ecma-finds? "^(ready|done)$" "done"))
+                  (assert.is_false (ecma-finds? "^(ready|done)$" "undone"))
+                  (assert.is_true (ecma-finds? "a$|^b" "xa"))
+                  (assert.is_true (ecma-finds? "^$" ""))))
+            (it "matches word boundaries"
+                (fn []
+                  (assert.is_true (ecma-finds? "\\bcat\\b" "a cat sat"))
+                  (assert.is_false (ecma-finds? "\\bcat\\b" "concatenate"))
+                  (assert.is_true (ecma-finds? "\\Bcat\\B" "concatenate"))))
+            (it "has the shorthand classes, in and out of brackets"
+                (fn []
+                  (assert.is_true (ecma-finds? "^\\w+$" "a_Z9"))
+                  (assert.is_false (ecma-finds? "^\\w+$" "a-b"))
+                  (assert.is_true (ecma-finds? "^\\W$" "-"))
+                  (assert.is_true (ecma-finds? "^\\s\\S$" "\tx"))
+                  (assert.is_true (ecma-finds? "^\\D$" "x"))
+                  (assert.is_true (ecma-finds? "^[\\d.]+$" "1.2.3"))))
+            (it "reads ECMAScript escapes"
+                (fn []
+                  (assert.is_true (ecma-finds? "^\\/\\$\\^$" "/$^"))
+                  (assert.is_true (ecma-finds? "^\\x41\\u00e9$" "Aé"))
+                  (assert.is_true (ecma-finds? "^\\f\\v$" "\f\v"))))
+            (it "takes non-capturing and named groups and lazy quantifiers"
+                (fn []
+                  (assert.is_true (ecma-finds? "^(?:ab)+$" "abab"))
+                  (assert.is_true (ecma-finds? "^(?<id>\\d+)$" "42"))
+                  (assert.is_true (ecma-finds? "^a+?b*?c??$" "aab"))))
+            (it "stops . at line terminators"
+                (fn []
+                  (assert.is_false (ecma-finds? "^a.b$" "a\u{2028}b"))))
+            (it "refuses what it can't match in linear time, or doesn't know"
+                (fn []
+                  (each [_ pattern (ipairs ["(a)\\1"
+                                            "a(?=b)"
+                                            "a(?!b)"
+                                            "(?<=a)b"
+                                            "(?i)a"
+                                            "^*"
+                                            "\\q"])]
+                    (assert.is_false (pcall iregexp.compile pattern
+                                            {:ecmascript true})
+                                     pattern))))
+            (it "keeps I-Regexp unchanged without the option"
+                (fn []
+                  (assert.is_true (matches? "^a$" "^a$"))
+                  (assert.is_false (pcall iregexp.compile "\\d"))))))
+
 (describe "iregexp syntax"
           (fn []
             (it "refuses what isn't I-Regexp"

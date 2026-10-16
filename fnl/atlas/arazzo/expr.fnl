@@ -10,6 +10,7 @@
 (local util (require :atlas.util))
 (local json (require :atlas.json))
 (local jsonpath (require :atlas.jsonpath))
+(local iregexp (require :atlas.iregexp))
 
 ;; ---- JSON Pointer ----
 
@@ -440,9 +441,10 @@ Arazzo spec, a doubled quote stands for the quote itself."
     :simple (eval-condition ctx criterion.condition)
     :regex (let [v (eval ctx criterion.context)]
              (and (not= nil v) (not= json.null v)
-                  (not= nil
-                        (: (tostring v) :match
-                           (eval-template ctx criterion.condition)))))
+                  (iregexp.search? (iregexp.compile (eval-template ctx
+                                                                   criterion.condition)
+                                                    {:ecmascript true})
+                                   (tostring v))))
     :jsonpath (let [v (eval ctx criterion.context)]
                 (and (not= nil v) (not= json.null v)
                      (< 0 (length (jsonpath.query (eval-template ctx

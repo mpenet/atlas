@@ -14,6 +14,7 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 ### Changed
 
 - An Arazzo condition that can't be evaluated fails, with a warning on stderr saying why, instead of failing the workflow.
+- Arazzo `regex` conditions are ECMAScript regular expressions, as in the specification's examples (`^2\d{2}$`), rather than Lua patterns; they run in linear time, so back-references and lookaround are refused.
 - An Arazzo step's `timeout` is in milliseconds, as Arazzo 1.1 defines it, rather than seconds.
 
 ## [1.0.0-beta5] - 2026-10-16

@@ -176,12 +176,12 @@ All of a step's `successCriteria` must hold; a step without any succeeds. A cond
   - condition: ($statusCode == 200 || $statusCode == 201) && $response.body#/state != 'failed'
   ```
 
-- **Regular expressions** (`type: regex`) never match a missing value. They are written as [Lua patterns](https://www.lua.org/manual/5.4/manual.html#6.4.1) rather than ECMAScript regexes: `%d` for a digit, `%w` for an alphanumeric, `%` to escape. There is no `|` and no `{m,n}`: `^2%d%d$` matches a 2xx status.
+- **Regular expressions** (`type: regex`) pass when the pattern matches part of the context's value, and never match a missing value. They are ECMAScript regexes, as in the spec's examples, without what can't be matched in linear time: back-references, lookahead and lookbehind are refused, and so are flags. Anchor with `^` and `$` to match the whole value: `^2\d{2}$` matches a 2xx status.
 
   ```yaml
   - context: $statusCode
     type: regex
-    condition: ^2%d%d$
+    condition: '^2\d{2}$'
   ```
 
 - **JSONPath** (`type: jsonpath`, [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535)) passes when the query selects at least one node of the context. Its `match()` and `search()` functions take [I-Regexp](https://www.rfc-editor.org/rfc/rfc9485) patterns, matched in linear time.
