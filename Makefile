@@ -282,7 +282,7 @@ endif
 
 # Every relative link of the documentation names an existing page and heading.
 check-docs:
-	lua tools/check-doc-links.lua README.md CHANGELOG.md doc/*.md
+	lua tools/check-doc-links.lua README.md CHANGELOG.md doc/*.md doc/library/*.md
 
 # Regenerates fnl/atlas/cli/width.fnl (display width of text in a terminal)
 # from Unicode's data files.

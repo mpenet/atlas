@@ -21,7 +21,11 @@ atlas calls any HTTP API that publishes an [OpenAPI 3](https://spec.openapis.org
 - [Arazzo workflows](arazzo.md): running and writing multi-step workflows.
 - [MCP server](mcp.md): serving an API's operations, and workflows, to AI agents.
 - [Moving from Restish](restish.md): importing a Restish configuration, and how the two compare.
-- [Library](library.md): using atlas from Fennel or Lua.
+- [Library](library.md): using atlas from Fennel or Lua; installation and a quick start, then
+  - [Clients](library/clients.md): building a client from a spec, base URLs, `$ref`s, servers;
+  - [Operations](library/operations.md): calling operations, responses, content negotiation, metadata, errors;
+  - [HTTP](library/http.md): the HTTP adapter, streaming, retries, pagination, TLS, proxies;
+  - [Data](library/data.md): JSON values and validation.
 
 ## Project
 
