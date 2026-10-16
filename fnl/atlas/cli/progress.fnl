@@ -213,4 +213,4 @@ leaves ?header in its place."
                           " workflow " (one-line workflow-id)
                           (if ok "" " failed") "  " (util.duration seconds) "\n")))}))
 
-{: reporter}
+{: reporter : fit : one-line}

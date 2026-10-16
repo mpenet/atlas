@@ -53,6 +53,8 @@ Options go anywhere after the command. `--name=value` and `--name value` are equ
 | `--no-color` | Never colour the output (colours are only used on a terminal anyway) |
 | `-v`, `--verbose` | Log the request and the response status and headers on stderr |
 | `--timing` | Log a line per request on stderr: method, URL, status, and how long each phase took (`dns 3ms · tcp 17ms · tls 25ms · server 75ms · download 5ms · total 126ms`); phases a reused connection skips are left out. `-v` shows the same timings |
+| `--until=CONDITION` | Send the request again until CONDITION holds, then print the last response; see [Waiting for a state](requests.md#waiting-for-a-state) |
+| `--every=N`, `--max-time=N` | With `--until`: seconds between requests (default 5), and how long to keep trying (default 600) |
 | `--dry-run` | Print the request instead of sending it; credentials redacted |
 | `--curl` | Print an equivalent `curl` command instead of sending (credentials included) |
 | `--no-validate` | Send even when the request doesn't match the spec; see [Checks](requests.md#checks-before-sending) |

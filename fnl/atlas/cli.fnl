@@ -2,6 +2,7 @@
 ;; ABOUTME: profile and completion subcommands; run returns the exit code.
 (local atlas (require :atlas))
 (local arazzo (require :atlas.arazzo))
+(local arazzo-expr (require :atlas.arazzo.expr))
 (local auth (require :atlas.auth))
 (local cli-help (require :atlas.cli.help))
 (local http-mod (require :atlas.http))
@@ -415,18 +416,74 @@ invalid body unless --no-validate."
                         (table.concat op.path-params ", ")
                         (length p.path-params) (table.concat p.path-params " ")))))
 
+(fn attempt [send]
+  "The response of (send); a request that fails stops atlas."
+  (let [(ok resp) (pcall send)]
+    (if ok resp
+        (exit? resp) (error resp 0)
+        (die (.. "request failed: " (tostring resp))))))
+
+(fn poll [send p verbose]
+  "The first response of (send) for which p.until holds, sending again every
+p.every seconds for up to p.max-time; on a terminal, a line says what it waits
+for."
+  (let [every (or p.every 5)
+        max-time (or p.max-time 600)
+        t0 (socket.gettime)
+        ;; in place on a terminal, unless -v logs requests between attempts
+        tty (and (util.terminal? 2) (not verbose))
+        columns (when tty (or (util.terminal-columns) 80))
+        clear #(when tty (io.stderr:write "\r\27[K"))]
+    (var result nil)
+    (var attempts 0)
+    (while (not result)
+      (let [resp (attempt send)
+            ctx {:response resp :inputs {} :steps {} :workflows {}}
+            criterion {:condition p.until}
+            (passed problem) (arazzo-expr.eval-criterion ctx criterion)
+            elapsed (- (socket.gettime) t0)]
+        (set attempts (+ attempts 1))
+        (when problem
+          (clear)
+          (die (.. "--until: " problem)))
+        (if passed (set result resp) (> (+ elapsed every) max-time)
+            (do
+              (clear)
+              (die (string.format "--until condition still false after %d attempt%s (%s): %s"
+                                  attempts (if (= attempts 1) "" "s")
+                                  (util.duration elapsed)
+                                  (arazzo-expr.explain-criterion ctx criterion))))
+            (do
+              (when tty
+                (io.stderr:write (.. "\r\27[K"
+                                     (progress.fit (progress.one-line (string.format "↻ attempt %d · %s · again in %ss · %s"
+                                                                                     attempts
+                                                                                     (util.duration elapsed)
+                                                                                     every
+                                                                                     (arazzo-expr.explain-criterion ctx
+                                                                                                                    criterion)))
+                                                   columns))))
+              (socket.sleep every)))))
+    (clear)
+    result))
+
+(fn exchange [send p display]
+  "Send the request with (send), again while p.until doesn't hold, and print
+the response."
+  (when (and (not p.until) (or p.every p.max-time))
+    (die (.. (if p.every "--every" "--max-time") " needs --until")))
+  (let [{: output : no-color : verbose} display
+        t0 (socket.gettime)
+        resp (if p.until (poll send p verbose) (attempt send))]
+    (print-resp resp output no-color verbose p.select (- (socket.gettime) t0)
+                ;; a condition that holds is success, whatever the status
+                (or p.ignore-status (not= nil p.until)))))
+
 (fn send-op [op p opts profile config]
   (check-arguments op p)
-  (let [request (op-request op p)
-        {: output : no-color : verbose} (display-options profile p config)]
+  (let [request (op-request op p)]
     (check-request op request opts p)
-    (let [t0 (socket.gettime)
-          (ok resp) (pcall op.invoke request)]
-      (if ok
-          (print-resp resp output no-color verbose p.select
-                      (- (socket.gettime) t0) p.ignore-status)
-          (if (exit? resp) (error resp 0)
-              (die (.. "request failed: " (tostring resp))))))))
+    (exchange #(op.invoke request) p (display-options profile p config))))
 
 (fn discovered-api-schema [profile-name profile p opts env verbose]
   "(location schema) of the spec discovery finds for the profile's base URL;
@@ -615,26 +672,19 @@ JSON or YAML one); otherwise -d is sent as given, as JSON when it is JSON."
                  opts.base-url)
         url (http-url target base p.profile)
         (body json-body) (http-body p)
-        headers (collect [k v (pairs opts.headers)] k v)
-        {: output : no-color : verbose} (display-options profile p config)]
+        headers (collect [k v (pairs opts.headers)] k v)]
     (each [k v (pairs p.headers)]
       (tset headers (k:lower) v))
     (when (and json-body (= nil (. headers :content-type)))
       (tset headers :content-type "application/json"))
-    (let [t0 (socket.gettime)
-          (ok resp) (pcall opts.http-fn
-                           {: method
-                            : url
-                            :query (when (next p.query) p.query)
-                            : headers
-                            : body
-                            :ssl opts.ssl
-                            :timeout opts.timeout})]
-      (if ok
-          (print-resp resp output no-color verbose p.select
-                      (- (socket.gettime) t0) p.ignore-status)
-          (if (exit? resp) (error resp 0)
-              (die (.. "request failed: " (tostring resp))))))))
+    (exchange #(opts.http-fn {: method
+                              : url
+                              :query (when (next p.query) p.query)
+                              : headers
+                              : body
+                              :ssl opts.ssl
+                              :timeout opts.timeout}) p
+              (display-options profile p config))))
 
 ;; ---- mcp ----
 

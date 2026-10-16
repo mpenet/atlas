@@ -58,6 +58,25 @@
          :scope :any
          :also [:mcp :auth]
          :help "Timeout in seconds"}
+        {:names ["--until"]
+         :key :until
+         :value :string
+         :arg "CONDITION"
+         :scope :op
+         :also [:http]
+         :help "Send again until CONDITION holds, like $response.body#/state == 'ready'"}
+        {:names ["--every"]
+         :key :every
+         :value :number
+         :scope :op
+         :also [:http]
+         :help "Seconds between requests with --until (default: 5)"}
+        {:names ["--max-time"]
+         :key :max-time
+         :value :number
+         :scope :op
+         :also [:http]
+         :help "Seconds --until keeps trying (default: 600)"}
         {:names ["--max-pages"]
          :key :max-pages
          :value :number

@@ -108,8 +108,12 @@ controls and the overrides that reorder text on screen as \\u{HHHH}."
   (let [h (io.popen "stty size <&2 2>/dev/null")
         out (when h (h:read :*a))]
     (when h (h:close))
-    (or (tonumber (and out (out:match "^%d+ (%d+)")))
-        (tonumber (os.getenv :COLUMNS)))))
+    ;; a terminal that doesn't know its size says 0
+    (accumulate [found nil _ v (ipairs [(and out (out:match "^%d+ (%d+)"))
+                                        (os.getenv :COLUMNS)])
+                 &until found]
+      (let [n (tonumber v)]
+        (when (and n (> n 0)) n)))))
 
 (fn json-content? [param]
   "Whether a parameter is declared with JSON content rather than a schema."

@@ -67,6 +67,18 @@ All problems are reported together and nothing is sent. `--no-validate` sends an
 
 Responses with status 408, 429, 500, 502, 503 or 504, and network errors, are retried up to `--retry` times (default 2), for GET, HEAD and OPTIONS requests only unless `--retry-unsafe` is given. atlas waits as long as the response's `Retry-After` header asks, at most `--retry-max-wait` seconds, and otherwise 1, 2, 4… seconds. An authentication failure is never retried.
 
+## Waiting for a state
+
+`--until` sends the request again, every `--every` seconds (default 5), until a condition holds, then prints the last response. It saves writing a loop, or a workflow, for an operation that takes a while:
+
+```sh
+atlas op exo get-operation 5f2c… --until "\$response.body#/state == 'success'"
+atlas op exo get-instance 9b1e… --until "\$response.body#/state == 'running'" --every 2
+atlas op exo get-instance 9b1e… --until '$statusCode == 404'   # until it is deleted
+```
+
+The condition is written as in [workflows](arazzo.md#success-criteria): `$statusCode`, `$response.body#/pointer` and `$response.header.NAME` compared with `==`, `!=`, `<`… and combined with `&&` and `||`. When it holds, atlas exits 0, whatever the status. On a terminal, a line says how many requests were sent and what the condition found. After `--max-time` seconds (default 600) atlas gives up with exit code 1 and says why, for example `($response.body#/state is "failure")`; a condition that can't be evaluated stops atlas at once.
+
 ## Pagination
 
 When a GET response is a JSON array and has a `Link: <…>; rel="next"` header, atlas follows the links and prints all items as one array. Every page is requested with the same headers and credentials; a link to another origin (scheme, host or port) is not followed. atlas stops after `--max-pages` pages (default 25). If a later page fails, the items collected so far are printed with a warning naming the failing status. `--no-paginate` prints the first page as it is.

@@ -1506,6 +1506,103 @@ does, which a streaming transport hands over one by one."
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find "nope/restish.json" 1 true))))))))
 
+(fn answers [& resps]
+  "A route answering resps in turn, then the last one again."
+  (var i 0)
+  (fn []
+    (set i (math.min (+ i 1) (length resps)))
+    (. resps i)))
+
+(describe "--until"
+          (fn []
+            (it "sends the request again until the condition holds, then prints the last response"
+                (fn []
+                  (let [r (atlas-run ["op"
+                                      "p"
+                                      "get-pet"
+                                      "7"
+                                      "--until"
+                                      "$response.body#/state == 'ready'"
+                                      "--every"
+                                      "0"
+                                      "--output=yaml"]
+                                     {"GET https://api.test/pets/7" (answers (respond 200
+                                                                                      {:state "pending"})
+                                                                             (respond 200
+                                                                                      {:state "pending"})
+                                                                             (respond 200
+                                                                                      {:state "ready"}))})]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal 3 (length r.requests))
+                    (assert.are.equal "state: ready" r.out))))
+            (it "works for http requests, on the status too"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "https://api.test/up"
+                                      "--until"
+                                      "$statusCode == 200"
+                                      "--every=0"]
+                                     {"GET https://api.test/up" (answers (respond 503
+                                                                                  {})
+                                                                         (respond 200
+                                                                                  {:ok true}))})]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal 2 (length r.requests)))))
+            (it "succeeds when the condition holds, whatever the status (waiting for a deletion)"
+                (fn []
+                  (let [r (atlas-run ["op"
+                                      "p"
+                                      "get-pet"
+                                      "7"
+                                      "--until"
+                                      "$statusCode == 404"
+                                      "--every=0"]
+                                     {"GET https://api.test/pets/7" (answers (respond 200
+                                                                                      {})
+                                                                             (respond 404
+                                                                                      {}))})]
+                    (assert.are.equal 0 r.code))))
+            (it "gives up after --max-time, saying why"
+                (fn []
+                  (let [r (atlas-run ["op"
+                                      "p"
+                                      "get-pet"
+                                      "7"
+                                      "--until"
+                                      "$response.body#/state == 'ready'"
+                                      "--every=0"
+                                      "--max-time=0"]
+                                     {"GET https://api.test/pets/7" (respond 200
+                                                                             {:state "pending"})})]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "--until condition still false after 1 attempt"
+                                                  1 true)
+                                      r.err)
+                    (assert.is_truthy (r.err:find "($response.body#/state is \"pending\")"
+                                                  1 true)
+                                      r.err))))
+            (it "stops at once on a condition that can't be evaluated"
+                (fn []
+                  (let [r (atlas-run ["op"
+                                      "p"
+                                      "get-pet"
+                                      "7"
+                                      "--until"
+                                      "$statuscode == 200"
+                                      "--every=0"]
+                                     {"GET https://api.test/pets/7" (respond 200
+                                                                             {})})]
+                    (assert.are.equal 1 r.code)
+                    (assert.are.equal 1 (length r.requests))
+                    (assert.is_truthy (r.err:find "can't be evaluated" 1 true)))))
+            (it "needs --until for --every and --max-time"
+                (fn []
+                  (let [r (atlas-run ["op" "p" "get-pet" "7" "--every=1"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "--every needs --until" 1
+                                                  true))
+                    (assert.are.equal 0 (length r.requests)))))))
+
 (describe "auth plugins"
           (fn []
             (it "sign each request of a profile whose auth a plugin provides"
