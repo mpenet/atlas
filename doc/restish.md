@@ -55,10 +55,4 @@ atlas also:
 - runs [Arazzo](arazzo.md) workflows, and offers them to AI agents through `atlas mcp --arazzo`;
 - is one static binary of less than 2 MB, with these features built in rather than installed as plugins.
 
-What Restish has that atlas doesn't:
-
-- jq built into its filters.
-- Caching responses.
-- Plugins (hooks, commands, TLS signers) and the plugins built on them, like bulk resource management and PKCS#11 signing.
-
 See the [Restish documentation](https://rest.sh/docs/) for its side of the comparison.
