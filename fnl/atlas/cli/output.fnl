@@ -118,7 +118,7 @@ the text itself."
     (if (and ok (or (not= (type v) :table) (= v json.null))) v
         ;; a quoted string, array or object that isn't JSON, or a mistyped
         ;; operator
-        (raw:match "^[\"%[{=]") (fail) (= raw "") (fail) raw)))
+        (raw:match "^[\"%[{=<>!]") (fail) (= raw "") (fail) raw)))
 
 (fn parse-filter [path select-path]
   "(keep rest) for the [?PATH OP VALUE] or [?PATH] at the start of path: keep
@@ -310,11 +310,10 @@ key, sorted; an array of other values is one per line."
         objects (icollect [_ row (ipairs rows)]
                   (when (and (container? row) (not (json.array? row)))
                     row))]
-    (if (and (= nil (next objects)) (next rows))
+    (if (= value json.null) nil (and (= nil (next objects)) (next rows))
         (table.concat (icollect [_ row (ipairs rows)]
                         (field (cell-text row))) "\n")
-        (and (= nil (next objects)) (not ?columns))
-        nil
+        (and (= nil (next objects)) (not ?columns)) nil
         (let [columns (or ?columns
                           (let [seen {}]
                             (each [_ obj (ipairs objects)]
@@ -328,8 +327,7 @@ key, sorted; an array of other values is one per line."
             (table.insert lines
                           (icollect [_ c (ipairs columns)]
                             (field (cell-text (. obj c))))))
-          (if (= fmt :table)
-              (aligned lines)
+          (if (= nil (. columns 1)) nil (= fmt :table) (aligned lines)
               (table.concat (icollect [_ cells (ipairs lines)]
                               (table.concat cells (if (= fmt :csv) "," "\t")))
                             "\n"))))))

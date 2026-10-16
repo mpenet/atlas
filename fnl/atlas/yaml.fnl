@@ -43,18 +43,23 @@ the core schema; quoted scalars are strings. Nulls are nil."
 
 ;; The loader works on a parser table:
 ;; {:next-event libyaml-iterator :event current-event
-;;  :anchors {name {:value v :size nodes}} :building {anchor-being-loaded true}
-;;  :nodes nodes-so-far :text source}
+;;  :anchors {name {:value v :size nodes :building bool}}
+;;  :nodes nodes-so-far :aliased nodes-aliases-added :text source}
 
 ;; aliases share their anchor's value, so a small document can stand for a
-;; huge one (billion laughs): the nodes it expands to are counted
-(local max-nodes 1000000)
+;; huge one (billion laughs): the nodes aliases add are counted (those
+;; written out are bounded by the text's size)
+(local max-aliased-nodes 1000000)
 
 (fn count-nodes [parser n]
-  (set parser.nodes (+ parser.nodes n))
-  (when (> parser.nodes max-nodes)
-    (error (.. "YAML parse error: the document expands to more than " max-nodes
-               " nodes through its aliases") 0)))
+  (set parser.nodes (+ parser.nodes n)))
+
+(fn count-aliased [parser n]
+  (count-nodes parser n)
+  (set parser.aliased (+ parser.aliased n))
+  (when (> parser.aliased max-aliased-nodes)
+    (error (.. "YAML parse error: the document's aliases expand to more than "
+               max-aliased-nodes " nodes") 0)))
 
 (fn advance [parser]
   (let [(ok e) (pcall parser.next-event)]
@@ -77,15 +82,17 @@ the core schema; quoted scalars are strings. Nulls are nil."
   "value, an anchored collection, filled by load-items; its anchor can't be
 used inside it."
   (let [anchor parser.event.anchor
-        start parser.nodes]
-    (remember parser value)
+        start parser.nodes
+        _ (remember parser value)
+        ;; this anchor's box: the name may be given to another node inside
+        box (when anchor (. parser.anchors anchor))]
     (count-nodes parser 1)
-    (when anchor
-      (tset parser.building anchor true))
+    (when box
+      (set box.building true))
     (load-items value)
-    (when anchor
-      (tset parser.building anchor nil)
-      (tset (. parser.anchors anchor) :size (- parser.nodes start)))
+    (when box
+      (set box.building nil)
+      (set box.size (- parser.nodes start)))
     value))
 
 (var load-node nil)
@@ -146,10 +153,10 @@ stays \"010\"."
                                 (error (.. "YAML parse error: unknown alias *"
                                            event.anchor)
                                        0))]
-                    (when (. parser.building event.anchor)
+                    (when box.building
                       (error (.. "YAML parse error: recursive alias *"
                                  event.anchor) 0))
-                    (count-nodes parser box.size)
+                    (count-aliased parser box.size)
                     box.value)
            :MAPPING_START (load-mapping parser)
            :SEQUENCE_START (load-sequence parser)
@@ -162,8 +169,8 @@ stays \"010\"."
   ;; could free it mid-parse
   (let [parser {:next-event (libyaml.parser text)
                 :anchors {}
-                :building {}
                 :nodes 0
+                :aliased 0
                 : text
                 :keep-null ?keep-null}]
     (advance parser)

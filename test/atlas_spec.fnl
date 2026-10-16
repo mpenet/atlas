@@ -885,6 +885,18 @@
                                                         {:server-vars {:zone "b"}
                                                          :http-fn #nil})
                                           :echo :url-for))))))
+            (it "takes the variables of servers in referenced path items"
+                (fn []
+                  (let [schema {:openapi "3.1.0"
+                                :servers [{:url "https://h.test/{ver}"
+                                           :variables {:ver {:default "v1"}}}]
+                                :components {:pathItems {:echo {:servers [{:url "https://{zone}.h.test"
+                                                                           :variables {:zone {:default "a"}}}]
+                                                                :get {:operationId "echo"}}}}
+                                :paths {"/echo" {"$ref" "#/components/pathItems/echo"}}}]
+                    (assert.are.equal "https://h.test/v1"
+                                      (atlas.base-url schema
+                                                      {:server-vars {:zone "b"}})))))
             (it "rejects unknown server variables"
                 (fn []
                   (let [(ok err) (pcall atlas.base-url multi-server-schema

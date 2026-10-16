@@ -221,8 +221,22 @@
                     (let [(ok err) (pcall yaml.parse (table.concat lines "\n"))]
                       (assert.is_false ok)
                       (assert.is_truthy (: (tostring err) :find
-                                           "expands to more than" 1 true))))))
+                                           "aliases expand to more than" 1 true))))))
             (it "keeps aliases used within the budget"
                 (fn []
                   (let [doc (yaml.parse "base: &b {x: 1}\nlist: [*b, *b, *b]\n")]
                     (assert.are.same [{:x 1} {:x 1} {:x 1}] doc.list))))))
+
+(describe "yaml.parse budget and anchors"
+          (fn []
+            (it "takes a big document without aliases"
+                (fn []
+                  (let [lines []]
+                    (for [i 1 260000]
+                      (table.insert lines (.. "k" i ": [a, b]")))
+                    (let [doc (yaml.parse (table.concat lines "\n"))]
+                      (assert.are.same ["a" "b"] doc.k260000)))))
+            (it "takes an anchor redefined inside a collection of the same name"
+                (fn []
+                  (assert.are.same {:a [1 1] :b 1}
+                                   (yaml.parse "a: &x [&x 1, *x]\nb: *x\n"))))))

@@ -1666,7 +1666,9 @@ answers candidates; one reply per line, each followed by |."
                                             ".a[?x==1].b[?c=1]"))))
               (it "rejects malformed filters"
                   (fn []
-                    (each [_ path (ipairs [".items[?x==[1]]"
+                    (each [_ path (ipairs [".items[?n<>1]"
+                                           ".items[?n!==1]"
+                                           ".items[?x==[1]]"
                                            ".items[?n===a]"
                                            ".items[?n==a]]"
                                            ".items[?n=={}]"
@@ -1741,6 +1743,17 @@ answers candidates; one reply per line, each followed by |."
                                                           :headers {}
                                                           :body [{:a 1} [5]]}
                                                          :csv false))))
+              (it "prints nothing for rows without columns"
+                  (fn []
+                    (let [json (require :atlas.json)]
+                      (assert.is_nil (cli.format-output {:status 200
+                                                         :headers {}
+                                                         :body [{} {}]}
+                                                        :table false))
+                      (assert.is_nil (cli.format-output {:status 200
+                                                         :headers {}
+                                                         :body json.null}
+                                                        :csv false)))))
               (it "prints nothing for an empty array, or the selected header"
                   (fn []
                     (let [json (require :atlas.json)
