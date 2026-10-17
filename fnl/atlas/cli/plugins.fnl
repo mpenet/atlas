@@ -19,33 +19,83 @@
 
 (var user-id nil)
 
+(fn listing [path]
+  "(mode owner target) of path as ls -ldn shows it, target for a link."
+  (let [out (command-output (.. "ls -ldn " (util.shell-quote path)
+                                " 2>/dev/null"))
+        (mode owner) (out:match "^(%S+)%s+%S+%s+(%d+)")]
+    (values mode owner (out:match " %-> (.-)%s*$"))))
+
+(fn dirname [path]
+  (or (path:match "^(.*)/[^/]*$") "."))
+
+(fn real-file [path]
+  "path with the links leading to it followed."
+  (var current path)
+  (for [_ 1 16 &until (not= "l" (: (or (listing current) "") :sub 1 1))]
+    (let [(_ _ target) (listing current)]
+      (set current (if (target:match "^/") target
+                       (.. (dirname current) "/" target)))))
+  current)
+
+(fn others-can-change? [mode]
+  "Whether a file or directory of mode can be changed by group or others:
+for a directory, unless it is sticky (others can't replace what is yours)."
+  (and (or (= (mode:sub 6 6) :w) (= (mode:sub 9 9) :w))
+       (not (and (= (mode:sub 1 1) :d)
+                 (or (= (mode:sub 10 10) :t) (= (mode:sub 10 10) :T))))))
+
 (fn check-file [path]
-  "Raise unless path is a file of the user's that no one else can change: a
-plugin runs with the user's credentials."
-  (let [listing (command-output (.. "ls -ldnL " (util.shell-quote path)
-                                    " 2>/dev/null"))
-        (mode owner) (listing:match "^(%S+)%s+%S+%s+(%d+)")]
+  "Raise unless path is a file of the user's, in directories of the user's or
+root's, that no one else can change: a plugin runs with the user's
+credentials. Links are followed."
+  (when (not user-id)
+    (set user-id (: (command-output "id -u") :match "%d+")))
+  (let [file (real-file path)
+        (mode owner) (listing file)]
     (when (not mode)
       (fail path "not found"))
     (when (not= (mode:sub 1 1) "-")
       (fail path "not a file"))
-    (when (not user-id)
-      (set user-id (: (command-output "id -u") :match "%d+")))
     (when (not= owner user-id)
       (fail path "belongs to another user"))
-    (when (or (= (mode:sub 6 6) :w) (= (mode:sub 9 9) :w))
+    (when (others-can-change? mode)
       (fail path (.. "can be changed by other users, who would get your credentials (chmod go-w "
-                     path ")")))))
+                     file ")")))
+    (when (= (mode:sub 11 11) "+")
+      (fail path
+            "has an access list, which may let other users change it: remove it"))
+    ;; nor may anyone else replace it: no directory up to / is theirs to change
+    (var dir (: (command-output (.. "cd " (util.shell-quote (dirname file))
+                                    " 2>/dev/null && pwd -P"))
+                :match "^(.-)%s*$"))
+    (while (and dir (not= dir ""))
+      (let [(dir-mode dir-owner) (listing dir)]
+        (when (or (not dir-mode)
+                  (not (or (= dir-owner user-id) (= dir-owner "0")))
+                  (others-can-change? dir-mode))
+          (fail path
+                (.. "is in " dir
+                    ", which can be changed by other users, who would get your credentials")))
+        (set dir (if (= dir "/") nil
+                     (let [parent (dirname dir)]
+                       (if (= parent "") "/" parent))))))))
 
 (fn evaluate [path]
-  "What the plugin file at path returns."
-  (if (path:match "%.fnl$")
-      (let [fennel (require :fennel)]
-        (fennel.dofile path {:filename path}))
-      (path:match "%.lua$")
-      (let [(chunk err) (loadfile path :t)]
-        (if chunk (chunk) (error err 0)))
-      (fail path "must be a .lua or .fnl file")))
+  "What the plugin file at path returns, from the text checked."
+  (let [f (io.open path :rb)
+        text (if f (f:read :*a) (fail path "can't be read"))]
+    (f:close)
+    (if (path:match "%.fnl$")
+        (let [(ok fennel) (pcall require :fennel)]
+          (when (not ok)
+            (fail path
+                  "Fennel plugins need the Fennel compiler: luarocks install fennel"))
+          (fennel.eval text {:filename path}))
+        (path:match "%.lua$")
+        (let [(chunk err) (load text (.. "@" path) :t)]
+          (if chunk (chunk) (error err 0)))
+        (fail path "must be a .lua or .fnl file"))))
 
 (local loaded {})
 
@@ -73,8 +123,17 @@ plugin runs with the user's credentials."
                           plugin))))
 
 (fn plugin-paths [config]
-  (icollect [_ p (ipairs (or config.plugins []))]
-    (expand-home p)))
+  "The config's plugin files, each once; relative paths would depend on the
+directory atlas runs in, so they are refused."
+  (let [seen {}]
+    (icollect [_ p (ipairs (or config.plugins []))]
+      (let [path (expand-home p)]
+        (when (not (path:match "^/"))
+          (error (.. "plugin " p ": must be an absolute path, or start with ~/")
+                 0))
+        (when (not (. seen path))
+          (tset seen path true)
+          path)))))
 
 (fn resolve-auth [config auth-config]
   "auth-config as is when atlas knows its name; else a copy with :sign, the

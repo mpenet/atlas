@@ -679,6 +679,39 @@
                       (assert.is_truthy (: (tostring (or (?. err :message) err))
                                            :find "auth plugin 'exo'" 1 true))
                       (assert.are.equal 0 (length calls))))))
+            (it "sends the headers it adds with lowercase names"
+                (fn []
+                  (let [(http calls) (seq-mock (ok-resp {}))
+                        auth (reload-auth http)
+                        wrapped (auth.wrap-http-fn {:name "exo"
+                                                    :sign #{:headers {:Authorization "x"}}}
+                                                   http.request)]
+                    (wrapped {:method "GET"
+                              :url "https://api.example.com/"
+                              :headers {:authorization "profile"}})
+                    (assert.are.same {:authorization "x"} (. calls 1 :headers)))))
+            (it "keep the path parameters of a URL it parses"
+                (fn []
+                  (let [(http) (seq-mock (ok-resp {}))
+                        auth (reload-auth http)
+                        seen {}
+                        wrapped (auth.wrap-http-fn {:name "exo"
+                                                    :sign (fn [req _ atlas]
+                                                            (set seen.url
+                                                                 (atlas.url.parse req.url))
+                                                            {:headers {}})}
+                                                   http.request)]
+                    (wrapped {:method "GET"
+                              :url "https://api.example.com/v2/a;x=1/c?q=1"
+                              :headers {}})
+                    (assert.are.equal "/v2/a;x=1/c" seen.url.path)
+                    (assert.are.equal "q=1" seen.url.query))))
+            (it "is never a value from the configuration: JSON has no functions"
+                (fn []
+                  (let [auth (reload-auth real-http)
+                        cfg {:name "bearer" :params {:token "t"} :sign true}]
+                    (assert.are.same {:authorization "Bearer t"}
+                                     (auth.get-headers "p" cfg {})))))
             (it "has no header to add up front, and no parameter it requires"
                 (fn []
                   (let [auth (reload-auth real-http)]
@@ -797,7 +830,7 @@
                     (wrapped {:method "GET"
                               :url "https://api.example.com/x"
                               :headers {}})
-                    (assert.are.same ["X-Hmac"] (. calls 1 :sensitive-headers)))))
+                    (assert.are.same ["x-hmac"] (. calls 1 :sensitive-headers)))))
             (it "signs the encoded body and leaves the caller's request alone"
                 (fn []
                   (let [(http calls) (seq-mock (ok-resp {}))

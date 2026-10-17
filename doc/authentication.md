@@ -105,9 +105,9 @@ The file returns a table whose `auth` maps names to functions. A function gets e
 | `sha256(text)`, `hmac_sha256(key, text)` | Digests, as raw bytes |
 | `base64(bytes)`, `unbase64(text)`, `hex(bytes)` | Encodings |
 | `json.encode`, `json.decode` | JSON |
-| `url.parse(url)` | `{scheme, host, port, path, query}` |
+| `url.parse(url)` | `{scheme, host, port, path, query}`, the path as sent (`;params` included) |
 | `url.query(query)` | The query string's parameters, decoded, in order: `[[name, value], ...]` |
 
 [`examples/plugins/exoscale.fnl`](examples/plugins/exoscale.fnl) signs Exoscale's API requests, about 40 lines. The digests are computed in Lua: signing takes well under a millisecond for an API request, but about half a second for a 1 MB body.
 
-Plugins are loaded only when a profile uses a name atlas doesn't provide. A plugin runs with your credentials, so atlas refuses one that isn't yours or that others can change (`chmod go-w`), and refuses a name provided by two plugins or by atlas itself. `atlas auth PROFILE` says which plugin signs its requests; `--dry-run` doesn't run it.
+Plugins are loaded only when a profile uses a name atlas doesn't provide, to find which one provides it: their top-level code runs then, even with `--dry-run`, which only leaves out the signing. A plugin runs with your credentials, so its path must start with `/` or `~/`, and atlas refuses a plugin file that isn't yours, that others can change (`chmod go-w`) or that has an access list, and one in a directory, up to `/`, that isn't yours or root's or that others can change (sticky directories like `/tmp` excepted). It also refuses a name provided by two plugins or by atlas itself. `atlas auth PROFILE` says which plugin signs its requests. Header names a plugin returns are sent in lowercase. Installed as a library, atlas needs the `fennel` module for Fennel plugins.

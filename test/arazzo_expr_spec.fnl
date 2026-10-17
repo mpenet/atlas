@@ -590,6 +590,10 @@
                   (let [(_ problem) (expr.eval-criterion {:inputs {}}
                                                          {:condition "$statusCode ~ 1"})]
                     (assert.are.equal "condition '$statusCode ~ 1' can't be evaluated: unexpected character '~' in condition: $statusCode ~ 1"
+                                      problem))
+                  (let [(_ problem) (expr.eval-criterion {:inputs {}}
+                                                         {:condition "$statusCode == 'a"})]
+                    (assert.are.equal "condition '$statusCode == 'a' can't be evaluated: unterminated string in condition: $statusCode == 'a"
                                       problem))))))
 
 (describe "explain-criterion"

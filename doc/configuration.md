@@ -19,7 +19,7 @@ The configuration is `~/.config/atlas/config.json` (`$XDG_CONFIG_HOME/atlas/conf
 }
 ```
 
-Settings apply in this order, first found wins: command-line option, profile, top level of the configuration, default. File paths in the configuration are used as written: `~` is not expanded, and relative paths are relative to the current directory.
+Settings apply in this order, first found wins: command-line option, profile, top level of the configuration, default. File paths in the configuration are used as written: `~` is not expanded, and relative paths are relative to the current directory. [Plugins](authentication.md#plugins) are the exception: their paths start with `/` or `~/`.
 
 ## Top level
 

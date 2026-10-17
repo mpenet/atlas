@@ -129,12 +129,15 @@ CURL_MODULE = $(LUA_DIR)/atlas/curl.so
 .PHONY: build binary check-binary check-binary-tls corpus unicode check-docs check-globals check-manifests clean deps fmt fmt-check install native-libs test
 .DELETE_ON_ERROR:
 
+# The Lua modules atlas uses, at the versions THIRD-PARTY.md names (the
+# binary bundles them); LUAROCKS="luarocks --local" installs them for the user.
+LUAROCKS ?= luarocks
 deps:
-	luarocks install lunajson
-	luarocks install luasocket
-	luarocks install lyaml
-	luarocks install fennel
-	luarocks install busted
+	$(LUAROCKS) install lunajson 1.2.3
+	$(LUAROCKS) install luasocket 3.1.0
+	$(LUAROCKS) install lyaml 6.2.9
+	$(LUAROCKS) install fennel 1.6.1
+	$(LUAROCKS) install busted
 
 build: $(LUA_TARGETS) $(CURL_MODULE)
 

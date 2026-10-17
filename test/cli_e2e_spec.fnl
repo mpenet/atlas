@@ -886,6 +886,10 @@ does, which a streaming transport hands over one by one."
                     (assert.is_truthy (r.out:find (.. "atlas " version
                                                       " (libcurl/")
                                                   1 true)))))
+            (it "lists --licenses in its usage"
+                (fn []
+                  (let [r (atlas-run [])]
+                    (assert.is_truthy (r.out:find "--licenses" 1 true)))))
             (it "prints the licenses of the software in the binary"
                 (fn []
                   (tset package.preload :atlas.third-party

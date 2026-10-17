@@ -18,10 +18,11 @@ RUN wget -q https://luarocks.org/releases/luarocks-3.13.0.tar.gz \
   && make install \
   && cd .. && rm -rf luarocks-3.13.0 luarocks-3.13.0.tar.gz
 
-RUN luarocks install fennel \
-  && luarocks install lunajson \
-  && luarocks install luasocket \
-  && luarocks install lyaml \
+# the versions of the Makefile's deps, which THIRD-PARTY.md names
+RUN luarocks install fennel 1.6.1 \
+  && luarocks install lunajson 1.2.3 \
+  && luarocks install luasocket 3.1.0 \
+  && luarocks install lyaml 6.2.9 \
   && luarocks install busted
 
 WORKDIR /src

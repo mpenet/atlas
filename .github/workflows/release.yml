@@ -39,10 +39,7 @@ jobs:
         # into the user tree: the Intel runners' Homebrew prefix (/usr/local)
         # isn't writable
         run: |
-          luarocks --local install fennel
-          luarocks --local install lunajson
-          luarocks --local install luasocket
-          luarocks --local install lyaml
+          make deps LUAROCKS="luarocks --local"
           echo "$HOME/.luarocks/bin" >> "$GITHUB_PATH"
 
       # Lua, libyaml, mbedTLS and libcurl from pinned sources, for macOS 12 and later
@@ -109,12 +106,12 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Checksums
-        run: cd dist && sha256sum atlas-* > SHA256SUMS && cat SHA256SUMS
-
       # the licenses of the software the binaries contain
       - name: Third-party licenses
         run: cp THIRD-PARTY.md dist/
+
+      - name: Checksums
+        run: cd dist && sha256sum atlas-* THIRD-PARTY.md > SHA256SUMS && cat SHA256SUMS
 
       - uses: actions/attest-build-provenance@v4
         with:

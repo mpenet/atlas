@@ -73,10 +73,7 @@ jobs:
         # into the user tree: the Intel runners' Homebrew prefix (/usr/local)
         # isn't writable
         run: |
-          luarocks --local install fennel
-          luarocks --local install lunajson
-          luarocks --local install luasocket
-          luarocks --local install lyaml
+          make deps LUAROCKS="luarocks --local"
           echo "$HOME/.luarocks/bin" >> "$GITHUB_PATH"
 
       - name: Build binary

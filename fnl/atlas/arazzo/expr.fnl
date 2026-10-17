@@ -81,7 +81,7 @@ parts = [body] or [header|query|path name...]."
 (fn resolve-expr [ctx expr]
   "Resolve a single $... runtime expression to a value."
   (let [e (expr:match "^%$(.+)")]
-    (when (not e) (error (.. "not a runtime expression: " expr)))
+    (when (not e) (error (.. "not a runtime expression: " expr) 0))
     (let [find-body (e:match "^find%((.+)%)$")]
       (if find-body
           (find-in ctx resolve-expr find-body)
@@ -272,7 +272,7 @@ Arazzo spec, a doubled quote stands for the quote itself."
     (var done false)
     (while (not done)
       (let [ch (s:sub i i)]
-        (if (= ch "") (error (.. "unterminated string in condition: " s))
+        (if (= ch "") (error (.. "unterminated string in condition: " s) 0)
             (and (= ch delimiter) (= (s:sub (+ i 1) (+ i 1)) delimiter))
             (do
               (table.insert out delimiter)

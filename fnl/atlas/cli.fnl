@@ -183,7 +183,7 @@ profiles are kept. --dry-run prints the converted profiles instead."
           (do
             (auth.clear-token profile-name)
             (print (.. "Logged out: " profile-name)))
-          auth-cfg.sign
+          (auth.signs? auth-cfg)
           (print (.. "signs each request with auth " auth-cfg.name
                      " from plugin " auth-cfg.plugin))
           (. {:external-tool true :bearer true :basic true :api-key true}

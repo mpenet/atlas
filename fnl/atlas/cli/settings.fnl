@@ -294,7 +294,7 @@ request signing, logging, and the transport (or dry-run printing)."
         signed (or (when (and wrapper-cfg
                               (not (and dry-run
                                         (or (= wrapper-cfg.name "external-tool")
-                                            wrapper-cfg.sign))))
+                                            (auth.signs? wrapper-cfg)))))
                      (auth.wrap-http-fn wrapper-cfg logged))
                    logged)
         retrying (retry.wrap signed (retry-options profile p config))

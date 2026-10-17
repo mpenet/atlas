@@ -47,6 +47,11 @@
                                      :token_url
                                      :client_id]})
 
+(fn signs? [auth-config]
+  "Whether auth-config carries a plugin's function signing requests: never a
+value from a configuration, which JSON can't hold."
+  (= (type auth-config.sign) :function))
+
 (fn built-in? [name]
   "Whether atlas itself provides authentication method name."
   (not= nil (. required-params name)))
@@ -471,7 +476,7 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
   OAuth types: returns {:authorization 'Bearer <token>'}.
   A plugin's signing function (:sign): returns {} — it signs each request."
   (check-params auth-config)
-  (match (if auth-config.sign :plugin auth-config.name)
+  (match (if (signs? auth-config) :plugin auth-config.name)
     :plugin {}
     "bearer" {:authorization (.. "Bearer " (required-param auth-config :token))}
     "basic" {:authorization (.. "Basic "
@@ -495,7 +500,7 @@ other requests (favicon, probes) get a 404. Returns the authorization code."
   "Lowercased names of the headers get-headers will supply, without running
 any auth flow; signing tools and plugins, and query api-keys, supply none up
 front."
-  (match (if auth-config.sign :plugin auth-config.name)
+  (match (if (signs? auth-config) :plugin auth-config.name)
     :plugin []
     "api-key" (match (?. auth-config :params :in)
                 :query []
@@ -568,8 +573,9 @@ signature covers what goes on the wire."
                                                               []))]
                                      n))
         (each [k vs (pairs extra)]
-          (tset req.headers k (if (= (type vs) :table) (. vs 1) vs))
-          (table.insert req.sensitive-headers k)))
+          ;; header names are lowercase in atlas: no duplicate by case
+          (tset req.headers (k:lower) (if (= (type vs) :table) (. vs 1) vs))
+          (table.insert req.sensitive-headers (k:lower))))
       (base-fn req))))
 
 ;; what plugins get to sign requests with
@@ -580,7 +586,15 @@ signature covers what goes on the wire."
         :unbase64 digest.unbase64
         :hex digest.hex
         :json {:encode json.encode :decode json.decode}
-        :url {:parse (. (require :socket.url) :parse)
+        :url {:parse (fn [url]
+                       ;; LuaSocket splits ;params off the path: signatures
+                       ;; cover the path as it is sent
+                       (let [parsed ((. (require :socket.url) :parse) url)]
+                         (when parsed.params
+                           (set parsed.path
+                                (.. (or parsed.path "") ";" parsed.params))
+                           (set parsed.params nil))
+                         parsed))
               ;; [[name value] ...] in order, decoded
               :query (fn [query]
                        (icollect [pair (string.gmatch (or query "") "[^&]+")]
@@ -612,7 +626,7 @@ read) and the helpers, and returns {:headers {name value}}."
 (fn wrap-signing [auth-config base-fn]
   "base-fn signing each request when auth-config signs requests: with a
 plugin's function, or an external tool."
-  (if auth-config.sign
+  (if (signs? auth-config)
       (wrap-signer #(plugin-headers auth-config $) base-fn)
       (and (= auth-config.name "external-tool")
            (not= (?. auth-config :params :output) "bearer-token"))
@@ -629,6 +643,7 @@ plugin's function, or an external tool."
 
 {: get-headers
  : built-in?
+ : signs?
  : header-names
  : wrap-http-fn
  : api-key-in-query?

@@ -117,6 +117,68 @@
                                             (digest.base64 (digest.hmac-sha256 "s3cret"
                                                                                message)))
                                         header)))))
+            (it "refuses a plugin in a directory others can change"
+                (fn []
+                  (let [dir (.. (os.tmpname) ".d")]
+                    (os.execute (.. "mkdir " dir " && chmod 777 " dir))
+                    (let [path (.. dir "/p.lua")]
+                      (with-open [f (io.open path :w)]
+                        (f:write lua-plugin))
+                      (os.execute (.. "chmod 600 " path))
+                      (let [(ok err) (pcall plugins.resolve-auth
+                                            {:plugins [path]} {:name "demo"})]
+                        (os.remove path)
+                        (os.remove dir)
+                        (assert.is_false ok)
+                        (assert.is_truthy (: (tostring err) :find
+                                             "can be changed by other users" 1
+                                             true)
+                                          (tostring err))
+                        (assert.is_truthy (: (tostring err) :find dir 1 true)))))))
+            (it "refuses a plugin with an access list"
+                (fn []
+                  (let [path (plugin-file ".lua" lua-plugin)]
+                    ;; macOS: grant write through an access list, mode unchanged
+                    (if (os.execute (.. "chmod +a 'everyone allow write' " path
+                                        " 2>/dev/null"))
+                        (let [(ok err) (pcall plugins.resolve-auth
+                                              {:plugins [path]} {:name "demo"})]
+                          (os.remove path)
+                          (assert.is_false ok)
+                          (assert.is_truthy (: (tostring err) :find
+                                               "access list" 1 true)))
+                        (os.remove path)))))
+            (it "refuses relative plugin paths"
+                (fn []
+                  (let [(ok err) (pcall plugins.resolve-auth
+                                        {:plugins ["plugins/p.lua"]}
+                                        {:name "demo"})]
+                    (assert.is_false ok)
+                    (assert.is_truthy (: (tostring err) :find
+                                         "must be an absolute path, or start with ~/"
+                                         1 true)))))
+            (it "loads a plugin listed twice once"
+                (fn []
+                  (let [path (plugin-file ".lua" lua-plugin)
+                        (ok auth) (pcall plugins.resolve-auth
+                                         {:plugins [path path]} {:name "demo"})]
+                    (os.remove path)
+                    (assert.is_true ok (tostring auth)))))
+            (it "says how to get Fennel when it isn't there"
+                (fn []
+                  (let [path (plugin-file ".fnl" fennel-plugin)
+                        saved (. package.loaded :fennel)]
+                    (tset package.loaded :fennel nil)
+                    (tset package.preload :fennel
+                          #(error "module 'fennel' not found"))
+                    (let [(ok err) (pcall plugins.resolve-auth
+                                          {:plugins [path]} {:name "fdemo"})]
+                      (tset package.preload :fennel nil)
+                      (tset package.loaded :fennel saved)
+                      (os.remove path)
+                      (assert.is_false ok)
+                      (assert.is_truthy (: (tostring err) :find
+                                           "luarocks install fennel" 1 true))))))
             (it "refuses two plugins providing the same auth, and built-in names"
                 (fn []
                   (let [a (plugin-file ".lua" lua-plugin)

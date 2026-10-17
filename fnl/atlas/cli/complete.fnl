@@ -57,6 +57,7 @@ own scope, :any for the API commands op, az and http, or one of its :also."
   (print "  auth    <profile> [--logout]                          Authenticate a profile")
   (print "  completion <fish|bash|zsh>                            Print shell completion")
   (print "  --version                                             Print the version")
+  (print "  --licenses                                            Print the licenses of the software in the binary")
   (each [_ [title scope] (ipairs [["Options (op):" :op]
                                   ["Options (az):" :az]
                                   ["Options (http):" :http]
