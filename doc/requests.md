@@ -77,7 +77,9 @@ atlas op exo get-instance 9b1e… --until "\$response.body#/state == 'running'" 
 atlas op exo get-instance 9b1e… --until '$statusCode == 404'   # until it is deleted
 ```
 
-The condition is written as in [workflows](arazzo.md#success-criteria): `$statusCode`, `$response.body#/pointer` and `$response.header.NAME` compared with `==`, `!=`, `<`… and combined with `&&` and `||`. When it holds, atlas exits 0, whatever the status. On a terminal, a line says how many requests were sent and what the condition found. After `--max-time` seconds (default 600) atlas gives up with exit code 1 and says why, for example `($response.body#/state is "failure")`; a condition that can't be evaluated stops atlas at once.
+The condition is written as in [workflows](arazzo.md#success-criteria), about the request and its response: `$statusCode`, `$response.body#/pointer`, `$response.header.NAME`, `$method`, `$url` and `$request…`, compared with `==`, `!=`, `<`… and combined with `&&` and `||`. It is checked before anything is sent: a condition that can't be evaluated, or that refers to anything else, stops atlas at once. When it holds, atlas exits 0, whatever the status. Each response is read whole to be checked, events and JSON Lines included, and the last one is printed.
+
+On a terminal, a line says how many requests were sent and what the condition found. atlas stops trying when another request would start after `--max-time` seconds (default 600), with exit code 1, saying why, for example `($response.body#/state is "failure")`. `--every` must be more than 0. As with [retries](#retries), a POST or PATCH is only sent again with `--retry-unsafe`; `--until` can't be used with `--dry-run` or `--curl`, which send nothing.
 
 ## Pagination
 

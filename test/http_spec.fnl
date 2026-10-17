@@ -679,6 +679,32 @@ c:close()")
                     ;; the body came 50ms after the headers
                     (assert.is_true (>= (- t.total t.starttransfer) 0.03)))))))
 
+(describe "redirect timings"
+          (fn []
+            (it "add the time of the redirects to the final response's"
+                (fn []
+                  (let [http (require :atlas.http)
+                        hops [{:status 302
+                               :headers {:location "https://api.test/b"}
+                               :timings {:total 0.5}}
+                              {:status 200
+                               :headers {}
+                               :timings {:namelookup 0
+                                         :connect 0
+                                         :appconnect 0
+                                         :pretransfer 0
+                                         :starttransfer 0.02
+                                         :total 0.03}}]
+                        n [0]
+                        resp (http.follow-redirects (fn [_]
+                                                      (tset n 1 (+ 1 (. n 1)))
+                                                      (. hops (. n 1)))
+                                                    {:method "GET"
+                                                     :url "https://api.test/a"})]
+                    (assert.are.equal 200 resp.status)
+                    (assert.are.equal 0.5 resp.timings.redirects)
+                    (assert.are.equal 0.53 resp.timings.total))))))
+
 (describe "streaming"
           (fn []
             (it "hands the body over as it arrives"

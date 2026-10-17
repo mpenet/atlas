@@ -201,19 +201,28 @@ req.sensitive-headers and any whose name looks like a credential."
 
 (fn follow-redirects [send req]
   "Call send, following redirects (at most 5, then an error) as
-redirect-target allows. The response's :url is where it came from."
+redirect-target allows. The response's :url is where it came from; its
+:timings count the redirects before it: their time is :redirects, and is in
+:total."
   (var current req)
   (var resp (send req))
   (var hops 0)
+  (var redirects 0)
   (var next-req (redirect-target current resp))
   (while next-req
     (when (>= hops 5)
       (error (.. "too many redirects from "
                  (util.redact-url req.url req.sensitive-query)) 0))
     (set hops (+ hops 1))
+    (set redirects (+ redirects (or (?. resp :timings :total) 0)))
     (set current next-req)
     (set resp (send current))
     (set next-req (redirect-target current resp)))
+  (when (and (> hops 0) resp.timings)
+    (set resp.timings
+         (doto (collect [k v (pairs resp.timings)] k v)
+           (tset :redirects redirects)
+           (tset :total (+ resp.timings.total redirects)))))
   (when (= nil resp.url)
     (set resp.url (util.append-query current.url (or current.query {})
                                      current.query-styles)))

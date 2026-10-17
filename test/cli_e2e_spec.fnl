@@ -1579,8 +1579,7 @@ does, which a streaming transport hands over one by one."
                                       "7"
                                       "--until"
                                       "$response.body#/state == 'ready'"
-                                      "--every"
-                                      "0"
+                                      "--every=0.01"
                                       "--output=yaml"]
                                      {"GET https://api.test/pets/7" (answers (respond 200
                                                                                       {:state "pending"})
@@ -1597,7 +1596,7 @@ does, which a streaming transport hands over one by one."
                                       "https://api.test/up"
                                       "--until"
                                       "$statusCode == 200"
-                                      "--every=0"]
+                                      "--every=0.01"]
                                      {"GET https://api.test/up" (answers (respond 503
                                                                                   {})
                                                                          (respond 200
@@ -1612,7 +1611,7 @@ does, which a streaming transport hands over one by one."
                                       "7"
                                       "--until"
                                       "$statusCode == 404"
-                                      "--every=0"]
+                                      "--every=0.01"]
                                      {"GET https://api.test/pets/7" (answers (respond 200
                                                                                       {})
                                                                              (respond 404
@@ -1626,7 +1625,7 @@ does, which a streaming transport hands over one by one."
                                       "7"
                                       "--until"
                                       "$response.body#/state == 'ready'"
-                                      "--every=0"
+                                      "--every=0.01"
                                       "--max-time=0"]
                                      {"GET https://api.test/pets/7" (respond 200
                                                                              {:state "pending"})})]
@@ -1645,12 +1644,93 @@ does, which a streaming transport hands over one by one."
                                       "7"
                                       "--until"
                                       "$statuscode == 200"
-                                      "--every=0"]
+                                      "--every=0.01"]
                                      {"GET https://api.test/pets/7" (respond 200
                                                                              {})})]
                     (assert.are.equal 1 r.code)
-                    (assert.are.equal 1 (length r.requests))
+                    (assert.are.equal 0 (length r.requests))
                     (assert.is_truthy (r.err:find "can't be evaluated" 1 true)))))
+            (it "reads a streamed body whole, to check it"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "https://api.test/lines"
+                                      "--until"
+                                      "$response.body#/0/a == 1"
+                                      "--every=0.01"]
+                                     {"GET https://api.test/lines" (respond-text 200
+                                                                                 "application/x-ndjson"
+                                                                                 ["{\"a\":1}\n"
+                                                                                  "{\"a\":2}\n"])})]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal 1 (length r.requests)))))
+            (it "refuses what it can't wait for, before sending anything"
+                (fn []
+                  (each [_ [args why] (ipairs [[["--every=0"]
+                                                "--every must be more than 0"]
+                                               [["--every=-1"]
+                                                "--every must be more than 0"]
+                                               [["--max-time=-1"]
+                                                "--max-time can't be negative"]
+                                               [["--dry-run"]
+                                                "--until can't be used with --dry-run or --curl"]
+                                               [["--curl"]
+                                                "--until can't be used with --dry-run or --curl"]])]
+                    (let [r (atlas-run (doto ["op"
+                                              "p"
+                                              "get-pet"
+                                              "7"
+                                              "--until"
+                                              "$statusCode == 200"]
+                                         (#(each [_ a (ipairs args)]
+                                             (table.insert $ a)))))]
+                      (assert.are.equal 1 r.code why)
+                      (assert.is_truthy (r.err:find why 1 true) r.err)
+                      (assert.are.equal 0 (length r.requests))))))
+            (it "refuses a condition it can't evaluate before sending"
+                (fn []
+                  (each [_ [condition why] (ipairs [["$statusCode =="
+                                                     "can't be evaluated"]
+                                                    ["$inputs.id == 1"
+                                                     "--until conditions use $statusCode, $method, $url, $request and $response"]])]
+                    (let [r (atlas-run ["op"
+                                        "p"
+                                        "get-pet"
+                                        "7"
+                                        "--until"
+                                        condition])]
+                      (assert.are.equal 1 r.code)
+                      (assert.is_truthy (r.err:find why 1 true) r.err)
+                      (assert.are.equal 0 (length r.requests))))))
+            (it "sends POST and PATCH again only with --retry-unsafe"
+                (fn []
+                  (let [routes {"POST https://api.test/jobs" (respond 200
+                                                                      {:state "done"})}
+                        refused (atlas-run ["http"
+                                            "POST"
+                                            "https://api.test/jobs"
+                                            "--until"
+                                            "$response.body#/state == 'done'"]
+                                           routes)
+                        allowed (atlas-run ["http"
+                                            "POST"
+                                            "https://api.test/jobs"
+                                            "--until"
+                                            "$response.body#/state == 'done'"
+                                            "--retry-unsafe"]
+                                           routes)]
+                    (assert.are.equal 1 refused.code)
+                    (assert.is_truthy (refused.err:find "--retry-unsafe" 1 true))
+                    (assert.are.equal 0 (length refused.requests))
+                    (assert.are.equal 0 allowed.code))))
+            (it "knows the request it sends"
+                (fn []
+                  (let [r (atlas-run ["http"
+                                      "https://api.test/up"
+                                      "--until"
+                                      "$method == 'GET' && $url == 'https://api.test/up'"]
+                                     {"GET https://api.test/up" (respond 200 {})})]
+                    (assert.are.equal 0 r.code r.err)
+                    (assert.are.equal 1 (length r.requests)))))
             (it "needs --until for --every and --max-time"
                 (fn []
                   (let [r (atlas-run ["op" "p" "get-pet" "7" "--every=1"])]

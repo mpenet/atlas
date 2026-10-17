@@ -350,7 +350,9 @@ without running it; exit 1 when something is."
         stderr-terminal (util.terminal? 2)
         reporter (when (or (= mode :progress) (= mode :full))
                    (progress.reporter {:write #(io.stderr:write $)
-                                       :tty (and stderr-terminal (not verbose))
+                                       ;; nor the lines --timing logs
+                                       :tty (and stderr-terminal (not verbose)
+                                                 (not p.timing))
                                        ;; unknown, a common width: the
                                        ;; lines rewritten in place must not wrap
                                        :columns (when stderr-terminal
@@ -471,30 +473,66 @@ invalid body unless --no-validate."
         (exit? resp) (error resp 0)
         (die (.. "request failed: " (tostring resp))))))
 
-(fn poll [send p verbose]
+;; what an --until condition can refer to: the request and its response
+(local until-roots {:statusCode true
+                    :method true
+                    :url true
+                    :request true
+                    :response true})
+
+(fn check-until [p request]
+  "Stop, before anything is sent, on --until settings atlas can't wait with."
+  (when (and (not p.until) (or p.every p.max-time))
+    (die (.. (if p.every "--every" "--max-time") " needs --until")))
+  (when p.until
+    (when (and p.every (<= p.every 0))
+      (die "--every must be more than 0"))
+    (when (and p.max-time (< p.max-time 0))
+      (die "--max-time can't be negative"))
+    (when (or p.dry-run p.curl)
+      (die "--until can't be used with --dry-run or --curl: it needs the responses"))
+    (let [(_ problem) (arazzo-expr.eval-criterion {} {:condition p.until})]
+      (when problem
+        (die (.. "--until: " problem))))
+    (each [_ e (ipairs (arazzo-expr.condition-expressions p.until))]
+      (when (not (. until-roots (or (e:match "^%$(%a+)") "")))
+        (die (.. "--until conditions use $statusCode, $method, $url, $request and $response, not "
+                 e))))
+    ;; as with retries: sending again must be safe
+    (when (and (. {:POST true :PATCH true} (: (tostring request.method) :upper))
+               (not p.retry-unsafe))
+      (die (.. "--until sends the request again: add --retry-unsafe to do that with "
+               (: (tostring request.method) :upper))))))
+
+(fn poll [send p display request]
   "The first response of (send) for which p.until holds, sending again every
 p.every seconds for up to p.max-time; on a terminal, a line says what it waits
 for."
   (let [every (or p.every 5)
         max-time (or p.max-time 600)
         t0 (socket.gettime)
-        ;; in place on a terminal, unless -v logs requests between attempts
-        tty (and (util.terminal? 2) (not verbose))
+        ;; in place on a terminal, unless request logs come between attempts
+        tty (and (util.terminal? 2) (not display.verbose) (not p.timing))
         columns (when tty (or (util.terminal-columns) 80))
-        clear #(when tty (io.stderr:write "\r\27[K"))]
+        clear #(when tty (io.stderr:write "\r\27[K"))
+        criterion {:condition p.until}]
     (var result nil)
     (var attempts 0)
     (while (not result)
-      (let [resp (attempt send)
-            ctx {:response resp :inputs {} :steps {} :workflows {}}
-            criterion {:condition p.until}
+      (let [(sent resp) (pcall attempt send)
+            _ (when (not sent)
+                (clear)
+                (error resp 0))
+            ctx {:response resp : request}
             (passed problem) (arazzo-expr.eval-criterion ctx criterion)
             elapsed (- (socket.gettime) t0)]
         (set attempts (+ attempts 1))
         (when problem
           (clear)
           (die (.. "--until: " problem)))
-        (if passed (set result resp) (> (+ elapsed every) max-time)
+        (if passed (set result resp)
+            ;; another attempt would start after --max-time
+            (> (+ elapsed every) max-time)
             (do
               (clear)
               (die (string.format "--until condition still false after %d attempt%s (%s): %s"
@@ -515,14 +553,13 @@ for."
     (clear)
     result))
 
-(fn exchange [send p display]
-  "Send the request with (send), again while p.until doesn't hold, and print
-the response."
-  (when (and (not p.until) (or p.every p.max-time))
-    (die (.. (if p.every "--every" "--max-time") " needs --until")))
+(fn exchange [send p display request]
+  "Send request with (send), again while p.until doesn't hold, and print the
+response. request: {:method :url :headers :query :body}, what conditions see."
+  (check-until p request)
   (let [{: output : no-color : verbose} display
         t0 (socket.gettime)
-        resp (if p.until (poll send p verbose) (attempt send))]
+        resp (if p.until (poll send p display request) (attempt send))]
     (print-resp resp output no-color verbose p.select (- (socket.gettime) t0)
                 ;; a condition that holds is success, whatever the status
                 (or p.ignore-status (not= nil p.until)))))
@@ -531,7 +568,12 @@ the response."
   (check-arguments op p)
   (let [request (op-request op p)]
     (check-request op request opts p)
-    (exchange #(op.invoke request) p (display-options profile p config))))
+    (exchange #(op.invoke request) p (display-options profile p config)
+              {:method (op.method:upper)
+               :url (op.url-for request)
+               :headers request.headers
+               :query request.query
+               :body request.body})))
 
 (fn discovered-api-schema [profile-name profile p opts env verbose]
   "(location schema) of the spec discovery finds for the profile's base URL;
@@ -615,7 +657,9 @@ stream (events, JSON Lines, raw output) as they arrive."
   (let [config env.config
         {: profile : schema : opts} (api-setup p env
                                                "Usage: atlas op <profile-or-schema> [operation] [args...]")
-        _ (print-streams opts profile p config)]
+        ;; --until reads each response whole, to check it
+        _ (when (not p.until)
+            (print-streams opts profile p config))]
     (if p.servers
         (let [servers (atlas.servers (if (= (type schema) :string)
                                          (atlas.load-schema schema)
@@ -712,9 +756,10 @@ JSON or YAML one); otherwise -d is sent as given, as JSON when it is JSON."
         profile (find-profile config p.profile)
         _ (when (and p.profile (not profile))
             (die (.. "Profile not found: " p.profile)))
-        opts (print-streams (client-options p.profile profile p config
-                                            env.transport)
-                            profile p config)
+        opts (let [opts (client-options p.profile profile p config
+                                        env.transport)]
+               ;; --until reads each response whole, to check it
+               (if p.until opts (print-streams opts profile p config)))
         base (if profile
                  (profile-base-url p.profile profile p opts env)
                  opts.base-url)
@@ -732,7 +777,12 @@ JSON or YAML one); otherwise -d is sent as given, as JSON when it is JSON."
                               : body
                               :ssl opts.ssl
                               :timeout opts.timeout}) p
-              (display-options profile p config))))
+              (display-options profile p config)
+              {: method
+               : url
+               : headers
+               :query (when (next p.query) p.query)
+               : body})))
 
 ;; ---- mcp ----
 

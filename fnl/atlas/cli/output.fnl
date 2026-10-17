@@ -38,13 +38,16 @@ from specs and servers."
 
 (fn timing-text [t]
   "How long the phases of an exchange took, from libcurl's timings (seconds
-since its start): dns, tcp, tls, server (until the first byte), download and
-total; phases that took no time (a reused connection's) are left out."
-  (let [phases [[:dns t.namelookup]
+since its start): the redirects before it, dns, tcp, tls, server (until the
+first byte), download and total; phases that took no time (a reused
+connection's) are left out."
+  (let [phases [[:redirects (or t.redirects 0)]
+                [:dns t.namelookup]
                 [:tcp (- t.connect t.namelookup)]
                 [:tls (if (> t.appconnect 0) (- t.appconnect t.connect) 0)]
                 [:server (- t.starttransfer t.pretransfer)]
-                [:download (- t.total t.starttransfer)]]
+                ;; the last exchange's own time: total counts the redirects
+                [:download (- t.total (or t.redirects 0) t.starttransfer)]]
         parts (icollect [_ [name seconds] (ipairs phases)]
                 ;; less than half a millisecond shows as 0ms: noise
                 (when (>= seconds 0.0005)

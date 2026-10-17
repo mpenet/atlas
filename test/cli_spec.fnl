@@ -253,6 +253,16 @@
                                                       :pretransfer 0.003
                                                       :starttransfer 0.01
                                                       :total 0.01}))))
+            (it "counts the time of the redirects that led to a response"
+                (fn []
+                  (assert.are.equal "redirects 500ms · server 20ms · total 520ms"
+                                    (cli.timing-text {:namelookup 0
+                                                      :connect 0
+                                                      :appconnect 0
+                                                      :pretransfer 0
+                                                      :starttransfer 0.02
+                                                      :total 0.52
+                                                      :redirects 0.5}))))
             (it "logs only each exchange's line and timing with --timing"
                 (fn []
                   (let [(_ _ err) (capture #((cli.wrap-log-timing (fn [_]
