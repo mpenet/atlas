@@ -1,8 +1,6 @@
-# ezu
+# Ezu
 
 <img  width="225" height="225" src="https://github.com/user-attachments/assets/4e4d83d3-4546-4af7-b8c7-cafa9bc3593b" />
-
-*Ezu*
 
 A command line for any HTTP API that publishes an [OpenAPI 3](https://spec.openapis.org/oas/latest.html) description.
 
