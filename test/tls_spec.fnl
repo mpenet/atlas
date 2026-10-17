@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for TLS settings: CA bundle discovery and the mapping of
 ;; ABOUTME: ssl options (cafile, capath, certificate, key, verify) to the transport's verification settings.
-(local tls (require :atlas.tls))
+(local tls (require :ezu.tls))
 
 (fn only [path]
   "exists? predicate true for path alone."

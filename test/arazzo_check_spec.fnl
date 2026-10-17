@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for checking Arazzo documents before running them: targets,
 ;; ABOUTME: parameters, bodies, references, conditions and actions.
-(local check (require :atlas.arazzo.check))
+(local check (require :ezu.arazzo.check))
 
 (fn op [id ?fields]
   (doto {:operation-id id

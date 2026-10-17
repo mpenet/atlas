@@ -1,11 +1,11 @@
 ;; ABOUTME: Specs for Arazzo document loading, client resolution and workflow execution.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local arazzo (require :atlas.arazzo))
+(local arazzo (require :ezu.arazzo))
 
 ;; ---- helpers ----
 
 (fn make-client [ops]
-  "Build a fake atlas client: {operationId → (fn [req] resp)}."
+  "Build a fake ezu client: {operationId → (fn [req] resp)}."
   (collect [id f (pairs ops)]
     (.. "op-" id)
     {:operation-id id
@@ -1061,7 +1061,7 @@
                     (assert.are.same {:pet {:name "rex"}} inputs))))
             (it "append to an array with -"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         seen []
                         clients {:api (make-client {:op (fn [req]
                                                           (table.insert seen
@@ -1618,7 +1618,7 @@ and record their requests in the returned list."
             (it "replace with a JSONPath target, every node it selects"
                 (fn []
                   (let [(client seen) (recording-client {:op #(ok-resp {})})
-                        json (require :atlas.json)]
+                        json (require :ezu.json)]
                     (arazzo.run-workflow (one-step-doc {:operationId "op"
                                                         :requestBody {:payload {:items (json.array [{:sku "a"
                                                                                                      :qty 1}

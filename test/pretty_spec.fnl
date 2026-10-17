@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for JSON and YAML terminal rendering.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local {: pretty : yaml} (require :atlas.pretty))
+(local {: pretty : yaml} (require :ezu.pretty))
 (local json (require :lunajson))
 (fn p [v] (pretty v 0 false))
 
@@ -63,7 +63,7 @@
                   (assert.are.equal "\nb: 1\nc: 2" (yaml {:c 2 :b 1} 0 false)))
                 (it "quotes strings that YAML would read as other types"
                     (fn []
-                      (let [ayaml (require :atlas.yaml)
+                      (let [ayaml (require :ezu.yaml)
                             v {:items ["yes"
                                        "No"
                                        "on"
@@ -84,7 +84,7 @@
           (fn []
             (it "quotes keys that would not read back as the same string"
                 (fn []
-                  (let [ayaml (require :atlas.yaml)
+                  (let [ayaml (require :ezu.yaml)
                         v {"a: b" 1
                            "#c" 2
                            "true" 3
@@ -95,13 +95,12 @@
                     (assert.are.same v (ayaml.parse (yaml v 0 false))))))
             (it "quotes control characters and writes infinities as YAML does"
                 (fn []
-                  (let [ayaml (require :atlas.yaml)
+                  (let [ayaml (require :ezu.yaml)
                         v {:a "x\1y" :b math.huge :c (- math.huge)}]
                     (assert.are.same v (ayaml.parse (yaml v 0 false))))))
             (it "quotes a key that YAML would read as a merge"
                 (fn []
                   (let [v {"<<" {:a 1} :b 2}]
                     (assert.are.same v
-                                     ((. (require :atlas.yaml) :parse) (yaml v
-                                                                             0
-                                                                             false))))))))
+                                     ((. (require :ezu.yaml) :parse) (yaml v 0
+                                                                           false))))))))

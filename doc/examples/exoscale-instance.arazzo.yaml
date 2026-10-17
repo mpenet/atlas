@@ -1,7 +1,7 @@
 # Creates an Exoscale compute instance from names (template, instance type),
 # waits for the creation job to finish, and returns the instance.
 #
-#   atlas az doc/examples/exoscale-instance.arazzo.yaml create-instance \
+#   ezu az doc/examples/exoscale-instance.arazzo.yaml create-instance \
 #     --profile exo -i name=web1 -i template="Linux Ubuntu 24.04 LTS 64-bit" \
 #     -i instance-size=medium [-i ssh-key=<key-name>]
 arazzo: 1.1.0

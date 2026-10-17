@@ -38,4 +38,4 @@ RUN make check-binary STATIC_LDFLAGS=-static
 
 # ---- export stage ----
 FROM scratch
-COPY --from=builder /src/bin/atlas-bin /atlas
+COPY --from=builder /src/bin/ezu-bin /ezu

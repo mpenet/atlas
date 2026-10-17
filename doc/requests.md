@@ -2,21 +2,21 @@
 
 [Documentation](README.md) › Requests
 
-How atlas builds a request from the command line, checks it against the spec, and sends it.
+How ezu builds a request from the command line, checks it against the spec, and sends it.
 
 ## Path parameters
 
 Path parameters are positional, in the order they appear in the path, and sent exactly as typed (percent-encoded). `--help` shows them.
 
 ```sh
-atlas op petstore get-pet-by-id 7
+ezu op petstore get-pet-by-id 7
 ```
 
 ## Query parameters and headers
 
 ```sh
-atlas op petstore find-pets-by-status --q.status=available
-atlas op myapi list-items --q.tag=a --q.tag=b --h.X-Request-Id=42
+ezu op petstore find-pets-by-status --q.status=available
+ezu op myapi list-items --q.tag=a --q.tag=b --h.X-Request-Id=42
 ```
 
 A profile's `query` and `headers` are added to every request; values given on the command line win.
@@ -25,19 +25,19 @@ A profile's `query` and `headers` are added to every request; values given on th
 
 ```sh
 # inline JSON (or YAML)
-atlas op myapi add-pet -d '{"name": "Rex", "status": "available"}'
+ezu op myapi add-pet -d '{"name": "Rex", "status": "available"}'
 
 # from a file
-atlas op myapi add-pet -d @pet.json
+ezu op myapi add-pet -d @pet.json
 
 # from stdin
-cat pet.json | atlas op myapi add-pet -d @-
+cat pet.json | ezu op myapi add-pet -d @-
 
 # field by field
-atlas op myapi add-pet --b.name=Rex --b.status=available --b.age=3
+ezu op myapi add-pet --b.name=Rex --b.status=available --b.age=3
 
 # nested fields
-atlas op myapi create-vm --b.instance-type.id=abc123 --b.disk.size=10
+ezu op myapi create-vm --b.instance-type.id=abc123 --b.disk.size=10
 ```
 
 `--b.` fields are merged: `--b.a.b=1 --b.a.c=2` gives `{"a": {"b": 1, "c": 2}}`. With `-d` as well, the fields are merged over its object.
@@ -47,7 +47,7 @@ Field values take their type from the request schema: a `string` property keeps 
 How `-d` is read depends on the operation's request content type:
 
 - JSON, form (`application/x-www-form-urlencoded`) and `multipart/form-data` operations take JSON or YAML.
-- Any other type (`application/octet-stream`, `text/plain`, XML, images…) is sent byte for byte: `atlas op myapi upload-image -d @photo.png`.
+- Any other type (`application/octet-stream`, `text/plain`, XML, images…) is sent byte for byte: `ezu op myapi upload-image -d @photo.png`.
 
 For `multipart/form-data`, a field whose value starts with `@` becomes a file part, named after the file: `--b.file=@photo.png`. Write `@@` for a value that starts with a literal `@`.
 
@@ -55,7 +55,7 @@ JSON bodies are encoded with object keys in sorted order, integers exactly and d
 
 ## Checks before sending
 
-Before sending, atlas compares the request with the operation's description:
+Before sending, ezu compares the request with the operation's description:
 
 - A required query parameter or header that is missing is an error naming the option to add (`--q.status=…`). Headers count wherever they come from: `--h.`, the profile, or authentication.
 - A query parameter the operation doesn't declare (often a typo) prints a warning listing the declared ones; the request is still sent.
@@ -65,25 +65,25 @@ All problems are reported together and nothing is sent. `--no-validate` sends an
 
 ## Retries
 
-Responses with status 408, 429, 500, 502, 503 or 504, and network errors, are retried up to `--retry` times (default 2), for GET, HEAD and OPTIONS requests only unless `--retry-unsafe` is given. atlas waits as long as the response's `Retry-After` header asks, at most `--retry-max-wait` seconds, and otherwise 1, 2, 4… seconds. An authentication failure is never retried.
+Responses with status 408, 429, 500, 502, 503 or 504, and network errors, are retried up to `--retry` times (default 2), for GET, HEAD and OPTIONS requests only unless `--retry-unsafe` is given. ezu waits as long as the response's `Retry-After` header asks, at most `--retry-max-wait` seconds, and otherwise 1, 2, 4… seconds. An authentication failure is never retried.
 
 ## Waiting for a state
 
 `--until` sends the request again, every `--every` seconds (default 5), until a condition holds, then prints the last response. It saves writing a loop, or a workflow, for an operation that takes a while:
 
 ```sh
-atlas op exo get-operation 5f2c… --until "\$response.body#/state == 'success'"
-atlas op exo get-instance 9b1e… --until "\$response.body#/state == 'running'" --every 2
-atlas op exo get-instance 9b1e… --until '$statusCode == 404'   # until it is deleted
+ezu op exo get-operation 5f2c… --until "\$response.body#/state == 'success'"
+ezu op exo get-instance 9b1e… --until "\$response.body#/state == 'running'" --every 2
+ezu op exo get-instance 9b1e… --until '$statusCode == 404'   # until it is deleted
 ```
 
-The condition is written as in [workflows](arazzo.md#success-criteria), about the request and its response: `$statusCode`, `$response.body#/pointer`, `$response.header.NAME`, `$method`, `$url` and `$request…`, compared with `==`, `!=`, `<`… and combined with `&&` and `||`. It is checked before anything is sent: a condition that can't be evaluated, or that refers to anything else, stops atlas at once. When it holds, atlas exits 0, whatever the status. Each response is read whole to be checked, events and JSON Lines included, and the last one is printed.
+The condition is written as in [workflows](arazzo.md#success-criteria), about the request and its response: `$statusCode`, `$response.body#/pointer`, `$response.header.NAME`, `$method`, `$url` and `$request…`, compared with `==`, `!=`, `<`… and combined with `&&` and `||`. It is checked before anything is sent: a condition that can't be evaluated, or that refers to anything else, stops ezu at once. When it holds, ezu exits 0, whatever the status. Each response is read whole to be checked, events and JSON Lines included, and the last one is printed.
 
-On a terminal, a line says how many requests were sent and what the condition found. atlas stops trying when another request would start after `--max-time` seconds (default 600), with exit code 1, saying why, for example `($response.body#/state is "failure")`. `--every` must be more than 0. As with [retries](#retries), a POST or PATCH is only sent again with `--retry-unsafe`; `--until` can't be used with `--dry-run` or `--curl`, which send nothing.
+On a terminal, a line says how many requests were sent and what the condition found. ezu stops trying when another request would start after `--max-time` seconds (default 600), with exit code 1, saying why, for example `($response.body#/state is "failure")`. `--every` must be more than 0. As with [retries](#retries), a POST or PATCH is only sent again with `--retry-unsafe`; `--until` can't be used with `--dry-run` or `--curl`, which send nothing.
 
 ## Pagination
 
-When a GET response is a JSON array and has a `Link: <…>; rel="next"` header, atlas follows the links and prints all items as one array. Every page is requested with the same headers and credentials; a link to another origin (scheme, host or port) is not followed. atlas stops after `--max-pages` pages (default 25). If a later page fails, the items collected so far are printed with a warning naming the failing status. `--no-paginate` prints the first page as it is.
+When a GET response is a JSON array and has a `Link: <…>; rel="next"` header, ezu follows the links and prints all items as one array. Every page is requested with the same headers and credentials; a link to another origin (scheme, host or port) is not followed. ezu stops after `--max-pages` pages (default 25). If a later page fails, the items collected so far are printed with a warning naming the failing status. `--no-paginate` prints the first page as it is.
 
 ## Dry runs
 

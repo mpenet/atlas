@@ -12,10 +12,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Tag matches atlas.version and a dated changelog entry
+      - name: Tag matches ezu.version and a dated changelog entry
         run: |
           v="${GITHUB_REF_NAME#v}"
-          grep -qF "{:version \"$v\"" fnl/atlas.fnl || { echo "fnl/atlas.fnl does not say version $v"; exit 1; }
+          grep -qF "{:version \"$v\"" fnl/ezu.fnl || { echo "fnl/ezu.fnl does not say version $v"; exit 1; }
           grep -qE "^## \[$v\] - [0-9]{4}-[0-9]{2}-[0-9]{2}" CHANGELOG.md || { echo "CHANGELOG.md has no dated section for $v"; exit 1; }
 
   build-macos:
@@ -53,12 +53,12 @@ jobs:
         run: make check-binary-tls
 
       - name: Stage artifact
-        run: cp bin/atlas-bin atlas-macos-${{ matrix.arch }}
+        run: cp bin/ezu-bin ezu-macos-${{ matrix.arch }}
 
       - uses: actions/upload-artifact@v7
         with:
-          name: atlas-macos-${{ matrix.arch }}
-          path: atlas-macos-${{ matrix.arch }}
+          name: ezu-macos-${{ matrix.arch }}
+          path: ezu-macos-${{ matrix.arch }}
 
   build-linux:
     needs: version
@@ -80,15 +80,15 @@ jobs:
       - name: Build Linux binary via Docker
         run: |
           docker buildx build --output type=local,dest=dist/ .
-          cp dist/atlas atlas-linux-${{ matrix.arch }}
+          cp dist/ezu ezu-linux-${{ matrix.arch }}
 
       - name: Check TLS verification
-        run: mkdir -p bin && cp atlas-linux-${{ matrix.arch }} bin/atlas-bin && make check-binary-tls
+        run: mkdir -p bin && cp ezu-linux-${{ matrix.arch }} bin/ezu-bin && make check-binary-tls
 
       - uses: actions/upload-artifact@v7
         with:
-          name: atlas-linux-${{ matrix.arch }}
-          path: atlas-linux-${{ matrix.arch }}
+          name: ezu-linux-${{ matrix.arch }}
+          path: ezu-linux-${{ matrix.arch }}
 
   release:
     needs: [build-macos, build-linux]
@@ -111,11 +111,11 @@ jobs:
         run: cp THIRD-PARTY.md dist/
 
       - name: Checksums
-        run: cd dist && sha256sum atlas-* THIRD-PARTY.md > SHA256SUMS && cat SHA256SUMS
+        run: cd dist && sha256sum ezu-* THIRD-PARTY.md > SHA256SUMS && cat SHA256SUMS
 
       - uses: actions/attest-build-provenance@v4
         with:
-          subject-path: 'dist/atlas-*'
+          subject-path: 'dist/ezu-*'
 
       - name: Release notes from the changelog
         run: |
@@ -150,10 +150,10 @@ jobs:
           v="${GITHUB_REF_NAME#v}"
           git clone "https://x-access-token:$TAP_TOKEN@github.com/mpenet/homebrew-tap.git" tap
           mkdir -p tap/Formula
-          tools/brew-formula.sh "$v" dist/SHA256SUMS > tap/Formula/atlas.rb
+          tools/brew-formula.sh "$v" dist/SHA256SUMS > tap/Formula/ezu.rb
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/atlas.rb
-          git commit -m "atlas $v"
+          git add Formula/ezu.rb
+          git commit -m "ezu $v"
           git push

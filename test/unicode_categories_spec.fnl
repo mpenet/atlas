@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for the Unicode general category of a code point, as the
 ;; ABOUTME: regular expressions of JSONPath (\p{Lu}, \P{N}…) need it.
-(local categories (require :atlas.unicode-categories))
+(local categories (require :ezu.unicode-categories))
 
 (describe "unicode-categories.of"
           (fn []

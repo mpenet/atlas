@@ -2,7 +2,7 @@
 luarocks.lock
 /build/
 /bin/anis-bin
-/bin/atlas-bin
+/bin/ezu-bin
 /test/*_spec.lua
 **.lua
 /tmp

@@ -1,12 +1,12 @@
 ;; ABOUTME: Specs for following Link rel="next" pagination and merging pages.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local paginate (require :atlas.paginate))
+(local paginate (require :ezu.paginate))
 
 (fn site [pages]
   "http-fn serving pages keyed by full URL; records requested URLs."
   (let [seen []]
     (values (fn [req]
-              (let [util (require :atlas.util)
+              (let [util (require :ezu.util)
                     url (util.append-query req.url (or req.query {}))]
                 (table.insert seen url)
                 (or (. pages url) {:status 404 :headers {} :body nil})))
@@ -14,7 +14,7 @@
 
 (fn page [body ?next]
   "A 200 response shaped like the real transport's, with :raw JSON text."
-  (let [json (require :atlas.json)]
+  (let [json (require :ezu.json)]
     {:status 200
      :headers (if ?next {:link (.. "<" ?next ">; rel=\"next\"")} {})
      :body body
@@ -90,12 +90,12 @@
             (it "requests next pages like the first, sensitive headers marked"
                 (fn []
                   (let [seen []
-                        json (require :atlas.json)
+                        json (require :ezu.json)
                         pages {"https://h/a" (page [1] "https://h/a?p=2")
                                "https://h/a?p=2" (page [2])}
                         f (paginate.wrap (fn [req]
                                            (table.insert seen req)
-                                           (let [util (require :atlas.util)]
+                                           (let [util (require :ezu.util)]
                                              (. pages
                                                 (util.append-query req.url
                                                                    (or req.query
@@ -108,7 +108,7 @@
                     (assert.are.same [:x-key] (. seen 2 :sensitive-headers)))))
             (it "keeps null members in the merged body"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         (http) (site {"https://h/a" (page (json.decode "[{\"a\":null}]"
                                                                        true)
                                                           "https://h/a?p=2")
@@ -165,7 +165,7 @@
                     (assert.are.equal 404 resp.next-page-status))))))
 
 (fn raw-page [raw ?next]
-  (let [http (require :atlas.http)
+  (let [http (require :ezu.http)
         resp (http.decode-response 200
                                    (if ?next
                                        {:link (.. "<" ?next ">; rel=\"next\"")
@@ -249,7 +249,7 @@
           (fn []
             (it "follows pages whose responses have a body but no raw text"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         f (paginate.wrap (fn [req]
                                            (if (req.url:find "page=2")
                                                {:status 200

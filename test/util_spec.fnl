@@ -1,6 +1,6 @@
-;; ABOUTME: Specs for shared helpers in atlas.util.
+;; ABOUTME: Specs for shared helpers in ezu.util.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local util (require :atlas.util))
+(local util (require :ezu.util))
 
 (describe "origin"
           (fn []
@@ -274,24 +274,24 @@
     (h:close)
     (out:match "^%s*(.-)%s*$")))
 
-(describe "atlas directories"
+(describe "ezu directories"
           (fn []
             (it "honors XDG_CACHE_HOME and XDG_CONFIG_HOME"
                 (fn []
-                  (assert.are.equal "/x/c/atlas"
+                  (assert.are.equal "/x/c/ezu"
                                     (eval-with-env "XDG_CACHE_HOME=/x/c"
-                                                   "print(require('atlas.util')['cache-dir']())"))
-                  (assert.are.equal "/x/k/atlas"
+                                                   "print(require('ezu.util')['cache-dir']())"))
+                  (assert.are.equal "/x/k/ezu"
                                     (eval-with-env "XDG_CONFIG_HOME=/x/k"
-                                                   "print(require('atlas.util')['config-dir']())"))))
+                                                   "print(require('ezu.util')['config-dir']())"))))
             (it "defaults to ~/.cache and ~/.config"
                 (fn []
-                  (assert.are.equal "/h/.cache/atlas"
+                  (assert.are.equal "/h/.cache/ezu"
                                     (eval-with-env "env -u XDG_CACHE_HOME HOME=/h"
-                                                   "print(require('atlas.util')['cache-dir']())"))
-                  (assert.are.equal "/h/.config/atlas"
+                                                   "print(require('ezu.util')['cache-dir']())"))
+                  (assert.are.equal "/h/.config/ezu"
                                     (eval-with-env "env -u XDG_CONFIG_HOME HOME=/h"
-                                                   "print(require('atlas.util')['config-dir']())"))))))
+                                                   "print(require('ezu.util')['config-dir']())"))))))
 
 (describe "resolve-reference URL edge cases"
           (fn []

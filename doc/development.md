@@ -11,7 +11,7 @@ make deps
 make build
 # the specs, the global and manifest checks, and the documentation's links
 make test
-# the standalone binary, in bin/atlas-bin
+# the standalone binary, in bin/ezu-bin
 make binary
 # build the binary and install it to /usr/local/bin (PREFIX=... to change)
 make install
@@ -21,7 +21,7 @@ make install
 
 ## The standalone binary
 
-`make binary` requires a C compiler, `fennel`, `lua`, `luarocks`, `libyaml`, `pkg-config`, `unzip` and `curl`. It downloads the mbedTLS and libcurl sources (checked against pinned checksums) and statically links Lua, luasocket, libcurl, mbedTLS, lyaml and libyaml, optimized for size, with the Lua modules embedded as stripped bytecode: the binary is about 2 MB and depends only on system libraries. `make check-binary` runs it with Lua's module paths emptied and checks what it links. The binary carries the licenses of what it contains, from [THIRD-PARTY.md](../THIRD-PARTY.md) (`atlas --licenses`); update that file when a bundled library or its version changes.
+`make binary` requires a C compiler, `fennel`, `lua`, `luarocks`, `libyaml`, `pkg-config`, `unzip` and `curl`. It downloads the mbedTLS and libcurl sources (checked against pinned checksums) and statically links Lua, luasocket, libcurl, mbedTLS, lyaml and libyaml, optimized for size, with the Lua modules embedded as stripped bytecode: the binary is about 2 MB and depends only on system libraries. `make check-binary` runs it with Lua's module paths emptied and checks what it links. The binary carries the licenses of what it contains, from [THIRD-PARTY.md](../THIRD-PARTY.md) (`ezu --licenses`); update that file when a bundled library or its version changes.
 
 `make binary STATIC_LDFLAGS=-static` links the system libraries too; the Linux release binaries are built that way against musl (see the `Dockerfile`), so they run on any distribution. `make binary DEPS_FROM_SOURCE=1` also builds Lua and libyaml from pinned sources for `MACOSX_DEPLOYMENT_TARGET` (default 12.0), which the macOS release binaries use.
 
@@ -35,7 +35,7 @@ downloads the public specs listed in `test/corpus/specs.txt` (GitHub, Stripe, Cl
 
 ## Generated code
 
-Two modules are generated from Unicode's data files: `fnl/atlas/cli/width.fnl`, the display width of text in a terminal (by `tools/unicode-width.lua`), and `fnl/atlas/unicode-categories.fnl`, the general category of each code point for regular expressions (by `tools/unicode-categories.lua`):
+Two modules are generated from Unicode's data files: `fnl/ezu/cli/width.fnl`, the display width of text in a terminal (by `tools/unicode-width.lua`), and `fnl/ezu/unicode-categories.fnl`, the general category of each code point for regular expressions (by `tools/unicode-categories.lua`):
 
 ```sh
 make unicode UNICODE_VERSION=17.0.0
@@ -43,7 +43,7 @@ make unicode UNICODE_VERSION=17.0.0
 
 ## Releasing
 
-1. Set the version in `fnl/atlas.fnl` (`:version`).
+1. Set the version in `fnl/ezu.fnl` (`:version`).
 2. Turn `unreleased` into today's date in that version's `CHANGELOG.md` section.
 3. Commit, tag `vVERSION` and push the tag.
 

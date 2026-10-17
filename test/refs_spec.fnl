@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for resolving $refs: JSON-pointer escapes, cycles, errors,
 ;; ABOUTME: and references into other files. Run with `make test`.
-(local refs (require :atlas.refs))
+(local refs (require :ezu.refs))
 
 (fn deref [root value ?opts]
   ((refs.resolver root ?opts) value))
@@ -237,6 +237,6 @@
           (fn []
             (it "give JSON null itself"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         out (deref {:b json.null} {:a {:$ref "#/b"}})]
                     (assert.are.equal json.null out.a))))))

@@ -1,14 +1,18 @@
 # Changelog
 
-All notable changes to atlas. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
+All notable changes to ezu, named atlas until 1.0.0-beta7. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+### Changed
+
+- atlas is now **ezu** (絵図, a pictorial map): the command, the Lua modules (`require "ezu"`), the rock and the Homebrew formula. Configuration and cache are in `~/.config/ezu` and `~/.cache/ezu`; copy `~/.config/atlas` there to keep your profiles.
 
 ### Added
 
 - Plugins: Lua or Fennel files listed in the configuration's `plugins` provide authentication methods, which profiles use by name. A method is a function signing each request in-process, with helpers for SHA-256, HMAC-SHA256, base64, hex, JSON and URLs; a plugin's path is absolute (or starts with `~/`), and its file and directories must belong to the user (or root, for directories) and be writable only by them. The binary carries the Fennel compiler (compressed, loaded only for a Fennel plugin), and `doc/examples/plugins/exoscale.fnl` signs Exoscale's API requests.
-- `atlas --licenses` prints the licenses of the software the binaries contain (Lua, libcurl, Mbed TLS, LuaSocket, lyaml, LibYAML, lunajson, Fennel, and zlib and musl on Linux, and the Unicode data); they are also in `THIRD-PARTY.md`, attached to each release.
-- `atlas az FILE [WORKFLOW] --check` checks a document against its sources without running it: operations and workflows that don't exist, parameters and bodies, references to steps, outputs, inputs, workflows and components, conditions, regexes and JSONPath queries, and actions. It exits 1 on an error.
+- `ezu --licenses` prints the licenses of the software the binaries contain (Lua, libcurl, Mbed TLS, LuaSocket, lyaml, LibYAML, lunajson, Fennel, and zlib and musl on Linux, and the Unicode data); they are also in `THIRD-PARTY.md`, attached to each release.
+- `ezu az FILE [WORKFLOW] --check` checks a document against its sources without running it: operations and workflows that don't exist, parameters and bodies, references to steps, outputs, inputs, workflows and components, conditions, regexes and JSONPath queries, and actions. It exits 1 on an error.
 - `--until CONDITION` on `op` and `http` sends the request again, every `--every` seconds, until the condition holds (written as in workflows: `$response.body#/state == 'ready'`, `$statusCode == 404`), then prints the last response and exits 0. After `--max-time` seconds (default 600) it gives up saying what the condition found. The condition is checked before anything is sent; a POST or PATCH is only sent again with `--retry-unsafe`.
 - `--timing` logs a line per request: method, URL, status and how long each phase took (dns, tcp, tls, server, download, total, and the redirects that led there). `-v` shows the same timings for each exchange, and the library's responses carry them as `:timings`.
 
@@ -94,7 +98,7 @@ All notable changes to atlas. The format follows [Keep a Changelog](https://keep
 
 ## [1.0.0-beta2] - 2026-10-15
 
-The first beta with release binaries: 1.0.0-beta1 was published without them, and its release can no longer take files. The code is that of 1.0.0-beta1: see its section of [CHANGELOG.md](https://github.com/mpenet/atlas/blob/main/CHANGELOG.md) for the changes since 1.0.0-alpha14.
+The first beta with release binaries: 1.0.0-beta1 was published without them, and its release can no longer take files. The code is that of 1.0.0-beta1: see its section of [CHANGELOG.md](https://github.com/mpenet/ezu/blob/main/CHANGELOG.md) for the changes since 1.0.0-alpha14.
 
 ### Fixed
 
@@ -272,13 +276,13 @@ The first beta with release binaries: 1.0.0-beta1 was published without them, an
 
 ## [1.0.0-alpha14] - 2026-07-06
 
-Earlier releases are described on the [releases page](https://github.com/mpenet/atlas/releases).
+Earlier releases are described on the [releases page](https://github.com/mpenet/ezu/releases).
 
-[1.0.0-beta7]: https://github.com/mpenet/atlas/compare/v1.0.0-beta6...v1.0.0-beta7
-[1.0.0-beta6]: https://github.com/mpenet/atlas/compare/v1.0.0-beta5...v1.0.0-beta6
-[1.0.0-beta5]: https://github.com/mpenet/atlas/compare/v1.0.0-beta4...v1.0.0-beta5
-[1.0.0-beta4]: https://github.com/mpenet/atlas/compare/v1.0.0-beta3...v1.0.0-beta4
-[1.0.0-beta3]: https://github.com/mpenet/atlas/compare/v1.0.0-beta2...v1.0.0-beta3
-[1.0.0-beta2]: https://github.com/mpenet/atlas/compare/v1.0.0-beta1...v1.0.0-beta2
-[1.0.0-beta1]: https://github.com/mpenet/atlas/compare/v1.0.0-alpha14...v1.0.0-beta1
-[1.0.0-alpha14]: https://github.com/mpenet/atlas/releases/tag/v1.0.0-alpha14
+[1.0.0-beta7]: https://github.com/mpenet/ezu/compare/v1.0.0-beta6...v1.0.0-beta7
+[1.0.0-beta6]: https://github.com/mpenet/ezu/compare/v1.0.0-beta5...v1.0.0-beta6
+[1.0.0-beta5]: https://github.com/mpenet/ezu/compare/v1.0.0-beta4...v1.0.0-beta5
+[1.0.0-beta4]: https://github.com/mpenet/ezu/compare/v1.0.0-beta3...v1.0.0-beta4
+[1.0.0-beta3]: https://github.com/mpenet/ezu/compare/v1.0.0-beta2...v1.0.0-beta3
+[1.0.0-beta2]: https://github.com/mpenet/ezu/compare/v1.0.0-beta1...v1.0.0-beta2
+[1.0.0-beta1]: https://github.com/mpenet/ezu/compare/v1.0.0-alpha14...v1.0.0-beta1
+[1.0.0-alpha14]: https://github.com/mpenet/ezu/releases/tag/v1.0.0-alpha14

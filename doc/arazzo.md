@@ -2,7 +2,7 @@
 
 [Documentation](README.md) › Arazzo workflows
 
-[Arazzo](https://spec.openapis.org/arazzo/latest.html) describes sequences of API calls: call this, take a value from the response, call that, repeat until a job is done. `atlas az` runs Arazzo 1.0 and 1.1 documents, using your [profiles](configuration.md) for authentication and TLS.
+[Arazzo](https://spec.openapis.org/arazzo/latest.html) describes sequences of API calls: call this, take a value from the response, call that, repeat until a job is done. `ezu az` runs Arazzo 1.0 and 1.1 documents, using your [profiles](configuration.md) for authentication and TLS.
 
 It is the natural fit for asynchronous APIs: one workflow starts an operation, polls its status until it completes, and returns the result, in a single command.
 
@@ -11,15 +11,15 @@ It is the natural fit for asynchronous APIs: one workflow starts an operation, p
 [`examples/petstore.arazzo.yaml`](examples/petstore.arazzo.yaml) uses the public Petstore: it finds the first pet with a given status, then fetches it.
 
 ```console
-$ atlas az doc/examples/petstore.arazzo.yaml
+$ ezu az doc/examples/petstore.arazzo.yaml
 first-pet  Find the first pet with a given status and fetch its details.
 
-$ atlas az doc/examples/petstore.arazzo.yaml first-pet --help
+$ ezu az doc/examples/petstore.arazzo.yaml first-pet --help
 first-pet
 
 Find the first pet with a given status and fetch its details.
 
-Usage: atlas az <name-or-file> first-pet [-i KEY=VAL ...]
+Usage: ezu az <name-or-file> first-pet [-i KEY=VAL ...]
 
 Inputs:
   status           string [available|pending|sold] (default: available) — Pet status to look for
@@ -28,14 +28,14 @@ Steps:
   1. find    findPetsByStatus
   2. fetch   getPetById
 
-$ atlas az doc/examples/petstore.arazzo.yaml first-pet -i status=sold
+$ ezu az doc/examples/petstore.arazzo.yaml first-pet -i status=sold
 {
   "name": "doggie-updated",
   "status": "sold"
 }
 ```
 
-The document is a file path, a URL, or a [name from the configuration](#named-workflow-documents). Without a workflow id, atlas lists the workflows; with `--help`, it describes one: its inputs (type, allowed values, default, description), which inputs can be given as arguments, and its steps with what they call.
+The document is a file path, a URL, or a [name from the configuration](#named-workflow-documents). Without a workflow id, ezu lists the workflows; with `--help`, it describes one: its inputs (type, allowed values, default, description), which inputs can be given as arguments, and its steps with what they call.
 
 The OpenAPI documents listed in `sourceDescriptions` are loaded automatically. Relative URLs resolve against the Arazzo document's own location.
 
@@ -43,21 +43,21 @@ The OpenAPI documents listed in `sourceDescriptions` are loaded automatically. R
 
 ```sh
 # one at a time
-atlas az pets first-pet -i status=sold
-atlas az pets first-pet --i.status=sold
+ezu az pets first-pet -i status=sold
+ezu az pets first-pet --i.status=sold
 
 # all at once, inline or from a file
-atlas az pets first-pet --inputs '{"status": "sold"}'
-atlas az pets first-pet --inputs @inputs.json
+ezu az pets first-pet --inputs '{"status": "sold"}'
+ezu az pets first-pet --inputs @inputs.json
 ```
 
 Inputs used as path parameters (`value: $inputs.NAME` on a `path` parameter) can also be given as arguments after the workflow id, in the order they first appear in the steps:
 
 ```sh
-atlas az myapi get-resource 0b6f3c2e
+ezu az myapi get-resource 0b6f3c2e
 ```
 
-`-d` and `--b.` set inputs too, which reads naturally for workflows that send a body: `atlas az myapi create-vm --b.name=web --b.disk.size=50`.
+`-d` and `--b.` set inputs too, which reads naturally for workflows that send a body: `ezu az myapi create-vm --b.name=web --b.disk.size=50`.
 
 When several sources set the same input, the last one in this list wins: the configured `inputs`, arguments, `--inputs`, `-d`, then `-i`, `--i.` and `--b.` fields. Field values are typed from the workflow's `inputs` schema, like `--b.` fields of an operation.
 
@@ -73,7 +73,7 @@ Inputs are checked against the `inputs` schema before anything runs (types, requ
 | `full` | For each step, the operation and request body, then the response, then the outputs |
 
 ```console
-$ atlas az doc/examples/petstore.arazzo.yaml first-pet --arazzo-output progress
+$ ezu az doc/examples/petstore.arazzo.yaml first-pet --arazzo-output progress
 ✓ 1/2 find   findPetsByStatus  116ms  200
 ✓ 2/2 fetch  getPetById        117ms  200
 ✓ workflow first-pet  960ms
@@ -92,21 +92,21 @@ Each line gives the step's position, its id, what it calls, how long it took and
 
 On a terminal, a step's line is updated in place while it runs and while it polls, cut to the terminal's width; in a log, each attempt gets its own line. The steps of a workflow run by another one (a step, `dependsOn` or a `goto`) are indented.
 
-A failed workflow ends with `✗ workflow NAME failed` and the reason: the step, the criterion that failed with the values it compared, and the response's status and body (shortened). atlas exits 1. `-v` shows progress as well and logs every request, credentials redacted. Outputs use the `--output` format.
+A failed workflow ends with `✗ workflow NAME failed` and the reason: the step, the criterion that failed with the values it compared, and the response's status and body (shortened). ezu exits 1. `-v` shows progress as well and logs every request, credentials redacted. Outputs use the `--output` format.
 
 ## Checking a document
 
 `--check` reads the document and its OpenAPI sources and reports what would go wrong, without sending a request to the API:
 
 ```console
-$ atlas az flows.yaml --check
+$ ezu az flows.yaml --check
 ✗ create-instance › step create: required header parameter 'x-trace' is missing
 ✗ create-instance › step wait › onFailure poll: goto to unknown step 'wiat'
 ! create-instance › step create: create-instance has no query parameter 'colour'
 2 errors, 1 warning
 ```
 
-It finds steps calling operations or workflows that don't exist; required parameters left out and parameters the operation doesn't declare (a warning); a body missing or not expected; references to steps, outputs, inputs, workflows, sources and components that don't exist; runtime expressions atlas doesn't know; conditions, regular expressions and JSONPath queries that can't be evaluated (unless they embed `{$expressions}`, only known when running); actions going to unknown steps or workflows. Parameters the profile adds to every request (its headers, query and authentication) count as given; header names match whatever their case, and `Accept`, `Content-Type` and `Authorization` header parameters are left out, as OpenAPI says. Workflows of other Arazzo documents (`$sourceDescriptions.NAME.ID`) are reported, since atlas doesn't run them. With a workflow id, it reports that workflow's problems only, its steps' included. atlas exits 1 when it finds an error, 0 otherwise.
+It finds steps calling operations or workflows that don't exist; required parameters left out and parameters the operation doesn't declare (a warning); a body missing or not expected; references to steps, outputs, inputs, workflows, sources and components that don't exist; runtime expressions ezu doesn't know; conditions, regular expressions and JSONPath queries that can't be evaluated (unless they embed `{$expressions}`, only known when running); actions going to unknown steps or workflows. Parameters the profile adds to every request (its headers, query and authentication) count as given; header names match whatever their case, and `Accept`, `Content-Type` and `Authorization` header parameters are left out, as OpenAPI says. Workflows of other Arazzo documents (`$sourceDescriptions.NAME.ID`) are reported, since ezu doesn't run them. With a workflow id, it reports that workflow's problems only, its steps' included. ezu exits 1 when it finds an error, 0 otherwise.
 
 ## Named workflow documents
 
@@ -134,7 +134,7 @@ The configuration's `arazzo` section names documents and attaches a profile and 
 
 ## Writing workflows
 
-A short reference of what atlas supports. The [Arazzo specification](https://spec.openapis.org/arazzo/latest.html) has the details.
+A short reference of what ezu supports. The [Arazzo specification](https://spec.openapis.org/arazzo/latest.html) has the details.
 
 ### Steps
 
@@ -159,12 +159,12 @@ A step calls an operation, named by `operationId` (written `$sourceDescriptions.
 | `$outputs.NAME` | In the workflow's `outputs`: one of its outputs defined above |
 | `$self` | The Arazzo document's own URL; relative source URLs resolve against it |
 | `$sourceDescriptions.NAME.url` | A field of a source description |
-| `$find(ARRAY, FIELD, VALUE[, RETURN])` | atlas extension: the first element of `ARRAY` whose `FIELD` is `VALUE`, or its `RETURN` field |
+| `$find(ARRAY, FIELD, VALUE[, RETURN])` | ezu extension: the first element of `ARRAY` whose `FIELD` is `VALUE`, or its `RETURN` field |
 | `{$expression}` | Inside a string: the expression's value |
 
 Arazzo 1.1 `{$expression}` embedding works in regex and JSONPath conditions and in selectors too.
 
-To reach inside an input or output, add a JSON pointer: `$steps.fetch.outputs.pet#/name`. Names may contain dots, so `$steps.fetch.outputs.pet.name` means an output named `pet.name`; when there is none but there is a `pet`, atlas says to use the pointer form.
+To reach inside an input or output, add a JSON pointer: `$steps.fetch.outputs.pet#/name`. Names may contain dots, so `$steps.fetch.outputs.pet.name` means an output named `pet.name`; when there is none but there is a `pet`, ezu says to use the pointer form.
 
 ### Selectors
 
@@ -182,7 +182,7 @@ outputs:
 
 ### Success criteria
 
-All of a step's `successCriteria` must hold; a step without any succeeds. A condition that can't be evaluated (a misspelled expression, a malformed pattern) fails, and atlas prints why as a warning on stderr. Three kinds are supported:
+All of a step's `successCriteria` must hold; a step without any succeeds. A condition that can't be evaluated (a misspelled expression, a malformed pattern) fails, and ezu prints why as a warning on stderr. Three kinds are supported:
 
 - **Simple conditions:** comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!` and parentheses, with strings in single or double quotes (`''` for a quote inside: `'it''s'`), numbers, `true`, `false` and `null`. Strings compare case-insensitively, as the spec requires. Values from responses are compared as values, never read as part of the condition. A misspelled expression (`$statuscode`) fails the condition with a warning, rather than reading as `null`.
 
@@ -207,7 +207,7 @@ All of a step's `successCriteria` must hold; a step without any succeeds. A cond
     condition: "$.items[?@.name == '{$inputs.name}']"
   ```
 
-XPath criteria and selectors are not supported: atlas works with JSON, not XML.
+XPath criteria and selectors are not supported: ezu works with JSON, not XML.
 
 ### Actions
 

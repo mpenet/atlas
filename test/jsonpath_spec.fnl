@@ -1,7 +1,7 @@
 ;; ABOUTME: Specs for JSONPath (RFC 9535): the official compliance test suite
 ;; ABOUTME: (test/fixtures/jsonpath-cts.json), values and normalized paths.
-(local jsonpath (require :atlas.jsonpath))
-(local json (require :atlas.json))
+(local jsonpath (require :ezu.jsonpath))
+(local json (require :ezu.json))
 
 (local cts (with-open [f (io.open "test/fixtures/jsonpath-cts.json")]
              (json.decode (f:read :*a) true)))

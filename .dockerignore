@@ -1,5 +1,5 @@
 build/
-bin/atlas-bin
+bin/ezu-bin
 dist/
 .git/
 lua/

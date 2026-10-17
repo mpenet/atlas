@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for I-Regexp (RFC 9485), the regular expressions of JSONPath:
 ;; ABOUTME: syntax, whole-string and substring matching, linear-time matching.
-(local iregexp (require :atlas.iregexp))
+(local iregexp (require :ezu.iregexp))
 
 (fn matches? [pattern s]
   (iregexp.matches? (iregexp.compile pattern) s))

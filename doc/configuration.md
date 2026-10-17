@@ -2,7 +2,7 @@
 
 [Documentation](README.md) › Configuration
 
-The configuration is `~/.config/atlas/config.json` (`$XDG_CONFIG_HOME/atlas/config.json` when `XDG_CONFIG_HOME` is set):
+The configuration is `~/.config/ezu/config.json` (`$XDG_CONFIG_HOME/ezu/config.json` when `XDG_CONFIG_HOME` is set):
 
 ```json
 {
@@ -39,7 +39,7 @@ Settings apply in this order, first found wins: command-line option, profile, to
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `schema` | string | The spec's URL or file path; without it, atlas finds the spec from `base-url` (see [Finding the spec](#finding-the-spec)) |
+| `schema` | string | The spec's URL or file path; without it, ezu finds the spec from `base-url` (see [Finding the spec](#finding-the-spec)) |
 | `extends` | string | Profile to inherit from |
 | `base-url` | string | Send requests here instead of the spec's server |
 | `server-index` | number | Which of the spec's servers to use, from 1 |
@@ -56,16 +56,16 @@ Settings apply in this order, first found wins: command-line option, profile, to
 | `output` | string | Output format |
 | `no-color` | boolean | Never colour the output |
 | `verbose` | boolean | Always log requests and responses |
-| `mcp` | object | `{"operations": [...]}`: the operations `atlas mcp` offers, names or `*` patterns; see [MCP server](mcp.md) |
+| `mcp` | object | `{"operations": [...]}`: the operations `ezu mcp` offers, names or `*` patterns; see [MCP server](mcp.md) |
 
-A profile with `extends` takes every key of the profile it names and overrides them with its own, except `headers`, which are merged key by key. Chains (`a` extends `b` extends `c`) work; a cycle is an error. `atlas profile show NAME` prints the result.
+A profile with `extends` takes every key of the profile it names and overrides them with its own, except `headers`, which are merged key by key. Chains (`a` extends `b` extends `c`) work; a cycle is an error. `ezu profile show NAME` prints the result.
 
 ## Servers
 
 Requests go to the first server the spec lists. `--servers` shows them all, with their variables:
 
 ```console
-$ atlas op myapi --servers
+$ ezu op myapi --servers
 * 1. https://api-{region}.example.com — Production
        region = eu  (default: eu; one of: eu, us)
   2. https://staging.example.com — Staging
@@ -75,15 +75,15 @@ $ atlas op myapi --servers
 
 ## Finding the spec
 
-A profile with `base-url` and no `schema` lets atlas find the spec, the way Restish does. It looks, in order, at:
+A profile with `base-url` and no `schema` lets ezu find the spec, the way Restish does. It looks, in order, at:
 
 1. the links of the base URL's `Link` header with `rel="service-desc"`, `"service-doc"` or `"describedby"` ([RFC 8631](https://www.rfc-editor.org/rfc/rfc8631)), on the base URL's origin only;
 2. `openapi.json` and `openapi.yaml` under the base URL (before its query string, if any);
 3. the base URL itself;
 4. `openapi.json` and `openapi.yaml` at the root of the base URL's origin, when the base URL has a path.
 
-The first that is an OpenAPI document is used, and where it was found is cached like the spec (`--reload` looks again, and so does atlas when the spec it remembered is gone). Credentials follow the spec's rules: sent only once a URL answers 401 or 403. When nothing is found, atlas says what each place answered; set `schema` then.
+The first that is an OpenAPI document is used, and where it was found is cached like the spec (`--reload` looks again, and so does ezu when the spec it remembered is gone). Credentials follow the spec's rules: sent only once a URL answers 401 or 403. When nothing is found, ezu says what each place answered; set `schema` then.
 
 ## Schema cache
 
-Specs fetched from a URL are cached in `~/.cache/atlas/schemas/` (`$XDG_CACHE_HOME/atlas/schemas/` when set) for an hour. `--reload` fetches the spec again, and `--cache-ttl` or a profile's `cache-ttl` change how long it stays cached.
+Specs fetched from a URL are cached in `~/.cache/ezu/schemas/` (`$XDG_CACHE_HOME/ezu/schemas/` when set) for an hour. `--reload` fetches the spec again, and `--cache-ttl` or a profile's `cache-ttl` change how long it stays cached.

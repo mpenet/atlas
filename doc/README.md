@@ -1,10 +1,10 @@
-# atlas documentation
+# ezu documentation
 
-atlas calls any HTTP API that publishes an [OpenAPI 3](https://spec.openapis.org/oas/latest.html) description: each operation becomes a command. The [README](../README.md) has a five-minute tour.
+ezu calls any HTTP API that publishes an [OpenAPI 3](https://spec.openapis.org/oas/latest.html) description: each operation becomes a command. The [README](../README.md) has a five-minute tour.
 
 ## Getting started
 
-- [Installing atlas](install.md): Homebrew, release binaries (about 2 MB, no runtime dependencies), from source, with luarocks; shell completion.
+- [Installing ezu](install.md): Homebrew, release binaries (about 2 MB, no runtime dependencies), from source, with luarocks; shell completion.
 - [Guide](guide.md): adding an API, credentials, several environments, scripting, debugging a request, corporate networks.
 
 ## Reference
@@ -21,7 +21,7 @@ atlas calls any HTTP API that publishes an [OpenAPI 3](https://spec.openapis.org
 - [Arazzo workflows](arazzo.md): running and writing multi-step workflows.
 - [MCP server](mcp.md): serving an API's operations, and workflows, to AI agents.
 - [Moving from Restish](restish.md): importing a Restish configuration, and how the two compare.
-- [Library](library.md): using atlas from Fennel or Lua; installation and a quick start, then
+- [Library](library.md): using ezu from Fennel or Lua; installation and a quick start, then
   - [Clients](library/clients.md): building a client from a spec, base URLs, `$ref`s, servers;
   - [Operations](library/operations.md): calling operations, responses, content negotiation, metadata, errors;
   - [HTTP](library/http.md): the HTTP adapter, streaming, retries, pagination, TLS, proxies;

@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for plugins: loading Lua and Fennel files listed in the config,
 ;; ABOUTME: refusing files others can change, and resolving the auth they provide.
-(local plugins (require :atlas.cli.plugins))
+(local plugins (require :ezu.cli.plugins))
 
 (fn plugin-file [extension text ?mode]
   "A plugin file with text, mode ?mode (default 600); returns its path."
@@ -91,8 +91,8 @@
                                         (tostring err))))))
             (it "signs Exoscale requests as Exoscale's client does, with the example plugin"
                 (fn []
-                  (let [digest (require :atlas.digest)
-                        auth-mod (require :atlas.auth)
+                  (let [digest (require :ezu.digest)
+                        auth-mod (require :ezu.auth)
                         path (with-open [f (io.open "doc/examples/plugins/exoscale.fnl")]
                                (plugin-file ".fnl" (f:read :*a)))
                         resolved (plugins.resolve-auth {:plugins [path]}

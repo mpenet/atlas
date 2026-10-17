@@ -2,7 +2,7 @@
 
 [Documentation](README.md) › Guide
 
-How to set atlas up for the APIs you use, and how to use it day to day. The [README](../README.md) has a quick tour; the [documentation index](README.md) lists the reference pages.
+How to set ezu up for the APIs you use, and how to use it day to day. The [README](../README.md) has a quick tour; the [documentation index](README.md) lists the reference pages.
 
 - [Adding an API](#adding-an-api)
 - [Credentials](#credentials)
@@ -13,14 +13,14 @@ How to set atlas up for the APIs you use, and how to use it day to day. The [REA
 
 ## Adding an API
 
-All atlas needs is the API's OpenAPI description, a URL or a file:
+All ezu needs is the API's OpenAPI description, a URL or a file:
 
 ```sh
-atlas op https://api.example.com/openapi.json --list
-atlas op ./openapi.yaml --list
+ezu op https://api.example.com/openapi.json --list
+ezu op ./openapi.yaml --list
 ```
 
-Once you use an API regularly, give it a name in `~/.config/atlas/config.json`:
+Once you use an API regularly, give it a name in `~/.config/ezu/config.json`:
 
 ```json
 {
@@ -33,13 +33,13 @@ Once you use an API regularly, give it a name in `~/.config/atlas/config.json`:
 ```
 
 ```sh
-atlas op example --list
+ezu op example --list
 ```
 
-**Where requests go.** atlas sends requests to the first server the spec lists. When it lists several (production and sandbox, regions…), `--servers` shows them:
+**Where requests go.** ezu sends requests to the first server the spec lists. When it lists several (production and sandbox, regions…), `--servers` shows them:
 
 ```sh
-atlas op example --servers
+ezu op example --servers
 ```
 
 Pick one with `server-index`, set its variables with `server`, or ignore the spec's servers with `base-url`:
@@ -77,10 +77,10 @@ Credentials go in the profile's `auth`. Keep secrets out of the file with `env:N
 }
 ```
 
-Check what will be sent with `atlas auth`:
+Check what will be sent with `ezu auth`:
 
 ```console
-$ atlas auth example
+$ ezu auth example
 authorization: Bearer s3cr3t
 ```
 
@@ -89,12 +89,12 @@ The methods:
 - **A token** (`bearer`), **a username and password** (`basic`), or **an API key** in a header, the query string or a cookie (`api-key`).
 - **OAuth 2.0, interactive** (`oauth-authorization-code`): the first request opens your browser to sign in, then the token is cached and refreshed. Register `http://127.0.0.1:PORT/callback` with the provider and set `redirect_port` to match.
 - **OAuth 2.0, for services and CI** (`oauth-client-credentials`): a client id and secret, no browser.
-- **OAuth 2.0, without a browser** (`oauth-device-authorization`): atlas prints a code and a URL; approve on any device.
+- **OAuth 2.0, without a browser** (`oauth-device-authorization`): ezu prints a code and a URL; approve on any device.
 - **Your own tool** (`external-tool`): a command that prints a token, or signs each request (AWS-style signatures, internal SSO helpers…).
 
 The [reference](authentication.md) has each method's parameters.
 
-Authentication happens only when a request goes out, so `--help`, `--list` and completion never open a browser. `atlas auth example` signs in again; `atlas auth example --logout` forgets the cached token.
+Authentication happens only when a request goes out, so `--help`, `--list` and completion never open a browser. `ezu auth example` signs in again; `ezu auth example --logout` forgets the cached token.
 
 ## Several environments
 
@@ -119,11 +119,11 @@ Authentication happens only when a request goes out, so `--help`, `--list` and c
 }
 ```
 
-`atlas profile show example-staging` shows the result. Tokens are cached per profile, so production and staging sessions don't mix.
+`ezu profile show example-staging` shows the result. Tokens are cached per profile, so production and staging sessions don't mix.
 
 ## Scripting
 
-atlas is built to sit in a pipeline:
+ezu is built to sit in a pipeline:
 
 - **Exit codes** tell outcomes apart: `0` success, `4` for a 4xx response, `5` for a 5xx, `1` for anything else (bad arguments, network errors, failed checks). Error bodies go to stderr, so stdout only ever holds a successful response.
 - **`--select`** picks what you need, so you rarely need `jq`; `--output raw` prints a selected string without quotes.
@@ -136,11 +136,11 @@ atlas is built to sit in a pipeline:
 ```sh
 #!/bin/sh
 set -e
-name=$(atlas op petstore get-pet-by-id 7 --select .name --output raw)
+name=$(ezu op petstore get-pet-by-id 7 --select .name --output raw)
 echo "pet 7 is $name"
 
 code=0
-atlas op petstore get-pet-by-id 999999999 >/dev/null 2>&1 || code=$?
+ezu op petstore get-pet-by-id 999999999 >/dev/null 2>&1 || code=$?
 if [ "$code" -eq 4 ]; then
   echo "no such pet"
 fi
@@ -152,10 +152,10 @@ fi
 - **`--dry-run`** prints the request that would be sent, without sending it or authenticating.
 - **`--curl`** prints the same request as a `curl` command, credentials included, to share or replay.
 - **`-v`** logs the request and the response headers on stderr, credentials redacted.
-- **`--no-validate`** sends a request atlas thinks is wrong: specs are sometimes stricter than the API they describe.
+- **`--no-validate`** sends a request ezu thinks is wrong: specs are sometimes stricter than the API they describe.
 
 ```console
-$ atlas op petstore get-pet-by-id 7 -v --select .name
+$ ezu op petstore get-pet-by-id 7 -v --select .name
 > GET https://petstore3.swagger.io/api/v3/pet/7
 > accept: application/json, application/xml
 > authorization: Bearer <redacted>
@@ -168,9 +168,9 @@ content-type: application/json
 
 ## Corporate networks
 
-**Proxies.** atlas uses the proxy named by `https_proxy` or `HTTPS_PROXY` for HTTPS, `http_proxy` (lower case only) for HTTP, or `all_proxy`/`ALL_PROXY`, and goes direct for the hosts in `no_proxy`/`NO_PROXY`.
+**Proxies.** ezu uses the proxy named by `https_proxy` or `HTTPS_PROXY` for HTTPS, `http_proxy` (lower case only) for HTTP, or `all_proxy`/`ALL_PROXY`, and goes direct for the hosts in `no_proxy`/`NO_PROXY`.
 
-**An internal CA.** atlas trusts the system's CA certificates. Point it at another bundle for every program with `SSL_CERT_FILE`, or for one profile:
+**An internal CA.** ezu trusts the system's CA certificates. Point it at another bundle for every program with `SSL_CERT_FILE`, or for one profile:
 
 ```json
 "internal": {

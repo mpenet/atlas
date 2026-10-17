@@ -89,7 +89,7 @@ The library never raises on HTTP error statuses — it returns the response tabl
 
 ## Content negotiation
 
-Atlas inspects the schema to set `Content-Type` and `Accept` automatically:
+Ezu inspects the schema to set `Content-Type` and `Accept` automatically:
 
 - `Content-Type` is the first of `application/json`, `application/x-www-form-urlencoded`, `multipart/form-data` declared in `requestBody.content`, else another declared type; a range (`*/*`, `application/*`) comes last and sends JSON. In a multipart body, an array is one part per element, all with its name (several files under one field).
 - `Accept` lists every media type declared across the operation's responses.
@@ -120,7 +120,7 @@ Each operation on the client exposes metadata fields, e.g. `(. client.get-pet-by
 | `:parameters` | | Declared parameters, path-level ones merged in |
 | `:summary` | `"Find pet by ID"` | Summary, or nil |
 | `:has-body` | `false` | Whether the operation takes a request body |
-| `:content-type` | `"application/json"` | Request content type atlas chose, nil without a body |
+| `:content-type` | `"application/json"` | Request content type ezu chose, nil without a body |
 | `:body-schema` | | Request body schema for that content type |
 | `:spec` | | The operation object from the spec, `$ref`s resolved (may contain cycles) |
 | `:fnl/docstring` | | Documentation for the Fennel REPL, rendered on first access |
@@ -130,8 +130,8 @@ Each operation on the client exposes metadata fields, e.g. `(. client.get-pet-by
 The `:fnl/docstring` field is picked up by the Fennel REPL's `(doc op)` form:
 
 ```fennel
->> (local atlas (require :atlas))
->> (local c (atlas.client "https://petstore3.swagger.io/api/v3/openapi.json"))
+>> (local ezu (require :ezu))
+>> (local c (ezu.client "https://petstore3.swagger.io/api/v3/openapi.json"))
 >> (doc c.get-pet-by-id)
 GET /pet/{petId}
 
@@ -150,7 +150,7 @@ Responses:
 
 ## Error handling
 
-`atlas.client` raises if:
+`ezu.client` raises if:
 
 - The schema cannot be fetched or parsed
 - No usable base URL can be determined

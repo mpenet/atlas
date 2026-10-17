@@ -1,6 +1,6 @@
 # Third-party software
 
-The atlas binaries contain the following software, under the licenses below. atlas itself is under the license in [LICENSE](LICENSE).
+The ezu binaries contain the following software, under the licenses below. ezu itself is under the license in [LICENSE](LICENSE).
 
 ## Lua 5.4
 
@@ -644,7 +644,7 @@ obstacle to adoption, that text has been removed.
 
 ## Unicode Character Database 17.0.0
 
-https://www.unicode.org — the display widths and general categories atlas derives from it
+https://www.unicode.org — the display widths and general categories ezu derives from it
 
 ```text
 UNICODE LICENSE V3

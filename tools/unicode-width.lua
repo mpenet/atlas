@@ -1,7 +1,7 @@
--- ABOUTME: Generates fnl/atlas/cli/width.fnl, the display width of text in a
+-- ABOUTME: Generates fnl/ezu/cli/width.fnl, the display width of text in a
 -- ABOUTME: terminal, from Unicode's EastAsianWidth.txt and DerivedGeneralCategory.txt.
 --
--- usage: lua tools/unicode-width.lua VERSION EastAsianWidth.txt DerivedGeneralCategory.txt > fnl/atlas/cli/width.fnl
+-- usage: lua tools/unicode-width.lua VERSION EastAsianWidth.txt DerivedGeneralCategory.txt > fnl/ezu/cli/width.fnl
 -- (files from https://www.unicode.org/Public/VERSION/ucd/, the second under extracted/)
 
 local version, eaw_file, category_file = ...

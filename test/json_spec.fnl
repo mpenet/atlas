@@ -1,12 +1,12 @@
-;; ABOUTME: Specs for atlas.json: decoded arrays stay arrays (even empty ones)
+;; ABOUTME: Specs for ezu.json: decoded arrays stay arrays (even empty ones)
 ;; ABOUTME: through printing, validation, YAML and re-encoding.
-(local json (require :atlas.json))
-(local pretty (require :atlas.pretty))
-(local yaml (require :atlas.yaml))
-(local validate (require :atlas.validate))
-(local http (require :atlas.http))
+(local json (require :ezu.json))
+(local pretty (require :ezu.pretty))
+(local yaml (require :ezu.yaml))
+(local validate (require :ezu.validate))
+(local http (require :ezu.http))
 
-(describe "atlas.json"
+(describe "ezu.json"
           (fn []
             (it "keeps empty arrays and objects apart when re-encoding"
                 (fn []
@@ -108,7 +108,7 @@
 
 (describe "JSON null"
           (fn []
-            (local expr (require :atlas.arazzo.expr))
+            (local expr (require :ezu.arazzo.expr))
             (it "keeps its place in arrays"
                 (fn []
                   (let [v (json.decode "[1,null,3]")]
@@ -148,13 +148,13 @@
                                                                                       true)}}
                                                        {:condition "$response.body#/a == null"}))))))
 
-(describe "JSON null across atlas"
+(describe "JSON null across ezu"
           (fn []
-            (local expr (require :atlas.arazzo.expr))
-            (local refs (require :atlas.refs))
-            (local util (require :atlas.util))
-            (local request (require :atlas.cli.request))
-            (local {: select-path} (require :atlas.cli.output))
+            (local expr (require :ezu.arazzo.expr))
+            (local refs (require :ezu.refs))
+            (local util (require :ezu.util))
+            (local request (require :ezu.cli.request))
+            (local {: select-path} (require :ezu.cli.output))
             (it "is kept, not copied, by the ref resolver"
                 (fn []
                   (let [schema (json.decode "{\"enum\":[\"red\",null]}")
@@ -203,10 +203,10 @@
 
 (describe "JSON null, further"
           (fn []
-            (local expr (require :atlas.arazzo.expr))
-            (local util (require :atlas.util))
-            (local coerce (require :atlas.coerce))
-            (local doc (require :atlas.doc))
+            (local expr (require :ezu.arazzo.expr))
+            (local util (require :ezu.util))
+            (local coerce (require :ezu.coerce))
+            (local doc (require :ezu.doc))
             (it "can't be written into"
                 (fn []
                   (assert.has.error #(tset json.null :b 5))

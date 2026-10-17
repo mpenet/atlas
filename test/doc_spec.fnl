@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for operation help rendering.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local {: build} (require :atlas.doc))
+(local {: build} (require :ezu.doc))
 
 (local simple-op
        {:operationId "getPetById"
@@ -96,7 +96,7 @@
                                                        1 true))
                         (assert.is_truthy (result:find "the pet" 1 true))))))))
 
-(local {: build-workflow} (require :atlas.cli.help))
+(local {: build-workflow} (require :ezu.cli.help))
 
 (local workflow
        {:workflowId "createAndWait"
@@ -193,7 +193,7 @@
                     (assert.is_truthy (text:find "^createAndWait\n\nCreate a resource and wait until ready\nPolls until the operation finishes%.\n"))))
               (it "shows usage with positional inputs"
                   (fn []
-                    (assert.is_truthy (text:find "Usage: atlas az <name-or-file> createAndWait <id> [-i KEY=VAL ...]"
+                    (assert.is_truthy (text:find "Usage: ezu az <name-or-file> createAndWait <id> [-i KEY=VAL ...]"
                                                  1 true))))
               (it "lists inputs sorted, required first, with details"
                   (fn []
@@ -214,10 +214,10 @@
           (fn []
             (it "includes the op subcommand"
                 (fn []
-                  (let [{: build-cli} (require :atlas.cli.help)]
+                  (let [{: build-cli} (require :ezu.cli.help)]
                     (assert.is_truthy (: (build-cli "/pets/{id}" :get
                                                     {:operationId "getPet"
                                                      :responses {}})
                                          :find
-                                         "Usage: atlas op <profile-or-schema> get-pet <id>"
+                                         "Usage: ezu op <profile-or-schema> get-pet <id>"
                                          1 true)))))))

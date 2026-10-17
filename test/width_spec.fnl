@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for the display width of text in a terminal: wide East Asian
 ;; ABOUTME: characters take two columns, combining and format characters none.
-(local width (require :atlas.cli.width))
+(local width (require :ezu.cli.width))
 
 (describe "width.of"
           (fn []

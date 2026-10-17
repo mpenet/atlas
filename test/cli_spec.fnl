@@ -2,12 +2,12 @@
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
 (local cli ;; the CLI is split across modules; the specs test it as one package
        (let [merged {}]
-         (each [_ m (ipairs [:atlas.cli
-                             :atlas.cli.args
-                             :atlas.cli.request
-                             :atlas.cli.output
-                             :atlas.cli.settings
-                             :atlas.cli.complete])]
+         (each [_ m (ipairs [:ezu.cli
+                             :ezu.cli.args
+                             :ezu.cli.request
+                             :ezu.cli.output
+                             :ezu.cli.settings
+                             :ezu.cli.complete])]
            (each [k v (pairs (require m))]
              (tset merged k v)))
          merged))
@@ -450,11 +450,11 @@
             (it "strips Lua file locations"
                 (fn []
                   (assert.are.equal "boom"
-                                    (cli.strip-location "./lua/atlas/cli.lua:12: boom"))))
+                                    (cli.strip-location "./lua/ezu/cli.lua:12: boom"))))
             (it "strips chunk-name locations from the static binary"
                 (fn []
                   (assert.are.equal "goto loop detected at: s1"
-                                    (cli.strip-location "[string \"fnl.atlas-bin\"]:7603: goto loop detected at: s1"))))
+                                    (cli.strip-location "[string \"fnl.ezu-bin\"]:7603: goto loop detected at: s1"))))
             (it "keeps URLs with ports intact"
                 (fn []
                   (assert.are.equal "GET http://h:8080/x failed: timeout"
@@ -628,7 +628,7 @@
                                                 :url "https://h/u"
                                                 :headers {:content-type "multipart/form-data"}
                                                 :body {:a "1"}})]
-                    (assert.is_truthy (text:find "content-type: multipart/form-data; boundary=atlas-"
+                    (assert.is_truthy (text:find "content-type: multipart/form-data; boundary=ezu-"
                                                  1 true)))))
             (it "refuses to inline binary bodies in curl"
                 (fn []
@@ -971,10 +971,10 @@
                                    (paths:match "([^/]+)$") "#/items\"}}}")))
                     (with-open [f (io.open paths :w)]
                       (f:write "{\"items\":{\"get\":{\"operationId\":\"listItems\",\"responses\":{}}}}"))
-                    (let [atlas (require :atlas)
+                    (let [ezu (require :ezu)
                           names (cli.complete-line (.. "op " spec " ")
                                                    {:config {}
-                                                    :load-schema atlas.load-schema})]
+                                                    :load-schema ezu.load-schema})]
                       (os.remove spec)
                       (os.remove paths)
                       (os.remove base)
@@ -1015,11 +1015,11 @@
                     (with-open [f (io.open spec :w)]
                       (f:write (.. "{\"openapi\":\"3.0.0\",\"info\":{},\"paths\":{\"/x\":{\"$ref\":\"http://127.0.0.1:"
                                    port "/p.json#/x\"}}}")))
-                    (let [atlas (require :atlas)
+                    (let [ezu (require :ezu)
                           names (cli.complete-line (.. "op " spec " ")
                                                    {:config {}
                                                     :timeout 0.2
-                                                    :load-schema atlas.load-schema})]
+                                                    :load-schema ezu.load-schema})]
                       (srv:close)
                       (os.remove spec)
                       (assert.are.same [] names)
@@ -1456,19 +1456,19 @@
                     (assert.are.equal "> GET https://h/x\n" err))))))
 
 (fn bash-complete [shell line candidates]
-  "COMPREPLY of the bash completion script for line, when atlas __complete
+  "COMPREPLY of the bash completion script for line, when ezu __complete
 answers candidates; one reply per line, each followed by |."
   (let [(_ script) (capture cli.completion-bash)
         script-file (os.tmpname)
         sh-quote #(.. "'" (pick-values 1 ($:gsub "'" "'\\''")) "'")]
     (with-open [f (io.open script-file :w)]
       (f:write script "\n")
-      (f:write (.. "atlas() { printf '%s\\n' "
+      (f:write (.. "ezu() { printf '%s\\n' "
                    (table.concat (icollect [_ c (ipairs candidates)]
                                    (sh-quote c))
                                  " ") "; }\n"))
       (f:write (.. "COMP_LINE=" (sh-quote line) "; COMP_POINT=${#COMP_LINE}\n"))
-      (f:write "_atlas_complete\nprintf '%s|\\n' \"${COMPREPLY[@]}\"\n"))
+      (f:write "_ezu_complete\nprintf '%s|\\n' \"${COMPREPLY[@]}\"\n"))
     (let [p (io.popen (.. "cd /tmp && " shell " " script-file))
           out (p:read :*a)]
       (p:close)
@@ -1496,7 +1496,7 @@ answers candidates; one reply per line, each followed by |."
                     (os.remove marker)
                     (each [_ shell (ipairs ["bash" "/bin/bash"])]
                       ;; candidates as a malicious spec could make them
-                      (let [out (bash-complete shell "atlas op x y --q.s="
+                      (let [out (bash-complete shell "ezu op x y --q.s="
                                                [(.. "--q.s=$(touch " marker ")")
                                                 "--q.s=*"
                                                 "--q.s=in progress"
@@ -1514,28 +1514,27 @@ answers candidates; one reply per line, each followed by |."
                   (each [_ shell (ipairs ["bash" "/bin/bash"])]
                     (assert.are.equal "fra-1 |\n"
                                       (bash-complete shell
-                                                     "atlas op x y --q.zone=de:f"
+                                                     "ezu op x y --q.zone=de:f"
                                                      ["--q.zone=de:fra-1"
                                                       "--q.zone=eu"]))
                     (assert.are.equal "v1 |\n"
                                       (bash-complete shell
-                                                     "atlas op x y --q.zone=k="
+                                                     "ezu op x y --q.zone=k="
                                                      ["--q.zone=k=v1"]))
                     (assert.are.equal "//x.example/a |\n"
                                       (bash-complete shell
-                                                     "atlas op x y --q.u=https:"
+                                                     "ezu op x y --q.u=https:"
                                                      ["--q.u=https://x.example/a"])))))
             (it "offers nothing once only the value is left to type"
                 (fn []
                   ;; printf prints one empty reply line when there are none
                   (assert.are.equal "|\n"
-                                    (bash-complete "bash"
-                                                   "atlas op x --output="
+                                    (bash-complete "bash" "ezu op x --output="
                                                    ["--output="]))))
             (it "adds no space after a name waiting for its value"
                 (fn []
                   (assert.are.equal "--q.status=|\n"
-                                    (bash-complete "bash" "atlas op x y --q.st"
+                                    (bash-complete "bash" "ezu op x y --q.st"
                                                    ["--q.status=" "--q.sort="]))))))
 
 (describe "zsh completion script"
@@ -1549,26 +1548,26 @@ answers candidates; one reply per line, each followed by |."
                         (f:write "compdef() { :; }\n")
                         (f:write script "\n")
                         ;; what zsh gives a completion function for
-                        ;; `true && atlas op be<TAB>`
+                        ;; `true && ezu op be<TAB>`
                         (f:write "compadd() { :; }\n")
-                        (f:write "BUFFER='true && atlas op be'; CURSOR=${#BUFFER}\n")
-                        (f:write "words=(atlas op be); CURRENT=3; PREFIX=be\n")
-                        (f:write (.. "atlas() { print -r -- \"line=$2\" > "
+                        (f:write "BUFFER='true && ezu op be'; CURSOR=${#BUFFER}\n")
+                        (f:write "words=(ezu op be); CURRENT=3; PREFIX=be\n")
+                        (f:write (.. "ezu() { print -r -- \"line=$2\" > "
                                      script-file ".out; }\n"))
-                        (f:write "_atlas\n"))
+                        (f:write "_ezu\n"))
                       (os.execute (.. "zsh " script-file))
                       (let [out (with-open [f (io.open (.. script-file ".out"))]
                                   (f:read :*a))]
                         (os.remove script-file)
                         (os.remove (.. script-file ".out"))
-                        (assert.are.equal "line=atlas op be\n" out))))))))
+                        (assert.are.equal "line=ezu op be\n" out))))))))
 
 (describe "completion backend"
           (fn []
             (it "skips variable assignments before the program name"
                 (fn []
                   (let [(_ out) (capture #(cli.run-complete ["__complete"
-                                                             "FOO=1 BAR=x atlas pro"]))]
+                                                             "FOO=1 BAR=x ezu pro"]))]
                     (assert.are.equal "profile" out))))))
 
 (describe "import-restish discoverability"
@@ -1628,7 +1627,7 @@ answers candidates; one reply per line, each followed by |."
                     (assert.is_nil (cli.select-path false "{a}[0]"))))
               (it "keeps an empty array an array when picking fields"
                   (fn []
-                    (let [json (require :atlas.json)]
+                    (let [json (require :ezu.json)]
                       (assert.is_true (json.array? (cli.select-path (json.array [])
                                                                     "{a}")))
                       (assert.is_true (json.array? (cli.select-path (json.array [])
@@ -1690,7 +1689,7 @@ answers candidates; one reply per line, each followed by |."
                                      (cli.select-path data ".items[?tags].id"))))
               (it "treats missing fields as null"
                   (fn []
-                    (let [json (require :atlas.json)]
+                    (let [json (require :ezu.json)]
                       (assert.are.same [2]
                                        (cli.select-path data
                                                         ".items[?tags==null].id"))
@@ -1717,7 +1716,7 @@ answers candidates; one reply per line, each followed by |."
                                        :size 20}]
                                      (cli.select-path data
                                                       ".items[?state==stopped]"))
-                    (let [json (require :atlas.json)
+                    (let [json (require :ezu.json)
                           none (cli.select-path data ".items[?size>99]")]
                       (assert.is_true (json.array? none))
                       (assert.are.same [] none))))
@@ -1825,7 +1824,7 @@ answers candidates; one reply per line, each followed by |."
                                                          :csv false))))
               (it "prints nothing for rows without columns"
                   (fn []
-                    (let [json (require :atlas.json)]
+                    (let [json (require :ezu.json)]
                       (assert.is_nil (cli.format-output {:status 200
                                                          :headers {}
                                                          :body [{} {}]}
@@ -1836,7 +1835,7 @@ answers candidates; one reply per line, each followed by |."
                                                         :csv false)))))
               (it "prints nothing for an empty array, or the selected header"
                   (fn []
-                    (let [json (require :atlas.json)
+                    (let [json (require :ezu.json)
                           empty {:status 200
                                  :headers {}
                                  :body (json.array [])
@@ -1917,7 +1916,7 @@ answers candidates; one reply per line, each followed by |."
                                            "invalid filter" 1 true)))))
               (it "finds nothing as an empty array"
                   (fn []
-                    (let [json (require :atlas.json)
+                    (let [json (require :ezu.json)
                           none (cli.select-path data "..nope")]
                       (assert.is_true (json.array? none))
                       (assert.are.same [] none)))))))

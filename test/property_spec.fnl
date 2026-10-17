@@ -1,16 +1,16 @@
 ;; ABOUTME: Property specs: random values must round-trip through the encoders,
-;; ABOUTME: and random input must never crash the parsers. ATLAS_SEED reproduces a run.
-(local json (require :atlas.json))
-(local pretty (require :atlas.pretty))
-(local yaml (require :atlas.yaml))
-(local util (require :atlas.util))
-(local expr (require :atlas.arazzo.expr))
-(local validate (require :atlas.validate))
-(local http (require :atlas.http))
-(local {: select-path} (require :atlas.cli.output))
-(local {: parse-args} (require :atlas.cli.args))
+;; ABOUTME: and random input must never crash the parsers. EZU_SEED reproduces a run.
+(local json (require :ezu.json))
+(local pretty (require :ezu.pretty))
+(local yaml (require :ezu.yaml))
+(local util (require :ezu.util))
+(local expr (require :ezu.arazzo.expr))
+(local validate (require :ezu.validate))
+(local http (require :ezu.http))
+(local {: select-path} (require :ezu.cli.output))
+(local {: parse-args} (require :ezu.cli.args))
 
-(local seed (tonumber (or (os.getenv :ATLAS_SEED) (os.time))))
+(local seed (tonumber (or (os.getenv :EZU_SEED) (os.time))))
 (local runs 300)
 
 (fn pick [items]

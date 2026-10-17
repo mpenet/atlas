@@ -1,10 +1,10 @@
 -- ABOUTME: Corpus check: loads real-world OpenAPI specs, builds clients and
 -- ABOUTME: exercises every operation offline (names, help, URLs, invoke, checks, MCP tools).
-local atlas = require("atlas")
-local help = require("atlas.cli.help")
-local request = require("atlas.cli.request")
-local mcp = require("atlas.cli.mcp")
-local json = require("atlas.json")
+local ezu = require("ezu")
+local help = require("ezu.cli.help")
+local request = require("ezu.cli.request")
+local mcp = require("ezu.cli.mcp")
+local json = require("ezu.json")
 local socket = require("socket")
 
 local function stub(req) return {status = 200, headers = {}, body = {}, raw = "{}"} end
@@ -13,14 +13,14 @@ local files = {...}
 local failed = false
 for _, file in ipairs(files) do
   local t0 = socket.gettime()
-  local ok, schema = pcall(atlas["load-schema"], file)
+  local ok, schema = pcall(ezu["load-schema"], file)
   local t_load = socket.gettime() - t0
   if not ok then
     failed = true
     print(string.format("%-18s LOAD FAILED: %s", file, tostring(schema)))
   else
     local t1 = socket.gettime()
-    local cok, client = pcall(atlas.client, schema, {["base-url"] = "https://example.test", ["http-fn"] = stub, ["source-url"] = file})
+    local cok, client = pcall(ezu.client, schema, {["base-url"] = "https://example.test", ["http-fn"] = stub, ["source-url"] = file})
     local t_client = socket.gettime() - t1
     if not cok then
       failed = true

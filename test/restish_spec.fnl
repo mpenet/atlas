@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for converting Restish configs (v1 apis.json and v2
-;; ABOUTME: restish.json) into atlas profiles. Run with `make test`.
-(local restish (require :atlas.cli.restish))
+;; ABOUTME: restish.json) into ezu profiles. Run with `make test`.
+(local restish (require :ezu.cli.restish))
 (local json (require :lunajson))
 
 (fn read-json [path]
@@ -60,7 +60,7 @@
                   (fn []
                     (assert.is_true (has warnings
                                          "devices: 2 spec_files; using the first (./devices.yaml)"))
-                    ;; a base URL without spec_files: atlas finds the spec
+                    ;; a base URL without spec_files: ezu finds the spec
                     ;; as Restish does
                     (assert.is_nil (accumulate [found nil _ w (ipairs warnings)
                                                 &until found]
@@ -134,14 +134,14 @@
           (fn []
             (it "rejects a config that is not an object"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         (ok err) (pcall restish.convert (json.array [1 2]))]
                     (assert.is_false ok)
                     (assert.is_truthy (: (tostring err) :find
                                          "not a Restish configuration" 1 true)))))
             (it "skips entries that are not what Restish writes"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         (profiles warnings) (restish.convert {:apis {:a {:base "https://a"
                                                                          :profiles {:default {:headers (json.array [5
                                                                                                                     "x: 1"])}}}
@@ -202,7 +202,7 @@
                                              :params {:client_id "c"
                                                       :redirect_url "http://localhost/cb"}})]
                       (assert.are.equal 80 profiles.a.auth.params.redirect_port))))
-              (it "warns about settings atlas can't apply"
+              (it "warns about settings ezu can't apply"
                   (fn []
                     (let [(_ warnings) (convert {:type "http-basic"
                                                  :params {:username "me"}})]

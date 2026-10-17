@@ -1,9 +1,9 @@
 ;; ABOUTME: Specs for YAML parsing and YAML-backed schema loading.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local yaml (require :atlas.yaml))
-(local atlas (require :atlas))
+(local yaml (require :ezu.yaml))
+(local ezu (require :ezu))
 
-(describe "atlas.yaml"
+(describe "ezu.yaml"
           (fn []
             (it "parses YAML with numeric keys as strings"
                 (fn []
@@ -34,11 +34,11 @@
                     (assert.are.equal 1 j.a)
                     (assert.are.equal 1 y.a))))))
 
-(describe "atlas.load-schema (YAML)"
+(describe "ezu.load-schema (YAML)"
           (fn []
             (it "loads a YAML OpenAPI fixture"
                 (fn []
-                  (let [s (atlas.load-schema "test/fixtures/petstore.yaml")]
+                  (let [s (ezu.load-schema "test/fixtures/petstore.yaml")]
                     (assert.are.equal "3.0.0" s.openapi)
                     (assert.is_not_nil (?. s :paths "/pets" :get))
                     (assert.are.equal "listPets"
@@ -51,8 +51,8 @@
                   (let [calls []
                         http (fn [req] (table.insert calls req)
                                {:status 200 :headers {} :body {}})
-                        c (atlas.client "test/fixtures/petstore.yaml"
-                                        {:http-fn http})]
+                        c (ezu.client "test/fixtures/petstore.yaml"
+                                      {:http-fn http})]
                     (assert.is_not_nil c.list-pets)
                     (assert.is_not_nil c.get-pet-by-id)
                     (c.get-pet-by-id 7)
@@ -61,7 +61,7 @@
 
 (describe "yaml.parse YAML 1.2 core schema"
           (fn []
-            (local yaml (require :atlas.yaml))
+            (local yaml (require :ezu.yaml))
             (it "keeps YAML 1.1 booleans and sexagesimals as strings"
                 (fn []
                   (assert.are.same {:a "no"
@@ -110,7 +110,7 @@
 
 (describe "yaml.parse edge cases"
           (fn []
-            (local yaml (require :atlas.yaml))
+            (local yaml (require :ezu.yaml))
             (it "turns integers too large for Lua into floats"
                 (fn []
                   (assert.are.equal 18446744073709551615.0
@@ -169,7 +169,7 @@
 
 (describe "yaml.parse memory safety"
           (fn []
-            (local yaml (require :atlas.yaml))
+            (local yaml (require :ezu.yaml))
             (it "keeps the text alive while libyaml reads it"
                 (fn []
                   ;; every thousand instructions, also while parsing: a full

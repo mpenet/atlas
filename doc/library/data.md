@@ -2,14 +2,14 @@
 
 [Documentation](../README.md) › [Library](../library.md) › Data
 
-JSON values as atlas decodes and encodes them, and checking values against a schema.
+JSON values as ezu decodes and encodes them, and checking values against a schema.
 
 ## JSON values
 
-Response bodies are decoded with `atlas.json`, which keeps arrays apart from objects even when empty: a decoded `[]` is a table marked as an array, so it prints and re-encodes as `[]`, never `{}`. A body you build in Lua has no such mark, so mark empty arrays yourself:
+Response bodies are decoded with `ezu.json`, which keeps arrays apart from objects even when empty: a decoded `[]` is a table marked as an array, so it prints and re-encodes as `[]`, never `{}`. A body you build in Lua has no such mark, so mark empty arrays yourself:
 
 ```fennel
-(local json (require :atlas.json))
+(local json (require :ezu.json))
 
 ;; sends "tags": []
 (client.update-pet.invoke {:body {:name "Rex" :tags (json.array [])}})
@@ -24,10 +24,10 @@ JSON `null` is `json.null`, a value of its own: in arrays it keeps its place (`[
 
 ## Validation
 
-`atlas.validate.check` returns a list of `"path: problem"` strings for a decoded value against a JSON Schema (the subset OpenAPI bodies use; `pattern` and `format` are not checked). Combined with an operation's `:body-schema`:
+`ezu.validate.check` returns a list of `"path: problem"` strings for a decoded value against a JSON Schema (the subset OpenAPI bodies use; `pattern` and `format` are not checked). Combined with an operation's `:body-schema`:
 
 ```fennel
-(local validate (require :atlas.validate))
+(local validate (require :ezu.validate))
 (validate.check client.create-instance.body-schema body :body)
 ;; => ["body.instance-type: required" "body.disk-size: expected integer, got string"]
 ```

@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for retrying idempotent requests on transient failures.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local retry (require :atlas.retry))
+(local retry (require :ezu.retry))
 
 (fn scripted [responses]
   "http-fn returning responses in order; a string entry raises that error."
@@ -94,9 +94,9 @@
 
 (describe "retry.wrap and requests that can't be sent"
           (fn []
-            (it "doesn't retry a request atlas refuses to build"
+            (it "doesn't retry a request ezu refuses to build"
                 (fn []
-                  (let [http (require :atlas.http)
+                  (let [http (require :ezu.http)
                         sleeps []
                         f (retry.wrap http.request
                                       {:attempts 3

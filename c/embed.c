@@ -22,7 +22,7 @@ static int write_bytes(lua_State *L, const void *p, size_t n, void *ud) {
   return ferror(out->file);
 }
 
-/* PROGRAM.lua as the stripped bytecode atlas_program. */
+/* PROGRAM.lua as the stripped bytecode ezu_program. */
 static int embed_program(const char *source, const char *target) {
   struct output out = {NULL, 0};
   lua_State *L = luaL_newstate();
@@ -35,12 +35,12 @@ static int embed_program(const char *source, const char *target) {
     perror(target);
     return 1;
   }
-  fprintf(out.file, "#include <stddef.h>\nconst unsigned char atlas_program[] = {\n");
+  fprintf(out.file, "#include <stddef.h>\nconst unsigned char ezu_program[] = {\n");
   if (lua_dump(L, write_bytes, &out, 1) != 0) {
     fprintf(stderr, "cannot write %s\n", target);
     return 1;
   }
-  fprintf(out.file, "\n};\nconst size_t atlas_program_size = %zu;\n", out.size);
+  fprintf(out.file, "\n};\nconst size_t ezu_program_size = %zu;\n", out.size);
   lua_close(L);
   return fclose(out.file) == 0 ? 0 : 1;
 }

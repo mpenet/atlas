@@ -2,20 +2,20 @@
 
 [Documentation](README.md) › Commands
 
-Every command of `atlas` and its options. What the options do is detailed in [Requests](requests.md) and [Output](output.md).
+Every command of `ezu` and its options. What the options do is detailed in [Requests](requests.md) and [Output](output.md).
 
 ```
-atlas op <profile-or-schema> [operation] [path-params...] [options]
-atlas az <name-or-file> [workflow-id] [path-params...] [options]
-atlas http [METHOD] <url-or-path> [options]
-atlas mcp <profile-or-schema> [--allow-writes] [--arazzo NAME] [options]
-atlas profile list
-atlas profile show <name>
-atlas profile import-restish [file] [--dry-run]
-atlas auth <profile> [--logout]
-atlas completion <fish|bash|zsh>
-atlas --version
-atlas --licenses
+ezu op <profile-or-schema> [operation] [path-params...] [options]
+ezu az <name-or-file> [workflow-id] [path-params...] [options]
+ezu http [METHOD] <url-or-path> [options]
+ezu mcp <profile-or-schema> [--allow-writes] [--arazzo NAME] [options]
+ezu profile list
+ezu profile show <name>
+ezu profile import-restish [file] [--dry-run]
+ezu auth <profile> [--logout]
+ezu completion <fish|bash|zsh>
+ezu --version
+ezu --licenses
 ```
 
 | Command | Description |
@@ -25,11 +25,11 @@ atlas --licenses
 | `http` | Sends a request to any URL, without a spec; see [Requests without a spec](#requests-without-a-spec-http). |
 | `mcp` | Serves the API's operations, and Arazzo workflows, as tools to AI agents (MCP over stdio); see [MCP server](mcp.md). |
 | `profile list` | Profiles with the schema each one uses, inherited ones included. |
-| `profile show` | A profile as atlas uses it, `extends` resolved. |
+| `profile show` | A profile as ezu uses it, `extends` resolved. |
 | `profile import-restish` | Adds the APIs of a Restish configuration as profiles; see [Moving from Restish](restish.md). |
 | `auth` | Authenticates a profile now: for static credentials and external tools, prints the headers that would be sent (and a query API key, or the signing command); for OAuth, runs the flow again. `--logout` deletes the cached token. |
 | `completion` | Prints the completion script for a shell; see [Shell completion](install.md#shell-completion). |
-| `--version` | Prints atlas's version and the libcurl and TLS library builds it uses. |
+| `--version` | Prints ezu's version and the libcurl and TLS library builds it uses. |
 | `--licenses` | Prints the licenses of the software the binary contains (also in [THIRD-PARTY.md](../THIRD-PARTY.md)). |
 
 ## Operation names
@@ -93,13 +93,13 @@ Options go anywhere after the command. `--name=value` and `--name value` are equ
 ## Requests without a spec (`http`)
 
 ```sh
-atlas http https://api.example.com/health
-atlas http GET /zones --profile exo
-atlas http POST /instances --profile exo --b.name=web1 --b.disk.size=10
-atlas http DELETE https://api.example.com/items/7 --profile ex -v
+ezu http https://api.example.com/health
+ezu http GET /zones --profile exo
+ezu http POST /instances --profile exo --b.name=web1 --b.disk.size=10
+ezu http DELETE https://api.example.com/items/7 --profile ex -v
 ```
 
-The method defaults to `GET`. A path (`/zones`) is appended to the API's URL: `--base-url`, else the profile's `base-url`, else its spec's server (with `--server-index` and `--server.`). A full URL is sent as is; with `--profile`, it must be on the profile's API origin. atlas refuses to send the profile's credentials anywhere else.
+The method defaults to `GET`. A path (`/zones`) is appended to the API's URL: `--base-url`, else the profile's `base-url`, else its spec's server (with `--server-index` and `--server.`). A full URL is sent as is; with `--profile`, it must be on the profile's API origin. ezu refuses to send the profile's credentials anywhere else.
 
 `http` goes through the same profile headers and query, authentication, retries, pagination, redirects, output and exit codes as `op`. It skips the spec-driven parts: operation names, parameter and body checks, and `--help` per operation. Its body is sent as given: `-d` with JSON is sent as JSON, with `Content-Type: application/json`; anything else goes as is, with the content type you set with `--h.Content-Type=…`. `--b.` fields build a JSON object, on top of `-d`'s JSON or YAML object if one is given.
 

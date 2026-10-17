@@ -1,7 +1,7 @@
--- ABOUTME: Generates fnl/atlas/unicode-categories.fnl, the general category of
+-- ABOUTME: Generates fnl/ezu/unicode-categories.fnl, the general category of
 -- ABOUTME: every code point, from Unicode's DerivedGeneralCategory.txt.
 --
--- usage: lua tools/unicode-categories.lua VERSION DerivedGeneralCategory.txt > fnl/atlas/unicode-categories.fnl
+-- usage: lua tools/unicode-categories.lua VERSION DerivedGeneralCategory.txt > fnl/ezu/unicode-categories.fnl
 -- (from https://www.unicode.org/Public/VERSION/ucd/extracted/)
 
 local version, category_file = ...

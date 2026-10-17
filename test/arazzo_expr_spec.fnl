@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for Arazzo runtime expressions, templates and criteria.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local expr (require :atlas.arazzo.expr))
+(local expr (require :ezu.arazzo.expr))
 
 (fn ctx []
   {:inputs {:host "api.example.com" :userId "42" :limit 10}
@@ -546,7 +546,7 @@
 
 (describe "payload evaluation"
           (fn []
-            (local json (require :atlas.json))
+            (local json (require :ezu.json))
             (it "keeps arrays arrays, empty ones included"
                 (fn []
                   (let [v (expr.eval {:inputs {:n 1}}
@@ -581,7 +581,7 @@
 
 (describe "condition syntax errors"
           (fn []
-            (it "say what is wrong, not where in atlas"
+            (it "say what is wrong, not where in ezu"
                 (fn []
                   (let [(_ problem) (expr.eval-criterion {:inputs {}}
                                                          {:condition "$statusCode =="})]
@@ -781,7 +781,7 @@
                                                {:context "$response.body"
                                                 :selector "/user/name"
                                                 :type "jsonpointer"}))))
-            (it "take an Expression Type Object, of the versions atlas knows"
+            (it "take an Expression Type Object, of the versions ezu knows"
                 (fn []
                   (assert.are.equal "Rex"
                                     (expr.eval (shop)

@@ -3,7 +3,7 @@ FNLFMT ?= fnlfmt
 FNL_DIR = fnl
 LUA_DIR = lua
 
-FNL_SOURCES = $(shell find $(FNL_DIR) -name "*.fnl" ! -name "atlas-bin.fnl")
+FNL_SOURCES = $(shell find $(FNL_DIR) -name "*.fnl" ! -name "ezu-bin.fnl")
 LUA_TARGETS = $(FNL_SOURCES:$(FNL_DIR)/%.fnl=$(LUA_DIR)/%.lua)
 
 # ---- OS detection ----
@@ -102,7 +102,7 @@ MBEDTLS_VERSION = 3.6.7
 MBEDTLS_SHA256  = a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6
 
 # libcurl for the binary: HTTP(S) only, built against mbedTLS; CA
-# certificates are located at runtime (atlas.tls), so none are compiled in
+# certificates are located at runtime (ezu.tls), so none are compiled in
 CURL_VERSION = 8.23.0
 CURL_SHA256  = e3de77cfa6367083c776a26647fc9f633b538c06c3baa73d931a252ac8f72b49
 CURL_CONFIGURE_FLAGS = --disable-shared --enable-static \
@@ -124,12 +124,12 @@ ifeq ($(UNAME_S),Darwin)
 else
   MODULE_LDFLAGS = -shared -fPIC
 endif
-CURL_MODULE = $(LUA_DIR)/atlas/curl.so
+CURL_MODULE = $(LUA_DIR)/ezu/curl.so
 
 .PHONY: build binary check-binary check-binary-tls corpus unicode check-docs check-globals check-manifests clean deps fmt fmt-check install native-libs test
 .DELETE_ON_ERROR:
 
-# The Lua modules atlas uses, at the versions THIRD-PARTY.md names (the
+# The Lua modules ezu uses, at the versions THIRD-PARTY.md names (the
 # binary bundles them); LUAROCKS="luarocks --local" installs them for the user.
 LUAROCKS ?= luarocks
 deps:
@@ -141,7 +141,7 @@ deps:
 
 build: $(LUA_TARGETS) $(CURL_MODULE)
 
-$(CURL_MODULE): c/atlas_curl.c
+$(CURL_MODULE): c/ezu_curl.c
 	@test -f "$(LUA_INC)/lua.h" || { echo "lua.h not found in '$(LUA_INC)': set LUA_INC to Lua's include directory"; exit 1; }
 	@mkdir -p $(dir $@)
 	$(CC) -O2 -Wall -fPIC $(MODULE_LDFLAGS) -I$(LUA_INC) $(CURL_CFLAGS) $< $(CURL_LIBS) -o $@
@@ -160,7 +160,7 @@ PREFIX ?= /usr/local
 
 install: binary
 	install -d $(DESTDIR)$(PREFIX)/bin
-	install -m 755 bin/atlas-bin $(DESTDIR)$(PREFIX)/bin/atlas
+	install -m 755 bin/ezu-bin $(DESTDIR)$(PREFIX)/bin/ezu
 
 # ---- standalone binary ----
 
@@ -170,7 +170,7 @@ NATIVE_STAMP = $(NATIVE_BUILD)/.stamp-curl-$(CURL_VERSION)-mbedtls-$(MBEDTLS_VER
 
 DEPS_STAMP = $(NATIVE_BUILD)/.deps-lua-$(LUA_VERSION)-yaml-$(LIBYAML_VERSION)$(NATIVE_OPT)
 
-native-libs: $(NATIVE_STAMP) $(NATIVE_BUILD)/libatlas_curl.a
+native-libs: $(NATIVE_STAMP) $(NATIVE_BUILD)/libezu_curl.a
 
 # fetch URL FILE SHA256: download and check against the pinned checksum
 fetch = curl -fsSL -o $(2) $(1) && echo "$(3)  $(2)" | $(SHA256) -c -
@@ -235,24 +235,24 @@ $(NATIVE_STAMP): $(if $(DEPS_FROM_SOURCE),$(DEPS_STAMP))
 	$(MAKE) -C $(NATIVE_BUILD)/curl-src/include install > /dev/null
 	@touch $@
 
-# the atlas.curl binding, against that libcurl
-$(NATIVE_BUILD)/libatlas_curl.a: c/atlas_curl.c $(NATIVE_STAMP)
-	$(CC) $(NATIVE_CFLAGS) -Wall -DCURL_STATICLIB -I$(LUA_INC) -I$(CURL_PREFIX)/include -c c/atlas_curl.c -o $(NATIVE_BUILD)/atlas_curl.o
-	ar rcs $@ $(NATIVE_BUILD)/atlas_curl.o
+# the ezu.curl binding, against that libcurl
+$(NATIVE_BUILD)/libezu_curl.a: c/ezu_curl.c $(NATIVE_STAMP)
+	$(CC) $(NATIVE_CFLAGS) -Wall -DCURL_STATICLIB -I$(LUA_INC) -I$(CURL_PREFIX)/include -c c/ezu_curl.c -o $(NATIVE_BUILD)/ezu_curl.o
+	ar rcs $@ $(NATIVE_BUILD)/ezu_curl.o
 
 # The program: every module in one Lua chunk, compiled to stripped bytecode
 # by c/embed.c, which links the binary's Lua so the bytecode matches it.
-$(NATIVE_BUILD)/atlas-bin.lua: $(LUA_TARGETS) fnl/atlas-bin.fnl
+$(NATIVE_BUILD)/ezu-bin.lua: $(LUA_TARGETS) fnl/ezu-bin.fnl
 	@mkdir -p $(NATIVE_BUILD)
 	LUA_PATH="./$(LUA_DIR)/?.lua;./$(LUA_DIR)/?/init.lua;$(shell luarocks path --lr-path 2>/dev/null)" \
-	$(FENNEL) --require-as-include --compile fnl/atlas-bin.fnl > $@
+	$(FENNEL) --require-as-include --compile fnl/ezu-bin.fnl > $@
 
 $(NATIVE_BUILD)/embed: c/embed.c $(if $(DEPS_FROM_SOURCE),$(DEPS_STAMP))
 	@mkdir -p $(NATIVE_BUILD)
 	$(CC) -O2 -Wall -I$(LUA_INC) c/embed.c $(LUA_LIB) $(ZLIB_LDFLAGS) -lm $(if $(filter Darwin,$(UNAME_S)),,-ldl) -o $@
 
-$(NATIVE_BUILD)/atlas_program.c: $(NATIVE_BUILD)/atlas-bin.lua $(NATIVE_BUILD)/embed
-	$(NATIVE_BUILD)/embed $(NATIVE_BUILD)/atlas-bin.lua $@
+$(NATIVE_BUILD)/ezu_program.c: $(NATIVE_BUILD)/ezu-bin.lua $(NATIVE_BUILD)/embed
+	$(NATIVE_BUILD)/embed $(NATIVE_BUILD)/ezu-bin.lua $@
 
 # The Fennel compiler, for auth plugins written in Fennel: deflated, and
 # inflated only when one is loaded.
@@ -262,30 +262,30 @@ $(NATIVE_BUILD)/fennel_source.c: $(FENNEL_LUA) $(NATIVE_BUILD)/embed
 	@test -n "$(FENNEL_LUA)" || { echo "fennel.lua not found: install fennel with luarocks, or set FENNEL_LUA"; exit 1; }
 	$(NATIVE_BUILD)/embed --deflated fennel_source $(FENNEL_LUA) $@
 
-# The licenses of what the binary contains, for atlas --licenses.
+# The licenses of what the binary contains, for ezu --licenses.
 $(NATIVE_BUILD)/third_party.c: THIRD-PARTY.md $(NATIVE_BUILD)/embed
 	$(NATIVE_BUILD)/embed --deflated third_party THIRD-PARTY.md $@
 
-binary: $(NATIVE_BUILD)/atlas_program.c $(NATIVE_BUILD)/fennel_source.c $(NATIVE_BUILD)/third_party.c c/atlas_main.c native-libs
+binary: $(NATIVE_BUILD)/ezu_program.c $(NATIVE_BUILD)/fennel_source.c $(NATIVE_BUILD)/third_party.c c/ezu_main.c native-libs
 	@mkdir -p bin
-	$(CC) $(NATIVE_CFLAGS) -Wall -I$(LUA_INC) c/atlas_main.c $(NATIVE_BUILD)/atlas_program.c $(NATIVE_BUILD)/fennel_source.c $(NATIVE_BUILD)/third_party.c \
-	  $(NATIVE_BUILD)/libsocket_core.a $(NATIVE_BUILD)/libatlas_curl.a $(NATIVE_BUILD)/liblyaml_ext.a \
+	$(CC) $(NATIVE_CFLAGS) -Wall -I$(LUA_INC) c/ezu_main.c $(NATIVE_BUILD)/ezu_program.c $(NATIVE_BUILD)/fennel_source.c $(NATIVE_BUILD)/third_party.c \
+	  $(NATIVE_BUILD)/libsocket_core.a $(NATIVE_BUILD)/libezu_curl.a $(NATIVE_BUILD)/liblyaml_ext.a \
 	  $(CURL_PREFIX)/lib/libcurl.a $(TLS_LDFLAGS) $(ZLIB_LDFLAGS) $(LIBYAML_LDFLAGS) \
-	  $(LUA_LIB) -lm $(SYSTEM_LDFLAGS) $(STATIC_LDFLAGS) $(DEAD_STRIP) -o bin/atlas-bin
-	strip bin/atlas-bin
+	  $(LUA_LIB) -lm $(SYSTEM_LDFLAGS) $(STATIC_LDFLAGS) $(DEAD_STRIP) -o bin/ezu-bin
+	strip bin/ezu-bin
 
 # Every module must be installed by the rockspec and bundled in the binary,
 # after the Fennel modules it requires; both lists are maintained by hand.
 check-manifests:
 	@missing=0; for f in $(FNL_SOURCES); do \
 	  m=$$(echo $$f | sed -e 's|^$(FNL_DIR)/||' -e 's|\.fnl$$||' -e 's|/|.|g'); \
-	  grep -q "\[\"$$m\"\]" atlas-oai-dev-1.rockspec || { echo "missing from rockspec: $$m"; missing=1; }; \
-	  at=$$(grep -n "^(require :$$m)" fnl/atlas-bin.fnl | cut -d: -f1); \
-	  [ -n "$$at" ] || { echo "missing from atlas-bin.fnl: $$m"; missing=1; continue; }; \
-	  for d in $$(grep -o "(require :atlas[a-z.-]*)" $$f | sed -e 's|(require :||' -e 's|)||'); do \
+	  grep -q "\[\"$$m\"\]" ezu-dev-1.rockspec || { echo "missing from rockspec: $$m"; missing=1; }; \
+	  at=$$(grep -n "^(require :$$m)" fnl/ezu-bin.fnl | cut -d: -f1); \
+	  [ -n "$$at" ] || { echo "missing from ezu-bin.fnl: $$m"; missing=1; continue; }; \
+	  for d in $$(grep -o "(require :ezu[a-z.-]*)" $$f | sed -e 's|(require :||' -e 's|)||'); do \
 	    [ -f $(FNL_DIR)/$$(echo $$d | tr . /).fnl ] || continue; \
-	    dat=$$(grep -n "^(require :$$d)" fnl/atlas-bin.fnl | cut -d: -f1); \
-	    [ -n "$$dat" ] && [ "$$dat" -lt "$$at" ] || { echo "atlas-bin.fnl requires $$m before $$d, which it requires"; missing=1; }; \
+	    dat=$$(grep -n "^(require :$$d)" fnl/ezu-bin.fnl | cut -d: -f1); \
+	    [ -n "$$dat" ] && [ "$$dat" -lt "$$at" ] || { echo "ezu-bin.fnl requires $$m before $$d, which it requires"; missing=1; }; \
 	  done; \
 	done; exit $$missing
 
@@ -307,22 +307,22 @@ fmt-check:
 # Run the binary with module search paths emptied, so it only passes when
 # every module is bundled.
 check-binary:
-	env -i PATH=/usr/bin:/bin LUA_PATH=";" LUA_CPATH=";" ./bin/atlas-bin op test/fixtures/petstore.yaml --list
+	env -i PATH=/usr/bin:/bin LUA_PATH=";" LUA_CPATH=";" ./bin/ezu-bin op test/fixtures/petstore.yaml --list
 	@# and carries the licenses of what it contains
-	@./bin/atlas-bin --licenses | grep -q "## Mbed TLS" || (echo "atlas --licenses doesn't list the bundled software" && false)
+	@./bin/ezu-bin --licenses | grep -q "## Mbed TLS" || (echo "ezu --licenses doesn't list the bundled software" && false)
 	@# and links nothing but system libraries
 ifeq ($(UNAME_S),Darwin)
-	@! otool -L bin/atlas-bin | tail -n +2 | grep -vE '^\s+(/usr/lib/|/System/Library/)' || (echo "non-system libraries linked above" && false)
+	@! otool -L bin/ezu-bin | tail -n +2 | grep -vE '^\s+(/usr/lib/|/System/Library/)' || (echo "non-system libraries linked above" && false)
 ifneq ($(DEPS_FROM_SOURCE),)
 	@# and runs on the macOS it was built for
-	@otool -l bin/atlas-bin | grep -A4 LC_BUILD_VERSION | grep -q "minos $(MACOSX_DEPLOYMENT_TARGET)" || (otool -l bin/atlas-bin | grep -A4 LC_BUILD_VERSION; echo "expected minos $(MACOSX_DEPLOYMENT_TARGET)" && false)
+	@otool -l bin/ezu-bin | grep -A4 LC_BUILD_VERSION | grep -q "minos $(MACOSX_DEPLOYMENT_TARGET)" || (otool -l bin/ezu-bin | grep -A4 LC_BUILD_VERSION; echo "expected minos $(MACOSX_DEPLOYMENT_TARGET)" && false)
 endif
 else ifneq ($(STATIC_LDFLAGS),)
 	@# no loader and no shared library: static, or static PIE (newer toolchains)
-	@! readelf -lW bin/atlas-bin | grep -q INTERP || (echo "expected a fully static binary: it names a loader" && false)
-	@! readelf -dW bin/atlas-bin | grep -q NEEDED || (readelf -dW bin/atlas-bin | grep NEEDED; echo "expected a fully static binary" && false)
+	@! readelf -lW bin/ezu-bin | grep -q INTERP || (echo "expected a fully static binary: it names a loader" && false)
+	@! readelf -dW bin/ezu-bin | grep -q NEEDED || (readelf -dW bin/ezu-bin | grep NEEDED; echo "expected a fully static binary" && false)
 else
-	@! ldd bin/atlas-bin | grep -vE 'linux-vdso|ld-linux|/lib(c|m|dl|pthread|rt)\.so' || (echo "non-system libraries linked above" && false)
+	@! ldd bin/ezu-bin | grep -vE 'linux-vdso|ld-linux|/lib(c|m|dl|pthread|rt)\.so' || (echo "non-system libraries linked above" && false)
 endif
 
 # Every relative link of the documentation names an existing page and heading.
@@ -330,8 +330,8 @@ check-docs:
 	lua tools/check-doc-links.lua README.md CHANGELOG.md THIRD-PARTY.md doc/*.md doc/library/*.md
 
 # Regenerates the tables made from Unicode's data files:
-# fnl/atlas/cli/width.fnl (display width of text in a terminal) and
-# fnl/atlas/unicode-categories.fnl (general categories, for regexes).
+# fnl/ezu/cli/width.fnl (display width of text in a terminal) and
+# fnl/ezu/unicode-categories.fnl (general categories, for regexes).
 UNICODE_VERSION = 17.0.0
 UNICODE_DIR = build/unicode
 unicode:
@@ -339,9 +339,9 @@ unicode:
 	curl -fsSL -o $(UNICODE_DIR)/EastAsianWidth.txt https://www.unicode.org/Public/$(UNICODE_VERSION)/ucd/EastAsianWidth.txt
 	curl -fsSL -o $(UNICODE_DIR)/DerivedGeneralCategory.txt https://www.unicode.org/Public/$(UNICODE_VERSION)/ucd/extracted/DerivedGeneralCategory.txt
 	lua tools/unicode-width.lua $(UNICODE_VERSION) $(UNICODE_DIR)/EastAsianWidth.txt $(UNICODE_DIR)/DerivedGeneralCategory.txt > $(UNICODE_DIR)/width.fnl
-	mv $(UNICODE_DIR)/width.fnl fnl/atlas/cli/width.fnl
+	mv $(UNICODE_DIR)/width.fnl fnl/ezu/cli/width.fnl
 	lua tools/unicode-categories.lua $(UNICODE_VERSION) $(UNICODE_DIR)/DerivedGeneralCategory.txt > $(UNICODE_DIR)/categories.fnl
-	mv $(UNICODE_DIR)/categories.fnl fnl/atlas/unicode-categories.fnl
+	mv $(UNICODE_DIR)/categories.fnl fnl/ezu/unicode-categories.fnl
 
 # Over the network: real-world specs (test/corpus/specs.txt) must load and
 # every operation must build, render help and pass the request checks.
@@ -360,10 +360,10 @@ corpus: build
 # refuse a server whose certificate does not verify.
 check-binary-tls:
 	home=$$(mktemp -d) && \
-	env -i PATH=/usr/bin:/bin HOME=$$home ./bin/atlas-bin op https://petstore3.swagger.io/api/v3/openapi.json --list > /dev/null && \
-	! env -i PATH=/usr/bin:/bin HOME=$$home ./bin/atlas-bin op https://self-signed.badssl.com/ --list 2> /dev/null && \
+	env -i PATH=/usr/bin:/bin HOME=$$home ./bin/ezu-bin op https://petstore3.swagger.io/api/v3/openapi.json --list > /dev/null && \
+	! env -i PATH=/usr/bin:/bin HOME=$$home ./bin/ezu-bin op https://self-signed.badssl.com/ --list 2> /dev/null && \
 	rm -rf $$home && echo "TLS checks passed"
 
 clean:
 	rm -f $(LUA_TARGETS)
-	rm -rf build bin/atlas-bin
+	rm -rf build bin/ezu-bin

@@ -1,8 +1,8 @@
 ;; ABOUTME: Specs for the MCP server: tool definitions built from operations,
 ;; ABOUTME: OpenAPI schemas as JSON Schema 2020-12, and the JSON-RPC handling.
-(local mcp (require :atlas.cli.mcp))
-(local atlas (require :atlas))
-(local json (require :atlas.json))
+(local mcp (require :ezu.cli.mcp))
+(local ezu (require :ezu))
+(local json (require :ezu.json))
 
 (describe "mcp.json-schema"
           (fn []
@@ -142,7 +142,7 @@
                                               :in "query"
                                               :schema {:type :string}}]}}}})
 
-(local client (atlas.client api {:http-fn #nil}))
+(local client (ezu.client api {:http-fn #nil}))
 
 (describe "mcp.tool"
           (fn []
@@ -167,7 +167,7 @@
                                                    :X-Org {:type :string}}
                                       :required ["X-Org" "petId"]}
                                      t.inputSchema))))
-            (it "leaves out parameters atlas supplies"
+            (it "leaves out parameters ezu supplies"
                 (fn []
                   (let [t (mcp.tool client.get-pet
                                     {:openapi-30 true
@@ -196,16 +196,16 @@
                                       :idempotentHint false
                                       :openWorldHint true}
                                      t.annotations))
-                  (let [op (atlas.client {:openapi "3.1.0"
-                                          :info {}
-                                          :servers [{:url "https://h"}]
-                                          :paths {"/x/{id}" {:get {:operationId "getX"
-                                                                   :parameters [{:name "id"
-                                                                                 :in "path"
-                                                                                 :required true}
-                                                                                {:name "id"
-                                                                                 :in "query"}]}}}}
-                                         {:http-fn #nil})
+                  (let [op (ezu.client {:openapi "3.1.0"
+                                        :info {}
+                                        :servers [{:url "https://h"}]
+                                        :paths {"/x/{id}" {:get {:operationId "getX"
+                                                                 :parameters [{:name "id"
+                                                                               :in "path"
+                                                                               :required true}
+                                                                              {:name "id"
+                                                                               :in "query"}]}}}}
+                                       {:http-fn #nil})
                         t (mcp.tool op.get-x {})]
                     (assert.is_truthy (. t.inputSchema.properties :id))
                     (assert.is_truthy (. t.inputSchema.properties "query.id")))))))
@@ -290,7 +290,7 @@
                                              :instructions "Use it."
                                              :ttlMs 0
                                              :cacheScope :private
-                                             :_meta {"io.modelcontextprotocol/serverInfo" {:name "atlas"
+                                             :_meta {"io.modelcontextprotocol/serverInfo" {:name "ezu"
                                                                                            :version "1.2.3"}}}}
                                    ((make-handler) {:jsonrpc "2.0"
                                                     :id 1
@@ -368,7 +368,7 @@
                   (let [handle (make-handler)]
                     (assert.are.same {:protocolVersion "2025-06-18"
                                       :capabilities {:tools {}}
-                                      :serverInfo {:name "atlas"
+                                      :serverInfo {:name "ezu"
                                                    :version "1.2.3"}
                                       :instructions "Use it."}
                                      (. (handle {:jsonrpc "2.0"
@@ -566,12 +566,12 @@
                                                     true))))
             (it "sends JSON Lines and other text bodies as given"
                 (fn []
-                  (let [c (atlas.client {:openapi "3.1.0"
-                                         :info {}
-                                         :servers [{:url "https://h"}]
-                                         :paths {"/x" {:post {:operationId "postX"
-                                                              :requestBody {:content {:application/x-ndjson {}}}}}}}
-                                        {:http-fn #nil})]
+                  (let [c (ezu.client {:openapi "3.1.0"
+                                       :info {}
+                                       :servers [{:url "https://h"}]
+                                       :paths {"/x" {:post {:operationId "postX"
+                                                            :requestBody {:content {:application/x-ndjson {}}}}}}}
+                                      {:http-fn #nil})]
                     (assert.are.equal "{\"a\":1}\n{\"a\":2}"
                                       (. (mcp.request c.post-x
                                                       {:body "{\"a\":1}\n{\"a\":2}"})

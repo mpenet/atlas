@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for validating request values against JSON Schema subsets.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local validate (require :atlas.validate))
+(local validate (require :ezu.validate))
 
 (fn errors [schema value]
   (validate.check schema value "body"))
@@ -45,7 +45,7 @@
                                            {:tier "gold"}))))
             (it "compares object and array enum values by content"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         schema {:enum [{:a 1} (json.array [1 2])]}]
                     (assert.are.same [] (errors schema {:a 1}))
                     (assert.are.same [] (errors schema (json.array [1 2])))
@@ -150,7 +150,7 @@
 
 (describe "recursive schemas"
           (fn []
-            (local refs (require :atlas.refs))
+            (local refs (require :ezu.refs))
 
             (fn resolved [schemas name]
               ((refs.resolver {:components {: schemas}}) {:$ref (.. "#/components/schemas/"
@@ -180,7 +180,7 @@
 
 (describe "schema forms from OpenAPI 3.0 and 3.1"
           (fn []
-            (local json (require :atlas.json))
+            (local json (require :ezu.json))
             (it "applies nullable only together with type"
                 (fn []
                   (assert.are.same []
@@ -212,7 +212,7 @@
           (fn []
             (it "takes null whatever else the schema says"
                 (fn []
-                  (let [json (require :atlas.json)]
+                  (let [json (require :ezu.json)]
                     (assert.are.same []
                                      (errors {:allOf [{:type :object}]
                                               :nullable true}

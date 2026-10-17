@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for the on-disk schema cache: round trips, expiry and
 ;; ABOUTME: damaged entries. Run with `make test` (uses a scratch cache dir).
-(local cache (require :atlas.cache))
+(local cache (require :ezu.cache))
 
 (fn unique-url []
   (.. "https://cache.test/" (os.time) "-" (math.random 1 1000000000) ".json"))

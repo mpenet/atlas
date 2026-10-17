@@ -12,10 +12,10 @@
 (fn err-resp [body ?status]
   {:status (or ?status 400) :headers {} :body body})
 
-(local real-http (require :atlas.http))
+(local real-http (require :ezu.http))
 
 (fn seq-mock [& resps]
-  "Returns an atlas.http-compatible module whose request fn yields resps in order."
+  "Returns an ezu.http-compatible module whose request fn yields resps in order."
   (var idx 0)
   (var calls [])
   (values {:encode-body real-http.encode-body
@@ -31,16 +31,16 @@
 (local real-socket (require :socket))
 
 (fn reload-auth [http-mod ?sock-mod]
-  (tset package.loaded :atlas.auth nil)
-  (tset package.loaded :atlas.http http-mod)
+  (tset package.loaded :ezu.auth nil)
+  (tset package.loaded :ezu.http http-mod)
   (tset package.loaded :socket (or ?sock-mod real-socket))
-  (require :atlas.auth))
+  (require :ezu.auth))
 
 (fn tmp-profile []
   (.. "test-auth-" (tostring (math.random 100000 999999))))
 
 (fn clean-token [profile-name]
-  (os.remove ((. (require :atlas.auth) :token-path) profile-name)))
+  (os.remove ((. (require :ezu.auth) :token-path) profile-name)))
 
 ;; ---- client credentials ----
 
@@ -115,20 +115,20 @@
                       (assert.is_truthy (body:find "scope=read" 1 true))))))
             (it "expands env: prefix in client_secret"
                 (fn []
-                  (os.execute "export _ATLAS_TEST_SECRET=env-secret 2>/dev/null; true")
+                  (os.execute "export _EZU_TEST_SECRET=env-secret 2>/dev/null; true")
                   ;; setenv workaround via a known-set var
                   (let [(http calls) (seq-mock (ok-resp (json-body {:access_token "tok"
                                                                     :expires_in 3600})))
                         auth (reload-auth http)
                         profile (tmp-profile)
-                        _ (os.execute "export _ATLAS_TEST_SECRET=env-secret")]
+                        _ (os.execute "export _EZU_TEST_SECRET=env-secret")]
                     ;; only test that env: expansion is attempted and errors clearly when var missing
                     (assert.has.error (fn []
                                         (auth.authenticate profile
                                                            {:name "oauth-client-credentials"
                                                             :params {:token_url "https://auth.example.com/token"
                                                                      :client_id "c"
-                                                                     :client_secret "env:_ATLAS_DEFINITELY_NOT_SET_XYZ"}}
+                                                                     :client_secret "env:_EZU_DEFINITELY_NOT_SET_XYZ"}}
                                                            {})))
                     (clean-token profile))))
             (it "errors on non-2xx token response"
@@ -174,7 +174,7 @@
                                        {})
                     (clean-token profile)
                     (let [body (. calls 1 :raw-body)
-                          util (require :atlas.util)]
+                          util (require :ezu.util)]
                       (assert.is_truthy (body:find "audience=api%3A%2F%2Fx" 1
                                                    true))
                       (assert.is_truthy (body:find (.. "client_secret="
@@ -182,7 +182,7 @@
                                                    1 true))))))
             (it "ignores null fields of a token response"
                 (fn []
-                  (let [http-json (require :atlas.json)
+                  (let [http-json (require :ezu.json)
                         body "{\"access_token\":\"tok\",\"refresh_token\":null,\"expires_in\":null}"
                         (http) (seq-mock {:status 200
                                           :headers {}
@@ -225,12 +225,12 @@
                         profile (tmp-profile)
                         cfg {:name "oauth-client-credentials"
                              :params {:token_url "https://id.example/token"
-                                      :client_id "env:ATLAS_TEST_UNSET_CID"
-                                      :client_secret "env:ATLAS_TEST_UNSET_CS"}}]
+                                      :client_id "env:EZU_TEST_UNSET_CID"
+                                      :client_secret "env:EZU_TEST_UNSET_CS"}}]
                     (auth.save-token profile
                                      {:access_token "tok"
                                       :expires_at (+ (os.time) 3600)
-                                      :issuer "https://id.example/token env:ATLAS_TEST_UNSET_CID"})
+                                      :issuer "https://id.example/token env:EZU_TEST_UNSET_CID"})
                     (let [(ok h) (pcall auth.get-headers profile cfg {})]
                       (clean-token profile)
                       (assert.is_true ok h)
@@ -528,10 +528,10 @@
                                                             :output "bearer-token"}}
                                                   {})]
                     (assert.are.equal "Bearer tok" headers.authorization))))
-            (it "doesn't give the tool atlas's own stdin"
+            (it "doesn't give the tool ezu's own stdin"
                 (fn []
-                  ;; under atlas mcp, stdin carries the protocol
-                  (let [script "local a = require(\"atlas.auth\"); local h = a[\"get-headers\"](\"p\", {name = \"external-tool\", params = {commandline = \"head -c 6; echo tok\", output = \"bearer-token\"}}, {}); io.write(h.authorization)"
+                  ;; under ezu mcp, stdin carries the protocol
+                  (let [script "local a = require(\"ezu.auth\"); local h = a[\"get-headers\"](\"p\", {name = \"external-tool\", params = {commandline = \"head -c 6; echo tok\", output = \"bearer-token\"}}, {}); io.write(h.authorization)"
                         h (io.popen (.. "printf secret | lua -e '" script "'"))
                         out (h:read :*a)]
                     (h:close)
@@ -614,14 +614,11 @@
                         seen {}
                         wrapped (auth.wrap-http-fn {:name "exo"
                                                     :params {:key "k1"}
-                                                    :sign (fn [req
-                                                               params
-                                                               atlas]
+                                                    :sign (fn [req params ezu]
                                                             (set seen.req req)
                                                             (set seen.params
                                                                  params)
-                                                            (set seen.atlas
-                                                                 atlas)
+                                                            (set seen.ezu ezu)
                                                             {:headers {:authorization (.. "SIG "
                                                                                           req.method
                                                                                           " "
@@ -638,7 +635,7 @@
                                       seen.req.url)
                     (assert.are.equal "{\"n\":1}" seen.req.body)
                     (assert.are.equal "k1" seen.params.key)
-                    (assert.are.equal :function (type seen.atlas.hmac_sha256))
+                    (assert.are.equal :function (type seen.ezu.hmac_sha256))
                     (assert.are.equal "SIG POST https://api.example.com/items?a=x%20y&b=2 {\"n\":1}"
                                       (. calls 1 :headers :authorization))
                     ;; what the plugin adds is a credential
@@ -696,9 +693,9 @@
                         auth (reload-auth http)
                         seen {}
                         wrapped (auth.wrap-http-fn {:name "exo"
-                                                    :sign (fn [req _ atlas]
+                                                    :sign (fn [req _ ezu]
                                                             (set seen.url
-                                                                 (atlas.url.parse req.url))
+                                                                 (ezu.url.parse req.url))
                                                             {:headers {}})}
                                                    http.request)]
                     (wrapped {:method "GET"
@@ -972,7 +969,7 @@
                                                                            " HTTP/1.1")])
                                                              :close)))})
                     (clean-token profile)
-                    (let [digest (require :atlas.digest)
+                    (let [digest (require :ezu.digest)
                           challenge (: (. opened 1) :match
                                        "code_challenge=([^&]+)")
                           verifier (: (. calls 1 :raw-body) :match

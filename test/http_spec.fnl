@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for request body encoding, response decoding, timeouts and fetching.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local http (require :atlas.http))
+(local http (require :ezu.http))
 
 (describe "http.encode-body"
           (fn []
@@ -135,7 +135,7 @@
           (fn []
             (it "refuses strings with an embedded NUL"
                 (fn []
-                  (let [curl (require :atlas.curl)]
+                  (let [curl (require :ezu.curl)]
                     (assert.has.error #(curl.perform {:method "GET"
                                                       :url "http://localhost:1\0@127.0.0.1:2/"})
                                       "url must not contain NUL bytes")
@@ -216,7 +216,7 @@
                 (fn []
                   (with-server 1
                     (fn [port]
-                      (let [script "local r = require('atlas.http').request({method = 'GET', url = 'http://api.example.test/pets'}); io.write(r.body.path)"
+                      (let [script "local r = require('ezu.http').request({method = 'GET', url = 'http://api.example.test/pets'}); io.write(r.body.path)"
                             proc (io.popen (.. "http_proxy=http://127.0.0.1:"
                                                port " lua -e \"" script "\""))
                             path (proc:read :*a)]
@@ -282,7 +282,7 @@
           (fn []
             (it "send one part per element under the same name"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         payload (http.encode-body {:headers {:content-type "multipart/form-data"}
                                                    :body {:files (json.array [{:filename "a.txt"
                                                                                :content "AAA"}
@@ -313,7 +313,7 @@
               (let [seen []]
                 (values (fn [req]
                           (table.insert seen req)
-                          (let [util (require :atlas.util)]
+                          (let [util (require :ezu.util)]
                             (or (. routes
                                    (util.append-query req.url (or req.query {})
                                                       req.query-styles))
@@ -365,7 +365,7 @@
               (it "doesn't add a query key the redirect URL already has, whatever its name"
                   (fn []
                     (each [_ name (ipairs ["api-key" "key[0]" "api key"])]
-                      (let [util (require :atlas.util)
+                      (let [util (require :ezu.util)
                             enc (util.url-encode name)
                             (send seen) (site {(.. "https://a.test/items?" enc
                                                     "=K") (moved (.. "/items/?"
@@ -608,7 +608,7 @@
                                        :body))))
             (it "keeps a null YAML body as null"
                 (fn []
-                  (let [json (require :atlas.json)]
+                  (let [json (require :ezu.json)]
                     (assert.are.equal json.null
                                       (. (http.decode-response 200
                                                                {:content-type "application/yaml"}
@@ -659,7 +659,7 @@ c:close()")
           (fn []
             (it "says how long each part of an exchange took"
                 (fn []
-                  (let [http (require :atlas.http)
+                  (let [http (require :ezu.http)
                         (url close) (serve-once ["HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n"
                                                  "ok"]
                                                 0.05)
@@ -683,7 +683,7 @@ c:close()")
           (fn []
             (it "add the time of the redirects to the final response's"
                 (fn []
-                  (let [http (require :atlas.http)
+                  (let [http (require :ezu.http)
                         hops [{:status 302
                                :headers {:location "https://api.test/b"}
                                :timings {:total 0.5}}
@@ -709,7 +709,7 @@ c:close()")
           (fn []
             (it "hands the body over as it arrives"
                 (fn []
-                  (let [curl (require :atlas.curl)
+                  (let [curl (require :ezu.curl)
                         socket (require :socket)
                         (url close) (serve-once [sse-head
                                                  (string.format "%x\r\n%s\r\n"
@@ -748,7 +748,7 @@ c:close()")
                                        0.3)))))
             (it "keeps the chunks a callback doesn't take"
                 (fn []
-                  (let [curl (require :atlas.curl)
+                  (let [curl (require :ezu.curl)
                         (url close) (serve-once [(.. sse-head (chunked "a" "b"))])
                         (status _ body) (curl.perform {:method "GET"
                                                        : url
@@ -758,7 +758,7 @@ c:close()")
                     (assert.are.equal "ab" body))))
             (it "raises what the callback raises"
                 (fn []
-                  (let [curl (require :atlas.curl)
+                  (let [curl (require :ezu.curl)
                         (url close) (serve-once [(.. sse-head (chunked "a"))])
                         (ok err) (pcall curl.perform
                                         {:method "GET"
@@ -836,7 +836,7 @@ c:close()")
                     (assert.are.same [] asked))))
             (it "refuses a request from inside a callback"
                 (fn []
-                  (let [curl (require :atlas.curl)
+                  (let [curl (require :ezu.curl)
                         (url close) (serve-once [(.. sse-head (chunked "a"))])
                         (ok err) (pcall curl.perform
                                         {:method "GET"

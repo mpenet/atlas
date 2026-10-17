@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for the live progress of Arazzo workflows: step lines, polling,
 ;; ABOUTME: failures and nesting, on a terminal (rewritten in place) and in logs.
-(local progress (require :atlas.cli.progress))
+(local progress (require :ezu.cli.progress))
 
 (fn screen []
   "A terminal: \r\27[K clears the current line, \n ends it. :lines gives the

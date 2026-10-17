@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for SHA-256, HMAC-SHA256, base64, hex and PKCE challenges,
 ;; ABOUTME: against the published test vectors (FIPS 180-2, RFC 4231, RFC 4648).
-(local digest (require :atlas.digest))
+(local digest (require :ezu.digest))
 
 (fn hex [s]
   (pick-values 1 (s:gsub "." #(string.format "%02x" (string.byte $)))))

@@ -1,6 +1,6 @@
-;; ABOUTME: End-to-end specs for the atlas commands, run in-process through
+;; ABOUTME: End-to-end specs for the ezu commands, run in-process through
 ;; ABOUTME: cli.run with a fake HTTP transport and an in-memory config.
-(local cli (require :atlas.cli))
+(local cli (require :ezu.cli))
 
 (fn respond [status body ?headers]
   (let [json (require :lunajson)
@@ -14,7 +14,7 @@
   "Fake transport answering by \"METHOD URL\" (URL with query); records requests."
   (let [requests []]
     (values (fn [req]
-              (let [util (require :atlas.util)
+              (let [util (require :ezu.util)
                     url (util.append-query req.url (or req.query {}))
                     route (or (. routes (.. req.method " " url)) (. routes url))]
                 (table.insert requests req)
@@ -47,7 +47,7 @@
 (fn respond-text [status content-type pieces]
   "A response whose body is the text of pieces, decoded as the transport
 does, which a streaming transport hands over one by one."
-  (let [http (require :atlas.http)]
+  (let [http (require :ezu.http)]
     (doto (http.decode-response status {:content-type content-type}
                                 (table.concat pieces))
       (tset :pieces pieces))))
@@ -82,7 +82,7 @@ does, which a streaming transport hands over one by one."
     (assert ok result)
     result))
 
-(fn atlas-run [args ?routes]
+(fn ezu-run [args ?routes]
   "Run the CLI in-process; returns {:code :out :err :requests}."
   (let [(transport requests) (routes-transport (or ?routes {}))
         out []
@@ -115,13 +115,13 @@ does, which a streaming transport hands over one by one."
       (assert ok code)
       {: code :out (table.concat out "\n") :err (table.concat err) : requests})))
 
-(describe "atlas op"
+(describe "ezu op"
           (fn []
             (it "sends the request with profile headers and auth, exit 0"
                 (fn []
-                  (let [r (atlas-run ["op" "p" "get-pet" "7" "--no-color"]
-                                     {"GET https://api.test/pets/7" (respond 200
-                                                                             {:name "Rex"})})]
+                  (let [r (ezu-run ["op" "p" "get-pet" "7" "--no-color"]
+                                   {"GET https://api.test/pets/7" (respond 200
+                                                                           {:name "Rex"})})]
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.out:find "\"name\": \"Rex\"" 1 true))
                     (assert.are.equal "Bearer t0k"
@@ -130,80 +130,79 @@ does, which a streaming transport hands over one by one."
             (it "maps HTTP errors to exit codes 4 and 5"
                 (fn []
                   (assert.are.equal 4
-                                    (. (atlas-run ["op" "p" "get-pet" "1"])
-                                       :code))
+                                    (. (ezu-run ["op" "p" "get-pet" "1"]) :code))
                   (assert.are.equal 5
-                                    (. (atlas-run ["op"
-                                                   "p"
-                                                   "get-pet"
-                                                   "1"
-                                                   "--retry=0"]
-                                                  {"GET https://api.test/pets/1" (respond 503
-                                                                                          {})})
+                                    (. (ezu-run ["op"
+                                                 "p"
+                                                 "get-pet"
+                                                 "1"
+                                                 "--retry=0"]
+                                                {"GET https://api.test/pets/1" (respond 503
+                                                                                        {})})
                                        :code))
                   (assert.are.equal 0
-                                    (. (atlas-run ["op"
-                                                   "p"
-                                                   "get-pet"
-                                                   "1"
-                                                   "--ignore-status"
-                                                   "--retry=0"]
-                                                  {"GET https://api.test/pets/1" (respond 503
-                                                                                          {})})
+                                    (. (ezu-run ["op"
+                                                 "p"
+                                                 "get-pet"
+                                                 "1"
+                                                 "--ignore-status"
+                                                 "--retry=0"]
+                                                {"GET https://api.test/pets/1" (respond 503
+                                                                                        {})})
                                        :code))))
             (it "blocks invalid bodies before sending"
                 (fn []
-                  (let [r (atlas-run ["op" "p" "add-pet" "--b.size=1"])]
+                  (let [r (ezu-run ["op" "p" "add-pet" "--b.size=1"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "body.name: required" 1 true))
                     (assert.are.equal 0 (length r.requests)))))
             (it "sends anyway with --no-validate"
                 (fn []
-                  (let [r (atlas-run ["op"
-                                      "p"
-                                      "add-pet"
-                                      "--b.size=1"
-                                      "--no-validate"]
-                                     {"POST https://api.test/pets" (respond 201
-                                                                            {})})]
+                  (let [r (ezu-run ["op"
+                                    "p"
+                                    "add-pet"
+                                    "--b.size=1"
+                                    "--no-validate"]
+                                   {"POST https://api.test/pets" (respond 201
+                                                                          {})})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal 1 (length r.requests)))))
             (it "counts the auth header toward required headers"
                 (fn []
                   (assert.are.equal 0
-                                    (. (atlas-run ["op" "p" "get-secure"]
-                                                  {"GET https://api.test/secure" (respond 200
-                                                                                          {})})
+                                    (. (ezu-run ["op" "p" "get-secure"]
+                                                {"GET https://api.test/secure" (respond 200
+                                                                                        {})})
                                        :code))))
             (it "does not authenticate for --help, --list or --servers"
                 (fn []
                   (assert.are.equal 0
-                                    (. (atlas-run ["op" "broken-auth" "--list"])
+                                    (. (ezu-run ["op" "broken-auth" "--list"])
                                        :code))
                   (assert.are.equal 0
-                                    (. (atlas-run ["op"
-                                                   "broken-auth"
-                                                   "get-pet"
-                                                   "--help"])
+                                    (. (ezu-run ["op"
+                                                 "broken-auth"
+                                                 "get-pet"
+                                                 "--help"])
                                        :code))
                   (assert.are.equal 0
-                                    (. (atlas-run ["op"
-                                                   "broken-auth"
-                                                   "--servers"])
+                                    (. (ezu-run ["op"
+                                                 "broken-auth"
+                                                 "--servers"])
                                        :code))))
             (it "reports an auth failure when a request needs it"
                 (fn []
-                  (let [r (atlas-run ["op" "broken-auth" "get-pet" "1"])]
+                  (let [r (ezu-run ["op" "broken-auth" "get-pet" "1"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "authentication failed" 1
                                                   true)))))
             (it "prints the request for --dry-run without sending"
                 (fn []
-                  (let [r (atlas-run ["op"
-                                      "p"
-                                      "list-pets"
-                                      "--q.status=sold"
-                                      "--dry-run"])]
+                  (let [r (ezu-run ["op"
+                                    "p"
+                                    "list-pets"
+                                    "--q.status=sold"
+                                    "--dry-run"])]
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.out:find "GET https://api.test/pets?status=sold"
                                                   1 true))
@@ -221,7 +220,7 @@ does, which a streaming transport hands over one by one."
                                                           ["op"
                                                            spec
                                                            "--servers"]])]
-                                 (. (atlas-run args) :out))]
+                                 (. (ezu-run args) :out))]
                       (os.remove spec)
                       (each [_ out (ipairs outs)]
                         (assert.is_nil (out:find "\27" 1 true))
@@ -233,8 +232,8 @@ does, which a streaming transport hands over one by one."
                       (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h/a\\u001b]0;T\\u0007\"}],\"paths\":{\"/x\":{\"get\":{\"operationId\":\"getX\",\"responses\":{}}}}}"))
                     (let [outs (icollect [_ extra (ipairs [["--dry-run"]
                                                            ["--curl"]])]
-                                 (let [r (atlas-run (doto ["op" spec "get-x"]
-                                                      (table.insert (. extra 1))))]
+                                 (let [r (ezu-run (doto ["op" spec "get-x"]
+                                                    (table.insert (. extra 1))))]
                                    (.. r.out r.err)))
                           url "https://h/a\27]0;T\7/x"
                           routes {url {:status 400
@@ -242,7 +241,7 @@ does, which a streaming transport hands over one by one."
                                                  :x-evil "a\27[2Jb"}
                                        :body "bad \27[31m"
                                        :raw "bad \27[31m"}}
-                          v (atlas-run ["op" spec "get-x" "-v"] routes)]
+                          v (ezu-run ["op" spec "get-x" "-v"] routes)]
                       (os.remove spec)
                       (table.insert outs (.. v.out v.err))
                       (each [_ out (ipairs outs)]
@@ -252,17 +251,13 @@ does, which a streaming transport hands over one by one."
                   (let [spec (.. (os.tmpname) ".json")]
                     (with-open [f (io.open spec :w)]
                       (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{\"/x\":{\"get\":{\"operationId\":\"getX\",\"parameters\":[{\"name\":\"q\\u001b]0;P\\u0007\",\"in\":\"query\"}],\"responses\":{\"200\":{\"$ref\":\"#/nope\\u001b[31m\"}}}}}}"))
-                    (let [r (atlas-run ["op" spec "--list"])]
+                    (let [r (ezu-run ["op" spec "--list"])]
                       (assert.are.equal 1 r.code)
                       (assert.is_nil (r.err:find "\27" 1 true))
                       (assert.is_truthy (r.err:find "\\x1B" 1 true)))
                     (with-open [f (io.open spec :w)]
                       (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{\"/x\":{\"get\":{\"operationId\":\"getX\",\"parameters\":[{\"name\":\"q\\u001b]0;P\\u0007\",\"in\":\"query\"}],\"responses\":{}}}}}"))
-                    (let [r (atlas-run ["op"
-                                        spec
-                                        "get-x"
-                                        "--q.zz=1"
-                                        "--dry-run"])]
+                    (let [r (ezu-run ["op" spec "get-x" "--q.zz=1" "--dry-run"])]
                       (os.remove spec)
                       (assert.is_truthy (r.err:find "warning" 1 true))
                       (assert.is_nil (r.err:find "\27" 1 true))))))
@@ -271,11 +266,11 @@ does, which a streaming transport hands over one by one."
                   (let [spec (.. (os.tmpname) ".json")]
                     (with-open [f (io.open spec :w)]
                       (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{\"/s\":{\"get\":{\"operationId\":\"search\",\"parameters\":[{\"name\":\"filter\",\"in\":\"query\",\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\"}}}}],\"responses\":{}}}}}"))
-                    (let [r (atlas-run ["op"
-                                        spec
-                                        "search"
-                                        "--q.filter={\"a\":1}"
-                                        "--dry-run"])]
+                    (let [r (ezu-run ["op"
+                                      spec
+                                      "search"
+                                      "--q.filter={\"a\":1}"
+                                      "--dry-run"])]
                       (os.remove spec)
                       (assert.is_truthy (r.out:find "GET https://h/s?filter=%7B%22a%22%3A1%7D"
                                                     1 true)
@@ -286,36 +281,35 @@ does, which a streaming transport hands over one by one."
                                                :auth {:name "api-key"
                                                       :params {:in "query"
                                                                :name "apikey"
-                                                               :value "env:ATLAS_TEST_UNSET_KEY"}}}}}
+                                                               :value "env:EZU_TEST_UNSET_KEY"}}}}}
                     #(do
                        (assert.are.equal 0
-                                         (. (atlas-run ["op" "q" "--list"])
-                                            :code))
+                                         (. (ezu-run ["op" "q" "--list"]) :code))
                        (assert.are.equal 0
-                                         (. (atlas-run ["op"
-                                                        "q"
-                                                        "list-pets"
-                                                        "--help"])
+                                         (. (ezu-run ["op"
+                                                      "q"
+                                                      "list-pets"
+                                                      "--help"])
                                             :code))
-                       (let [r (atlas-run ["op" "q" "list-pets" "--dry-run"])]
+                       (let [r (ezu-run ["op" "q" "list-pets" "--dry-run"])]
                          (assert.are.equal 0 r.code)
                          (assert.is_truthy (r.out:find "apikey=<redacted>" 1
                                                        true)
                                            r.out))
-                       (let [r (atlas-run ["op" "q" "list-pets"])]
+                       (let [r (ezu-run ["op" "q" "list-pets"])]
                          (assert.are.equal 1 r.code)
-                         (assert.is_truthy (r.err:find "ATLAS_TEST_UNSET_KEY" 1
+                         (assert.is_truthy (r.err:find "EZU_TEST_UNSET_KEY" 1
                                                        true)))))))
             (it "rejects body fields on top of an array body"
                 (fn []
-                  (let [r (atlas-run ["op"
-                                      "p"
-                                      "add-pet"
-                                      "-d"
-                                      "[1]"
-                                      "--b.x=1"
-                                      "--no-validate"
-                                      "--dry-run"])]
+                  (let [r (ezu-run ["op"
+                                    "p"
+                                    "add-pet"
+                                    "-d"
+                                    "[1]"
+                                    "--b.x=1"
+                                    "--no-validate"
+                                    "--dry-run"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "require --body to be a JSON object"
                                                   1 true)))))
@@ -327,7 +321,7 @@ does, which a streaming transport hands over one by one."
                                                                                     :raw "{\"a\":1}"}})]
                     (with-open [f (io.open path :w)]
                       (f:write "{\"a\":1}"))
-                    (let [r (atlas-run ["op" path "--list"])
+                    (let [r (ezu-run ["op" path "--list"])
                           real-stderr io.stderr
                           err []]
                       (os.remove path)
@@ -349,7 +343,7 @@ does, which a streaming transport hands over one by one."
             (it "explains a profile without a schema"
                 (fn []
                   (let [r (with-config {:profiles {:noschema {:headers {:x-a "b"}}}}
-                            #(atlas-run ["op" "noschema" "list-pets"]))]
+                            #(ezu-run ["op" "noschema" "list-pets"]))]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "profile noschema has no schema"
                                                   1 true)
@@ -362,16 +356,12 @@ does, which a streaming transport hands over one by one."
                       (f:write "hello"))
                     (with-open [f (io.open spec :w)]
                       (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{\"/j\":{\"post\":{\"operationId\":\"create\",\"requestBody\":{\"content\":{\"Application/JSON\":{\"schema\":{\"type\":\"object\",\"required\":[\"name\"]}}}},\"responses\":{}}},\"/m\":{\"post\":{\"operationId\":\"upload\",\"requestBody\":{\"content\":{\"Multipart/Form-Data\":{\"schema\":{\"type\":\"object\"}}}},\"responses\":{}}}}}"))
-                    (let [v (atlas-run ["op"
-                                        spec
-                                        "create"
-                                        "--b.x=1"
-                                        "--dry-run"])
-                          m (atlas-run ["op"
-                                        spec
-                                        "upload"
-                                        (.. "--b.file=@" file)
-                                        "--dry-run"])]
+                    (let [v (ezu-run ["op" spec "create" "--b.x=1" "--dry-run"])
+                          m (ezu-run ["op"
+                                      spec
+                                      "upload"
+                                      (.. "--b.file=@" file)
+                                      "--dry-run"])]
                       (os.remove spec)
                       (os.remove file)
                       (assert.are.equal 1 v.code)
@@ -383,12 +373,12 @@ does, which a streaming transport hands over one by one."
                   (let [spec (.. (os.tmpname) ".json")]
                     (with-open [f (io.open spec :w)]
                       (f:write "{\"openapi\":\"3.0.0\",\"info\":{},\"servers\":[{\"url\":\"https://h\"}],\"paths\":{\"/s\":{\"get\":{\"operationId\":\"search\",\"parameters\":[{\"name\":\"filter\",\"in\":\"query\",\"content\":{\"application/json\":{\"schema\":{}}}}],\"responses\":{}}}}}"))
-                    (let [r (atlas-run ["op"
-                                        spec
-                                        "search"
-                                        "--q.filter={\"a\":1}"
-                                        "--q.filter={\"b\":2}"
-                                        "--dry-run"])]
+                    (let [r (ezu-run ["op"
+                                      spec
+                                      "search"
+                                      "--q.filter={\"a\":1}"
+                                      "--q.filter={\"b\":2}"
+                                      "--dry-run"])]
                       (os.remove spec)
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find "filter takes one JSON value"
@@ -407,12 +397,9 @@ does, which a streaming transport hands over one by one."
                                           :pq {:schema spec
                                                :query {:appid "P"}}}}
                           rq (with-config cfg
-                               #(atlas-run ["op" "q" "list-items" "--dry-run"]))
+                               #(ezu-run ["op" "q" "list-items" "--dry-run"]))
                           rpq (with-config cfg
-                                #(atlas-run ["op"
-                                             "pq"
-                                             "list-items"
-                                             "--dry-run"]))]
+                                #(ezu-run ["op" "pq" "list-items" "--dry-run"]))]
                       (os.remove spec)
                       (assert.are.equal 0 rq.code)
                       (assert.are.equal 0 rpq.code)
@@ -420,12 +407,7 @@ does, which a streaming transport hands over one by one."
             (it "rejects a body for an operation that takes none"
                 (fn []
                   (each [_ extra (ipairs ["-d={}" "--b.z=2"])]
-                    (let [r (atlas-run ["op"
-                                        "p"
-                                        "get-pet"
-                                        "7"
-                                        extra
-                                        "--dry-run"])]
+                    (let [r (ezu-run ["op" "p" "get-pet" "7" extra "--dry-run"])]
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find "get-pet takes no request body"
                                                     1 true))))))
@@ -437,7 +419,7 @@ does, which a streaming transport hands over one by one."
                                                                   :params {:commandline (.. "echo x >> "
                                                                                             count-file
                                                                                             "; exit 3")}}}}}
-                              #(atlas-run ["op" "sig" "list-pets"]))
+                              #(ezu-run ["op" "sig" "list-pets"]))
                           runs (with-open [f (io.open count-file)]
                                  (length (f:read :*a)))]
                       (os.remove count-file)
@@ -455,7 +437,7 @@ does, which a streaming transport hands over one by one."
                                                                    :params {:commandline (.. "touch "
                                                                                              marker
                                                                                              "; echo '{}'")}}}}}
-                              #(atlas-run ["op" "sign" "list-pets" "--dry-run"]))
+                              #(ezu-run ["op" "sign" "list-pets" "--dry-run"]))
                           ran (io.open marker)]
                       (when ran
                         (ran:close)
@@ -464,13 +446,13 @@ does, which a streaming transport hands over one by one."
                       (assert.is_nil ran)))))
             (it "uses the profile's output format"
                 (fn []
-                  (let [r (atlas-run ["op" "yaml" "get-pet" "3"]
-                                     {"GET https://api.test/pets/3" (respond 200
-                                                                             {:name "Rex"})})]
+                  (let [r (ezu-run ["op" "yaml" "get-pet" "3"]
+                                   {"GET https://api.test/pets/3" (respond 200
+                                                                           {:name "Rex"})})]
                     (assert.are.equal "name: Rex" r.out))))
             (it "reports unknown operations"
                 (fn []
-                  (let [r (atlas-run ["op" "p" "nope"])]
+                  (let [r (ezu-run ["op" "p" "nope"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "Unknown operation: nope" 1
                                                   true)))))
@@ -632,18 +614,18 @@ does, which a streaming transport hands over one by one."
                     (assert.are.equal 1 (length requests))
                     (assert.is_nil (. requests 1 :headers :authorization)))))))
 
-(describe "atlas az"
+(describe "ezu az"
           (fn []
             (it "runs a workflow with the context's profile and prints outputs in its format"
                 (fn []
-                  (let [r (atlas-run ["az" "flows" "fetchPet" "-i" "id=7"]
-                                     {"GET https://api.test/pets/7" (respond 200
-                                                                             {:name "Rex"})})]
+                  (let [r (ezu-run ["az" "flows" "fetchPet" "-i" "id=7"]
+                                   {"GET https://api.test/pets/7" (respond 200
+                                                                           {:name "Rex"})})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "name: Rex" r.out))))
             (it "says why a condition can't be evaluated"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         flow (with-open [f (io.open "test/fixtures/cli-flow.arazzo.json")]
                                (json.decode (f:read :*a)))
                         file (.. (os.tmpname) ".json")]
@@ -653,67 +635,67 @@ does, which a streaming transport hands over one by one."
                          (.. (os.getenv "PWD") "/test/fixtures/cli-api.json"))
                     (with-open [f (io.open file :w)]
                       (f:write (json.encode flow)))
-                    (let [r (atlas-run ["az" file "fetchPet" "-i" "id=7"]
-                                       {"GET https://api.test/pets/7" (respond 200
-                                                                               {:name "Rex"})})]
+                    (let [r (ezu-run ["az" file "fetchPet" "-i" "id=7"]
+                                     {"GET https://api.test/pets/7" (respond 200
+                                                                             {:name "Rex"})})]
                       (os.remove file)
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find "warning: condition '$statuscode == 200' can't be evaluated"
                                                     1 true))))))
             (it "prints outputs as a table row"
                 (fn []
-                  (let [r (atlas-run ["az"
-                                      "flows"
-                                      "fetchPet"
-                                      "-i"
-                                      "id=7"
-                                      "--output=csv"]
-                                     {"GET https://api.test/pets/7" (respond 200
-                                                                             {:name "Rex"})})]
+                  (let [r (ezu-run ["az"
+                                    "flows"
+                                    "fetchPet"
+                                    "-i"
+                                    "id=7"
+                                    "--output=csv"]
+                                   {"GET https://api.test/pets/7" (respond 200
+                                                                           {:name "Rex"})})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "name\nRex" r.out))))
             (it "validates workflow inputs against the inputs schema"
                 (fn []
-                  (let [r (atlas-run ["az"
-                                      "flows"
-                                      "fetchPet"
-                                      "--inputs"
-                                      "{\"id\": 7}"])]
+                  (let [r (ezu-run ["az"
+                                    "flows"
+                                    "fetchPet"
+                                    "--inputs"
+                                    "{\"id\": 7}"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "inputs.id: expected string, got integer"
                                                   1 true))
                     (assert.are.equal 0 (length r.requests)))))
             (it "prints each step's response with --arazzo-output steps"
                 (fn []
-                  (let [r (atlas-run ["az"
-                                      "flows"
-                                      "fetchPet"
-                                      "-i"
-                                      "id=7"
-                                      "--arazzo-output"
-                                      "steps"]
-                                     {"GET https://api.test/pets/7" (respond 200
-                                                                             {:name "Rex"})})]
+                  (let [r (ezu-run ["az"
+                                    "flows"
+                                    "fetchPet"
+                                    "-i"
+                                    "id=7"
+                                    "--arazzo-output"
+                                    "steps"]
+                                   {"GET https://api.test/pets/7" (respond 200
+                                                                           {:name "Rex"})})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "--- get ---\nname: Rex\n--- outputs ---\nname: Rex"
                                       r.out))))
             (it "prints requests and responses with --arazzo-output full"
                 (fn []
-                  (let [r (atlas-run ["az"
-                                      "flows"
-                                      "fetchPet"
-                                      "-i"
-                                      "id=7"
-                                      "--arazzo-output"
-                                      "full"]
-                                     {"GET https://api.test/pets/7" (respond 200
-                                                                             {:name "Rex"})})]
+                  (let [r (ezu-run ["az"
+                                    "flows"
+                                    "fetchPet"
+                                    "-i"
+                                    "id=7"
+                                    "--arazzo-output"
+                                    "full"]
+                                   {"GET https://api.test/pets/7" (respond 200
+                                                                           {:name "Rex"})})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "--- get request ---\noperation: getPet\n--- get response HTTP 200 ---\nname: Rex\n--- outputs ---\nname: Rex"
                                       r.out))))
             (it "lists the workflows of a document"
                 (fn []
-                  (let [r (atlas-run ["az" "flows"])]
+                  (let [r (ezu-run ["az" "flows"])]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "fetchPet" r.out))))
             (it "takes inputs from -d and --b. fields"
@@ -721,23 +703,23 @@ does, which a streaming transport hands over one by one."
                   (let [routes {"GET https://api.test/pets/7" (respond 200
                                                                        {:name "Rex"})}]
                     (assert.are.equal "name: Rex"
-                                      (. (atlas-run ["az"
-                                                     "flows"
-                                                     "fetchPet"
-                                                     "-d"
-                                                     "{\"id\": \"7\"}"]
-                                                    routes)
+                                      (. (ezu-run ["az"
+                                                   "flows"
+                                                   "fetchPet"
+                                                   "-d"
+                                                   "{\"id\": \"7\"}"]
+                                                  routes)
                                          :out))
                     (assert.are.equal "name: Rex"
-                                      (. (atlas-run ["az"
-                                                     "flows"
-                                                     "fetchPet"
-                                                     "--b.id=7"]
-                                                    routes)
+                                      (. (ezu-run ["az"
+                                                   "flows"
+                                                   "fetchPet"
+                                                   "--b.id=7"]
+                                                  routes)
                                          :out)))))
             (it "prints workflow help"
                 (fn []
-                  (let [r (atlas-run ["az" "flows" "fetchPet" "--help"])]
+                  (let [r (ezu-run ["az" "flows" "fetchPet" "--help"])]
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.out:find "fetchPet" 1 true))
                     (assert.are.equal 0 (length r.requests)))))
@@ -750,13 +732,13 @@ does, which a streaming transport hands over one by one."
                                "/test/fixtures/cli-api.json\"}],\"workflows\":[{\"workflowId\":\"w\",\"steps\":[{\"stepId\":\"s\\u001b]0;P\\u0007\",\"operationId\":\"getPet\",\"parameters\":[{\"name\":\"id\",\"in\":\"path\",\"value\":7}]}]}]}"))
                     (let [routes {"GET https://api.test/pets/7" (respond 200
                                                                          {:name "Rex"})}
-                          verbose (atlas-run ["az" file "w" "-v"] routes)
-                          steps (atlas-run ["az"
-                                            file
-                                            "w"
-                                            "--arazzo-output"
-                                            "full"]
-                                           routes)]
+                          verbose (ezu-run ["az" file "w" "-v"] routes)
+                          steps (ezu-run ["az"
+                                          file
+                                          "w"
+                                          "--arazzo-output"
+                                          "full"]
+                                         routes)]
                       (os.remove file)
                       (assert.are.equal 0 verbose.code)
                       (assert.is_nil (verbose.err:find "\27" 1 true))
@@ -767,40 +749,40 @@ does, which a streaming transport hands over one by one."
                   (let [file (.. (os.tmpname) ".json")]
                     (with-open [f (io.open file :w)]
                       (f:write "{\"arazzo\":\"1.0.0\",\"info\":{},\"workflows\":[{\"workflowId\":5,\"steps\":[]},{\"steps\":[]}]}"))
-                    (let [r (atlas-run ["az" file])]
+                    (let [r (ezu-run ["az" file])]
                       (os.remove file)
                       (assert.are.equal 0 r.code)
                       (assert.is_truthy (r.out:find "5" 1 true))))))
             (it "rejects an unknown profile"
                 (fn []
-                  (let [r (atlas-run ["az"
-                                      "flows"
-                                      "fetchPet"
-                                      "-i"
-                                      "id=7"
-                                      "--profile"
-                                      "typo"])]
+                  (let [r (ezu-run ["az"
+                                    "flows"
+                                    "fetchPet"
+                                    "-i"
+                                    "id=7"
+                                    "--profile"
+                                    "typo"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "Profile not found: typo" 1
                                                   true))
                     (assert.are.equal 0 (length r.requests)))))
             (it "rejects unknown workflows and --dry-run"
                 (fn []
-                  (let [r (atlas-run ["az" "flows" "nope"])]
+                  (let [r (ezu-run ["az" "flows" "nope"])]
                     (assert.are.equal 1 r.code)
                     (assert.are.equal "Unknown workflow: nope\n" r.err))
-                  (let [r (atlas-run ["az" "flows" "fetchPet" "--dry-run"])]
+                  (let [r (ezu-run ["az" "flows" "fetchPet" "--dry-run"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "not supported for az" 1 true)))))
             (it "reports a failed workflow in progress mode"
                 (fn []
-                  (let [r (atlas-run ["az"
-                                      "flows"
-                                      "fetchPet"
-                                      "-i"
-                                      "id=7"
-                                      "--arazzo-output"
-                                      "progress"])]
+                  (let [r (ezu-run ["az"
+                                    "flows"
+                                    "fetchPet"
+                                    "-i"
+                                    "id=7"
+                                    "--arazzo-output"
+                                    "progress"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "workflow fetchPet failed" 1
                                                   true))
@@ -808,15 +790,15 @@ does, which a streaming transport hands over one by one."
                     (assert.is_truthy (r.err:find "1/1 get  getPet" 1 true)))))
             (it "shows each step's result in progress mode, not its outputs"
                 (fn []
-                  (let [r (atlas-run ["az"
-                                      "flows"
-                                      "fetchPet"
-                                      "-i"
-                                      "id=7"
-                                      "--arazzo-output"
-                                      "progress"]
-                                     {"GET https://api.test/pets/7" (respond 200
-                                                                             {:name "Rex"})})]
+                  (let [r (ezu-run ["az"
+                                    "flows"
+                                    "fetchPet"
+                                    "-i"
+                                    "id=7"
+                                    "--arazzo-output"
+                                    "progress"]
+                                   {"GET https://api.test/pets/7" (respond 200
+                                                                           {:name "Rex"})})]
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.err:find "1/1 get  getPet  %d+ms  .*200"))
                     (assert.is_truthy (r.err:find "workflow fetchPet  %d+ms"))
@@ -824,19 +806,19 @@ does, which a streaming transport hands over one by one."
                     (assert.are.equal "name: Rex" r.out))))
             (it "checks a document without running it"
                 (fn []
-                  (let [r (atlas-run ["az" "flows" "--check"])]
+                  (let [r (ezu-run ["az" "flows" "--check"])]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal 0 (length r.requests))
                     (assert.is_truthy (r.out:find "nothing wrong found" 1 true)
                                       r.out))))
             (it "refuses to check a workflow that doesn't exist"
                 (fn []
-                  (let [r (atlas-run ["az" "flows" "fetchPett" "--check"])]
+                  (let [r (ezu-run ["az" "flows" "fetchPett" "--check"])]
                     (assert.are.equal 1 r.code)
                     (assert.are.equal "Unknown workflow: fetchPett\n" r.err))))
             (it "lists what is wrong in a document, and fails"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         flow (with-open [f (io.open "test/fixtures/cli-flow.arazzo.json")]
                                (json.decode (f:read :*a)))
                         file (.. (os.tmpname) ".json")]
@@ -847,8 +829,8 @@ does, which a streaming transport hands over one by one."
                          {:x "$steps.nope.outputs.y"})
                     (with-open [f (io.open file :w)]
                       (f:write (json.encode flow)))
-                    (let [r (atlas-run ["az" file "--check"])
-                          one (atlas-run ["az" file "fetchPet" "--check"])]
+                    (let [r (ezu-run ["az" file "--check"])
+                          one (ezu-run ["az" file "fetchPet" "--check"])]
                       (os.remove file)
                       (assert.are.equal 1 r.code)
                       (assert.are.equal 0 (length r.requests))
@@ -865,7 +847,7 @@ does, which a streaming transport hands over one by one."
                                         one.out)))))
             (it "fails with exit 1 when a step fails"
                 (fn []
-                  (let [r (atlas-run ["az" "flows" "fetchPet" "-i" "id=7"])]
+                  (let [r (ezu-run ["az" "flows" "fetchPet" "-i" "id=7"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "step 'get' failed: $statusCode == 200 ($statusCode is 404); HTTP 404"
                                                   1 true)))))))
@@ -874,61 +856,61 @@ does, which a streaming transport hands over one by one."
           (fn []
             (it "prints usage without arguments"
                 (fn []
-                  (let [r (atlas-run [])]
+                  (let [r (ezu-run [])]
                     (assert.are.equal 0 r.code)
-                    (assert.is_truthy (r.out:find "Usage: atlas" 1 true)))))
+                    (assert.is_truthy (r.out:find "Usage: ezu" 1 true)))))
             (it "prints its version and the HTTP library it uses"
                 (fn []
-                  (let [r (atlas-run ["--version"])
-                        version (. (require :atlas) :version)]
+                  (let [r (ezu-run ["--version"])
+                        version (. (require :ezu) :version)]
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (version:match "^%d+%.%d+%.%d+"))
-                    (assert.is_truthy (r.out:find (.. "atlas " version
+                    (assert.is_truthy (r.out:find (.. "ezu " version
                                                       " (libcurl/")
                                                   1 true)))))
             (it "lists --licenses in its usage"
                 (fn []
-                  (let [r (atlas-run [])]
+                  (let [r (ezu-run [])]
                     (assert.is_truthy (r.out:find "--licenses" 1 true)))))
             (it "prints the licenses of the software in the binary"
                 (fn []
-                  (tset package.preload :atlas.third-party
+                  (tset package.preload :ezu.third-party
                         #"# Third-party software\n\n## Lua 5.4\n")
-                  (let [r (atlas-run ["--licenses"])]
-                    (tset package.preload :atlas.third-party nil)
-                    (tset package.loaded :atlas.third-party nil)
+                  (let [r (ezu-run ["--licenses"])]
+                    (tset package.preload :ezu.third-party nil)
+                    (tset package.loaded :ezu.third-party nil)
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "# Third-party software\n\n## Lua 5.4"
                                       r.out))))
             (it "says where the licenses are when it isn't the binary"
                 (fn []
-                  (let [r (atlas-run ["--licenses"])]
+                  (let [r (ezu-run ["--licenses"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "THIRD-PARTY.md" 1 true)))))
             (it "lists profiles sorted"
                 (fn []
-                  (let [r (atlas-run ["profile" "list"])]
+                  (let [r (ezu-run ["profile" "list"])]
                     (assert.are.equal "broken-auth\ttest/fixtures/cli-api.json\ncounted\ttest/fixtures/cli-api.json\np\ttest/fixtures/cli-api.json\nyaml\ttest/fixtures/cli-api.json"
                                       r.out))))
-            (it "prints static credentials for atlas auth"
+            (it "prints static credentials for ezu auth"
                 (fn []
                   (assert.are.equal "authorization: Bearer t0k"
-                                    (. (atlas-run ["auth" "p"]) :out))))
+                                    (. (ezu-run ["auth" "p"]) :out))))
             (it "rejects options given to completion"
                 (fn []
-                  (let [r (atlas-run ["completion" "bash" "--dry-run"])]
+                  (let [r (ezu-run ["completion" "bash" "--dry-run"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "--dry-run doesn't apply to completion"
                                                   1 true)))))
             (it "explains missing profile arguments"
                 (fn []
-                  (let [r (atlas-run ["profile"])]
+                  (let [r (ezu-run ["profile"])]
                     (assert.are.equal 1 r.code)
-                    (assert.is_truthy (r.err:find "Usage: atlas profile" 1 true))
+                    (assert.is_truthy (r.err:find "Usage: ezu profile" 1 true))
                     (assert.is_nil (r.err:find "nil" 1 true)))
-                  (let [r (atlas-run ["profile" "show"])]
+                  (let [r (ezu-run ["profile" "show"])]
                     (assert.are.equal 1 r.code)
-                    (assert.is_truthy (r.err:find "Usage: atlas profile show <name>"
+                    (assert.is_truthy (r.err:find "Usage: ezu profile show <name>"
                                                   1 true)))))
             (it "explains field paths without a name and inputs that are not objects"
                 (fn []
@@ -952,12 +934,12 @@ does, which a streaming transport hands over one by one."
                                                  "-d"
                                                  "\"s\""]
                                                 "--body must be an object"]])]
-                    (let [r (atlas-run args)]
+                    (let [r (ezu-run args)]
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find msg 1 true) r.err)))))
             (it "keeps the cached token when signing in again fails"
                 (fn []
-                  (let [auth (require :atlas.auth)
+                  (let [auth (require :ezu.auth)
                         socket (require :socket)
                         srv (assert (socket.bind "127.0.0.1" 0))
                         (_ port) (srv:getsockname)]
@@ -970,14 +952,14 @@ does, which a streaming transport hands over one by one."
                                                                                               "/token")
                                                                                :client_id "c"
                                                                                :client_secret "s"}}}}}
-                              #(atlas-run ["auth" "oc-keep"]))
+                              #(ezu-run ["auth" "oc-keep"]))
                           kept (auth.load-token "oc-keep")]
                       (auth.clear-token "oc-keep")
                       (assert.are.equal 1 r.code)
                       (assert.are.equal "old" (?. kept :access_token))))))
             (it "takes --timeout for the token endpoint"
                 (fn []
-                  (let [r (atlas-run ["auth" "p" "--timeout" "5"])]
+                  (let [r (ezu-run ["auth" "p" "--timeout" "5"])]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "authorization: Bearer t0k" r.out))))
             (it "shows a query API key read from the environment"
@@ -985,15 +967,15 @@ does, which a streaming transport hands over one by one."
                   (let [r (with-config {:profiles {:qkenv {:auth {:name "api-key"
                                                                   :params {:in "query"
                                                                            :name "key"
-                                                                           :value "env:ATLAS_TEST_UNSET_KEY"}}}}}
-                            #(atlas-run ["auth" "qkenv"]))]
+                                                                           :value "env:EZU_TEST_UNSET_KEY"}}}}}
+                            #(ezu-run ["auth" "qkenv"]))]
                     (assert.are.equal 1 r.code)
-                    (assert.is_truthy (r.err:find "ATLAS_TEST_UNSET_KEY" 1 true)))
+                    (assert.is_truthy (r.err:find "EZU_TEST_UNSET_KEY" 1 true)))
                   (let [r (with-config {:profiles {:qkenv {:auth {:name "api-key"
                                                                   :params {:in "query"
                                                                            :name "key"
                                                                            :value "env:HOME"}}}}}
-                            #(atlas-run ["auth" "qkenv"]))]
+                            #(ezu-run ["auth" "qkenv"]))]
                     (assert.are.equal (.. "query: key=" (os.getenv :HOME))
                                       r.out))))
             (it "rejects unknown TLS options and non-positive timeouts"
@@ -1013,7 +995,7 @@ does, which a streaming transport hands over one by one."
                                                  "--list"
                                                  "--timeout=0"]
                                                 "--timeout must be greater than 0"]])]
-                    (let [r (atlas-run args)]
+                    (let [r (ezu-run args)]
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find msg 1 true) r.err)))))
             (it "rejects a config with the wrong shape"
@@ -1028,9 +1010,9 @@ does, which a streaming transport hands over one by one."
                                                "profile a: schema must be a string"]])]
                     ;; profile list marks a broken profile and goes on
                     (let [r (with-config cfg
-                              #(atlas-run ["op" "a" "--list"]))
+                              #(ezu-run ["op" "a" "--list"]))
                           listed (with-config cfg
-                                   #(atlas-run ["profile" "list"]))]
+                                   #(ezu-run ["profile" "list"]))]
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find msg 1 true) r.err)
                       (assert.is_truthy (: (.. listed.out listed.err) :find msg
@@ -1044,7 +1026,7 @@ does, which a streaming transport hands over one by one."
                                             ["op" "nopw" "list-pets" "--help"]
                                             ["profile" "show" "nopw"]
                                             ["auth" "nopw" "--logout"]])]
-                       (assert.are.equal 0 (. (atlas-run args) :code)
+                       (assert.are.equal 0 (. (ezu-run args) :code)
                                          (table.concat args " "))))))
             (it "adds a cookie API key to the cookies already sent"
                 (fn []
@@ -1056,15 +1038,15 @@ does, which a streaming transport hands over one by one."
                                                              :value "S"}}}}}
                         routes {"GET https://api.test/pets" (respond 200 [])}
                         r (with-config cfg
-                            #(atlas-run ["op" "ck" "list-pets"] routes))
+                            #(ezu-run ["op" "ck" "list-pets"] routes))
                         mine (with-config cfg
-                               #(atlas-run ["op"
-                                            "ck"
-                                            "list-pets"
-                                            "--h.cookie=sid=MINE"]
-                                           routes))
+                               #(ezu-run ["op"
+                                          "ck"
+                                          "list-pets"
+                                          "--h.cookie=sid=MINE"]
+                                         routes))
                         cookie (fn [run]
-                                 (let [util (require :atlas.util)]
+                                 (let [util (require :ezu.util)]
                                    (util.header (. run.requests 1 :headers)
                                                 "cookie")))]
                     (assert.are.equal 0 r.code)
@@ -1076,19 +1058,19 @@ does, which a streaming transport hands over one by one."
                                                         :auth {:name "api-key"
                                                                :params {:in "cookie"
                                                                         :name "session"
-                                                                        :value "env:ATLAS_TEST_UNSET_KEY"}}}}}
-                            #(atlas-run ["op"
-                                         "ce"
-                                         "list-pets"
-                                         "--h.Cookie=session=mine"]
-                                        {"GET https://api.test/pets" (respond 200
-                                                                              [])}))]
+                                                                        :value "env:EZU_TEST_UNSET_KEY"}}}}}
+                            #(ezu-run ["op"
+                                       "ce"
+                                       "list-pets"
+                                       "--h.Cookie=session=mine"]
+                                      {"GET https://api.test/pets" (respond 200
+                                                                            [])}))]
                     (assert.are.equal 0 r.code r.err))))
             (it "fetches a spec with the cookie key after a 401, next to the profile's cookies"
                 (fn []
                   (let [schema-text (with-open [f (io.open "test/fixtures/cli-api.json")]
                                       (f:read :*a))
-                        util (require :atlas.util)
+                        util (require :ezu.util)
                         (transport requests) (routes-transport {"GET https://api.test/openapi.json" (fn [req]
                                                                                                       (if (: (or (util.header req.headers
                                                                                                                               :cookie)
@@ -1124,7 +1106,7 @@ does, which a streaming transport hands over one by one."
                                                 "external-tool auth requires params.commandline"]])]
                     (let [r (with-config {:profiles {:bad {:schema "test/fixtures/cli-api.json"
                                                            : auth}}}
-                              #(atlas-run ["auth" "bad"]))]
+                              #(ezu-run ["auth" "bad"]))]
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find msg 1 true) r.err)))))
             (it "rejects Arazzo contexts and extends of the wrong shape"
@@ -1141,13 +1123,13 @@ does, which a streaming transport hands over one by one."
                                                                 :y "oops"}}
                                                     ["op" "x" "--list"]
                                                     "profile y must be an object"]])]
-                    (let [r (with-config cfg #(atlas-run args))]
+                    (let [r (with-config cfg #(ezu-run args))]
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find msg 1 true) r.err)))
                   (let [r (with-config {:profiles {:x {:schema "s.json"
                                                        :extends "y"}
                                                    :y "oops"}}
-                            #(atlas-run ["profile" "list"]))]
+                            #(ezu-run ["profile" "list"]))]
                     (assert.is_nil (r.out:find ".lua:" 1 true) r.out))))
             (it "rejects profiles whose settings have the wrong shape"
                 (fn []
@@ -1161,10 +1143,10 @@ does, which a streaming transport hands over one by one."
                                                     :auth {:params {}}}
                                                    "profile bad: auth needs a name"]])]
                     (let [r (with-config {:profiles {:bad profile}}
-                              #(atlas-run ["op" "bad" "list-pets"]))]
+                              #(ezu-run ["op" "bad" "list-pets"]))]
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find msg 1 true) r.err)))))
-            (it "tells what atlas auth adds besides headers"
+            (it "tells what ezu auth adds besides headers"
                 (fn []
                   (with-config {:profiles {:qkey {:auth {:name "api-key"
                                                          :params {:in "query"
@@ -1174,63 +1156,58 @@ does, which a streaming transport hands over one by one."
                                                          :params {:commandline "sign-it"}}}}}
                     #(do
                        (assert.are.equal "query: appid=K"
-                                         (. (atlas-run ["auth" "qkey"]) :out))
+                                         (. (ezu-run ["auth" "qkey"]) :out))
                        (assert.are.equal "signs each request with: sign-it"
-                                         (. (atlas-run ["auth" "sign"]) :out))))))
+                                         (. (ezu-run ["auth" "sign"]) :out))))))
             (it "rejects unknown commands with exit 1"
                 (fn []
-                  (assert.are.equal 1 (. (atlas-run ["frobnicate"]) :code))))
+                  (assert.are.equal 1 (. (ezu-run ["frobnicate"]) :code))))
             (it "lists the schema a profile inherits"
                 (fn []
                   (let [r (with-config {:profiles {:base {:schema "s.json"}
                                                    :child {:extends "base"}}}
-                            #(atlas-run ["profile" "list"]))]
+                            #(ezu-run ["profile" "list"]))]
                     (assert.are.equal "base\ts.json\nchild\ts.json" r.out))))
             (it "lists every profile, flagging one whose extends is broken"
                 (fn []
                   (let [r (with-config {:profiles {:a {:schema "s.json"}
                                                    :b {:extends "nope"}
                                                    :c {:schema "t.json"}}}
-                            #(atlas-run ["profile" "list"]))]
+                            #(ezu-run ["profile" "list"]))]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "a\ts.json\nb\t(broken: Profile not found: nope)\nc\tt.json"
                                       r.out))))
             (it "rejects options that don't apply to the command"
                 (fn []
-                  (let [r (atlas-run ["op"
-                                      "p"
-                                      "get-pet"
-                                      "3"
-                                      "--profile"
-                                      "yaml"])]
+                  (let [r (ezu-run ["op" "p" "get-pet" "3" "--profile" "yaml"])]
                     (assert.are.equal 1 r.code)
                     (assert.are.equal "--profile doesn't apply to op (it is for az)\n"
                                       r.err)
                     (assert.are.equal 0 (length r.requests)))
-                  (let [r (atlas-run ["az" "flows" "fetchPet" "--select" ".a"])]
+                  (let [r (ezu-run ["az" "flows" "fetchPet" "--select" ".a"])]
                     (assert.are.equal 1 r.code)
                     (assert.are.equal "--select doesn't apply to az (it is for op)\n"
                                       r.err))
-                  (let [r (atlas-run ["op" "p" "get-pet" "3" "--logout"])]
+                  (let [r (ezu-run ["op" "p" "get-pet" "3" "--logout"])]
                     (assert.are.equal 1 r.code)
                     (assert.are.equal "--logout doesn't apply to op (it is for auth)\n"
                                       r.err))))
             (it "scopes options to profile and auth too"
                 (fn []
-                  (let [r (atlas-run ["profile" "list" "--timeout" "3"])]
+                  (let [r (ezu-run ["profile" "list" "--timeout" "3"])]
                     (assert.are.equal 1 r.code)
                     (assert.are.equal "--timeout doesn't apply to profile (it is for op, az and http)\n"
                                       r.err))
-                  (let [r (atlas-run ["profile" "list" "--dry-run"])]
+                  (let [r (ezu-run ["profile" "list" "--dry-run"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "--dry-run only applies to profile import-restish"
                                                   1 true)))
-                  (let [r (atlas-run ["auth" "p" "--base-url" "http://x"])]
+                  (let [r (ezu-run ["auth" "p" "--base-url" "http://x"])]
                     (assert.are.equal 1 r.code))
                   (assert.are.equal "authorization: Bearer t0k"
-                                    (. (atlas-run ["auth"
-                                                   "p"
-                                                   "--ssl.verify=none"])
+                                    (. (ezu-run ["auth"
+                                                 "p"
+                                                 "--ssl.verify=none"])
                                        :out))))
             (it "prints usage for --help on profile and auth, doing nothing else"
                 (fn []
@@ -1239,101 +1216,90 @@ does, which a streaming transport hands over one by one."
                                           "import-restish"
                                           "x.json"
                                           "--help"]])]
-                    (let [r (atlas-run args)]
+                    (let [r (ezu-run args)]
                       (assert.are.equal 0 r.code)
-                      (assert.is_truthy (r.out:find "Usage: atlas" 1 true))
+                      (assert.is_truthy (r.out:find "Usage: ezu" 1 true))
                       (assert.is_nil (r.out:find "Bearer" 1 true))))))
             (it "checks server variables when listing servers"
                 (fn []
-                  (let [r (atlas-run ["op"
-                                      "p"
-                                      "--servers"
-                                      "--server.region=xx"])]
+                  (let [r (ezu-run ["op" "p" "--servers" "--server.region=xx"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "unknown server variable 'region'"
                                                   1 true)))))
             (it "explains bad option values"
                 (fn []
-                  (let [r (atlas-run ["op" "p" "get-pet" "3" "--output=yml"])]
+                  (let [r (ezu-run ["op" "p" "get-pet" "3" "--output=yml"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "--output must be one of json, yaml, raw, table, csv, tsv, status, headers"
                                                   1 true)))
-                  (let [r (atlas-run ["op"
-                                      "p"
-                                      "get-pet"
-                                      "3"
-                                      "--server-index=0"])]
+                  (let [r (ezu-run ["op" "p" "get-pet" "3" "--server-index=0"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "server index 0 out of range"
                                                   1 true)))
-                  (let [r (atlas-run ["op" "p" "add-pet" "--b.=1"])]
+                  (let [r (ezu-run ["op" "p" "add-pet" "--b.=1"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "--b. needs a field name" 1
                                                   true)))))
             (it "shows a profile, or fails when it does not exist"
                 (fn []
-                  (let [r (atlas-run ["profile" "show" "yaml"])]
+                  (let [r (ezu-run ["profile" "show" "yaml"])]
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.out:find "test/fixtures/cli-api.json"
                                                   1 true)))
-                  (let [r (atlas-run ["profile" "show" "nope"])]
+                  (let [r (ezu-run ["profile" "show" "nope"])]
                     (assert.are.equal 1 r.code)
                     (assert.are.equal "Profile not found: nope\n" r.err))))
             (it "rejects unknown profile subcommands"
                 (fn []
-                  (let [r (atlas-run ["profile" "frob"])]
+                  (let [r (ezu-run ["profile" "frob"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "Unknown profile subcommand: frob"
                                                   1 true)))))
-            (it "explains what atlas auth needs"
+            (it "explains what ezu auth needs"
                 (fn []
-                  (assert.are.equal "Usage: atlas auth <profile> [--logout]\n"
-                                    (. (atlas-run ["auth"]) :err))
+                  (assert.are.equal "Usage: ezu auth <profile> [--logout]\n"
+                                    (. (ezu-run ["auth"]) :err))
                   (assert.are.equal "Profile not found: nope\n"
-                                    (. (atlas-run ["auth" "nope"]) :err))
+                                    (. (ezu-run ["auth" "nope"]) :err))
                   (assert.are.equal "No auth configured for profile: yaml\n"
-                                    (. (atlas-run ["auth" "yaml"]) :err))
-                  (assert.is_truthy (: (. (atlas-run ["auth" "broken-auth"])
-                                          :err)
+                                    (. (ezu-run ["auth" "yaml"]) :err))
+                  (assert.is_truthy (: (. (ezu-run ["auth" "broken-auth"]) :err)
                                        :find
                                        "external auth command failed (exit 1)" 1
                                        true))))
             (it "logs out of a profile"
                 (fn []
-                  (let [r (atlas-run ["auth" "p" "--logout"])]
+                  (let [r (ezu-run ["auth" "p" "--logout"])]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "Logged out: p" r.out))))
             (it "lists configured profiles and contexts when op or az has no target"
                 (fn []
-                  (let [r (atlas-run ["op"])]
+                  (let [r (ezu-run ["op"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "Configured profiles:\n  broken-auth\ttest/fixtures/cli-api.json\n"
                                                   1 true)))
-                  (let [r (atlas-run ["az"])]
+                  (let [r (ezu-run ["az"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "Configured Arazzo contexts:\n  flows\ttest/fixtures/cli-flow.arazzo.json\n"
                                                   1 true)))))
             (it "answers the shell scripts' completion requests"
                 (fn []
                   (assert.are.equal "import-restish"
-                                    (. (atlas-run ["__complete"
-                                                   "atlas profile im"])
+                                    (. (ezu-run ["__complete" "ezu profile im"])
                                        :out))
                   (assert.are.equal "--verbose\tShow status, headers and requests"
-                                    (. (atlas-run ["__complete"
-                                                   "--describe"
-                                                   "atlas op x --verb"])
+                                    (. (ezu-run ["__complete"
+                                                 "--describe"
+                                                 "ezu op x --verb"])
                                        :out))
-                  (assert.are.equal ""
-                                    (. (atlas-run ["__complete" "atlas"]) :out))))
+                  (assert.are.equal "" (. (ezu-run ["__complete" "ezu"]) :out))))
             (it "prints completion scripts for each shell"
                 (fn []
                   (each [_ shell (ipairs ["fish" "bash" "zsh"])]
-                    (let [r (atlas-run ["completion" shell])]
+                    (let [r (ezu-run ["completion" shell])]
                       (assert.are.equal 0 r.code)
                       (assert.is_truthy (r.out:find "__complete" 1 true))))
-                  (assert.are.equal 1
-                                    (. (atlas-run ["completion" "tcsh"]) :code))))))
+                  (assert.are.equal 1 (. (ezu-run ["completion" "tcsh"]) :code))))))
 
 (describe "credentials and schema sources"
           (fn []
@@ -1426,50 +1392,50 @@ does, which a streaming transport hands over one by one."
                         n) 0)))
 
             (before_each (fn [] (os.remove "build/test-home/auth-runs")))
-            (it "runs the auth flow once for atlas auth"
+            (it "runs the auth flow once for ezu auth"
                 (fn []
                   (assert.are.equal "authorization: Bearer tok"
-                                    (. (atlas-run ["auth" "counted"]) :out))
+                                    (. (ezu-run ["auth" "counted"]) :out))
                   (assert.are.equal 1 (auth-runs))))
             (it "honors --logout for every auth type"
                 (fn []
-                  (let [r (atlas-run ["auth" "p" "--logout"])]
+                  (let [r (ezu-run ["auth" "p" "--logout"])]
                     (assert.are.equal "Logged out: p" r.out))))
             (it "does not authenticate for --dry-run"
                 (fn []
-                  (let [r (atlas-run ["op" "counted" "get-pet" "1" "--dry-run"])]
+                  (let [r (ezu-run ["op" "counted" "get-pet" "1" "--dry-run"])]
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.out:find "authorization: <redacted>" 1
                                                   true))
                     (assert.are.equal 0 (auth-runs)))))
             (it "does not authenticate when an explicit header covers it"
                 (fn []
-                  (let [r (atlas-run ["op"
-                                      "counted"
-                                      "get-pet"
-                                      "1"
-                                      "--h.Authorization=Basic x"]
-                                     {"GET https://api.test/pets/1" (respond 200
-                                                                             {})})]
+                  (let [r (ezu-run ["op"
+                                    "counted"
+                                    "get-pet"
+                                    "1"
+                                    "--h.Authorization=Basic x"]
+                                   {"GET https://api.test/pets/1" (respond 200
+                                                                           {})})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "Basic x"
                                       (. r.requests 1 :headers :authorization))
                     (assert.are.equal 0 (auth-runs)))))
             (it "rejects extra positional arguments"
                 (fn []
-                  (let [r (atlas-run ["op" "p" "get-pet" "1" "2"])]
+                  (let [r (ezu-run ["op" "p" "get-pet" "1" "2"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "get-pet takes 1 path parameter (id), got 2"
                                                   1 true))
                     (assert.are.equal 0 (length r.requests)))))
             (it "rejects workflow inputs on op"
                 (fn []
-                  (let [r (atlas-run ["op" "p" "list-pets" "-i" "a=1"])]
+                  (let [r (ezu-run ["op" "p" "list-pets" "-i" "a=1"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "doesn't apply to op (it is for az)"
                                                   1 true)))))))
 
-(describe "atlas profile import-restish"
+(describe "ezu profile import-restish"
           (fn []
             (let [json (require :lunajson)
                   target "build/test-home/import-config.json"
@@ -1577,62 +1543,62 @@ does, which a streaming transport hands over one by one."
           (fn []
             (it "sends the request again until the condition holds, then prints the last response"
                 (fn []
-                  (let [r (atlas-run ["op"
-                                      "p"
-                                      "get-pet"
-                                      "7"
-                                      "--until"
-                                      "$response.body#/state == 'ready'"
-                                      "--every=0.01"
-                                      "--output=yaml"]
-                                     {"GET https://api.test/pets/7" (answers (respond 200
-                                                                                      {:state "pending"})
-                                                                             (respond 200
-                                                                                      {:state "pending"})
-                                                                             (respond 200
-                                                                                      {:state "ready"}))})]
+                  (let [r (ezu-run ["op"
+                                    "p"
+                                    "get-pet"
+                                    "7"
+                                    "--until"
+                                    "$response.body#/state == 'ready'"
+                                    "--every=0.01"
+                                    "--output=yaml"]
+                                   {"GET https://api.test/pets/7" (answers (respond 200
+                                                                                    {:state "pending"})
+                                                                           (respond 200
+                                                                                    {:state "pending"})
+                                                                           (respond 200
+                                                                                    {:state "ready"}))})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal 3 (length r.requests))
                     (assert.are.equal "state: ready" r.out))))
             (it "works for http requests, on the status too"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "https://api.test/up"
-                                      "--until"
-                                      "$statusCode == 200"
-                                      "--every=0.01"]
-                                     {"GET https://api.test/up" (answers (respond 503
-                                                                                  {})
-                                                                         (respond 200
-                                                                                  {:ok true}))})]
+                  (let [r (ezu-run ["http"
+                                    "https://api.test/up"
+                                    "--until"
+                                    "$statusCode == 200"
+                                    "--every=0.01"]
+                                   {"GET https://api.test/up" (answers (respond 503
+                                                                                {})
+                                                                       (respond 200
+                                                                                {:ok true}))})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal 2 (length r.requests)))))
             (it "succeeds when the condition holds, whatever the status (waiting for a deletion)"
                 (fn []
-                  (let [r (atlas-run ["op"
-                                      "p"
-                                      "get-pet"
-                                      "7"
-                                      "--until"
-                                      "$statusCode == 404"
-                                      "--every=0.01"]
-                                     {"GET https://api.test/pets/7" (answers (respond 200
-                                                                                      {})
-                                                                             (respond 404
-                                                                                      {}))})]
+                  (let [r (ezu-run ["op"
+                                    "p"
+                                    "get-pet"
+                                    "7"
+                                    "--until"
+                                    "$statusCode == 404"
+                                    "--every=0.01"]
+                                   {"GET https://api.test/pets/7" (answers (respond 200
+                                                                                    {})
+                                                                           (respond 404
+                                                                                    {}))})]
                     (assert.are.equal 0 r.code))))
             (it "gives up after --max-time, saying why"
                 (fn []
-                  (let [r (atlas-run ["op"
-                                      "p"
-                                      "get-pet"
-                                      "7"
-                                      "--until"
-                                      "$response.body#/state == 'ready'"
-                                      "--every=0.01"
-                                      "--max-time=0"]
-                                     {"GET https://api.test/pets/7" (respond 200
-                                                                             {:state "pending"})})]
+                  (let [r (ezu-run ["op"
+                                    "p"
+                                    "get-pet"
+                                    "7"
+                                    "--until"
+                                    "$response.body#/state == 'ready'"
+                                    "--every=0.01"
+                                    "--max-time=0"]
+                                   {"GET https://api.test/pets/7" (respond 200
+                                                                           {:state "pending"})})]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "--until condition still false after 1 attempt"
                                                   1 true)
@@ -1642,29 +1608,29 @@ does, which a streaming transport hands over one by one."
                                       r.err))))
             (it "stops at once on a condition that can't be evaluated"
                 (fn []
-                  (let [r (atlas-run ["op"
-                                      "p"
-                                      "get-pet"
-                                      "7"
-                                      "--until"
-                                      "$statuscode == 200"
-                                      "--every=0.01"]
-                                     {"GET https://api.test/pets/7" (respond 200
-                                                                             {})})]
+                  (let [r (ezu-run ["op"
+                                    "p"
+                                    "get-pet"
+                                    "7"
+                                    "--until"
+                                    "$statuscode == 200"
+                                    "--every=0.01"]
+                                   {"GET https://api.test/pets/7" (respond 200
+                                                                           {})})]
                     (assert.are.equal 1 r.code)
                     (assert.are.equal 0 (length r.requests))
                     (assert.is_truthy (r.err:find "can't be evaluated" 1 true)))))
             (it "reads a streamed body whole, to check it"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "https://api.test/lines"
-                                      "--until"
-                                      "$response.body#/0/a == 1"
-                                      "--every=0.01"]
-                                     {"GET https://api.test/lines" (respond-text 200
-                                                                                 "application/x-ndjson"
-                                                                                 ["{\"a\":1}\n"
-                                                                                  "{\"a\":2}\n"])})]
+                  (let [r (ezu-run ["http"
+                                    "https://api.test/lines"
+                                    "--until"
+                                    "$response.body#/0/a == 1"
+                                    "--every=0.01"]
+                                   {"GET https://api.test/lines" (respond-text 200
+                                                                               "application/x-ndjson"
+                                                                               ["{\"a\":1}\n"
+                                                                                "{\"a\":2}\n"])})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal 1 (length r.requests)))))
             (it "refuses what it can't wait for, before sending anything"
@@ -1679,14 +1645,14 @@ does, which a streaming transport hands over one by one."
                                                 "--until can't be used with --dry-run or --curl"]
                                                [["--curl"]
                                                 "--until can't be used with --dry-run or --curl"]])]
-                    (let [r (atlas-run (doto ["op"
-                                              "p"
-                                              "get-pet"
-                                              "7"
-                                              "--until"
-                                              "$statusCode == 200"]
-                                         (#(each [_ a (ipairs args)]
-                                             (table.insert $ a)))))]
+                    (let [r (ezu-run (doto ["op"
+                                            "p"
+                                            "get-pet"
+                                            "7"
+                                            "--until"
+                                            "$statusCode == 200"]
+                                       (#(each [_ a (ipairs args)]
+                                           (table.insert $ a)))))]
                       (assert.are.equal 1 r.code why)
                       (assert.is_truthy (r.err:find why 1 true) r.err)
                       (assert.are.equal 0 (length r.requests))))))
@@ -1696,12 +1662,12 @@ does, which a streaming transport hands over one by one."
                                                      "can't be evaluated"]
                                                     ["$inputs.id == 1"
                                                      "--until conditions use $statusCode, $method, $url, $request and $response"]])]
-                    (let [r (atlas-run ["op"
-                                        "p"
-                                        "get-pet"
-                                        "7"
-                                        "--until"
-                                        condition])]
+                    (let [r (ezu-run ["op"
+                                      "p"
+                                      "get-pet"
+                                      "7"
+                                      "--until"
+                                      condition])]
                       (assert.are.equal 1 r.code)
                       (assert.is_truthy (r.err:find why 1 true) r.err)
                       (assert.are.equal 0 (length r.requests))))))
@@ -1709,35 +1675,35 @@ does, which a streaming transport hands over one by one."
                 (fn []
                   (let [routes {"POST https://api.test/jobs" (respond 200
                                                                       {:state "done"})}
-                        refused (atlas-run ["http"
-                                            "POST"
-                                            "https://api.test/jobs"
-                                            "--until"
-                                            "$response.body#/state == 'done'"]
-                                           routes)
-                        allowed (atlas-run ["http"
-                                            "POST"
-                                            "https://api.test/jobs"
-                                            "--until"
-                                            "$response.body#/state == 'done'"
-                                            "--retry-unsafe"]
-                                           routes)]
+                        refused (ezu-run ["http"
+                                          "POST"
+                                          "https://api.test/jobs"
+                                          "--until"
+                                          "$response.body#/state == 'done'"]
+                                         routes)
+                        allowed (ezu-run ["http"
+                                          "POST"
+                                          "https://api.test/jobs"
+                                          "--until"
+                                          "$response.body#/state == 'done'"
+                                          "--retry-unsafe"]
+                                         routes)]
                     (assert.are.equal 1 refused.code)
                     (assert.is_truthy (refused.err:find "--retry-unsafe" 1 true))
                     (assert.are.equal 0 (length refused.requests))
                     (assert.are.equal 0 allowed.code))))
             (it "knows the request it sends"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "https://api.test/up"
-                                      "--until"
-                                      "$method == 'GET' && $url == 'https://api.test/up'"]
-                                     {"GET https://api.test/up" (respond 200 {})})]
+                  (let [r (ezu-run ["http"
+                                    "https://api.test/up"
+                                    "--until"
+                                    "$method == 'GET' && $url == 'https://api.test/up'"]
+                                   {"GET https://api.test/up" (respond 200 {})})]
                     (assert.are.equal 0 r.code r.err)
                     (assert.are.equal 1 (length r.requests)))))
             (it "needs --until for --every and --max-time"
                 (fn []
-                  (let [r (atlas-run ["op" "p" "get-pet" "7" "--every=1"])]
+                  (let [r (ezu-run ["op" "p" "get-pet" "7" "--every=1"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "--every needs --until" 1
                                                   true))
@@ -1749,16 +1715,16 @@ does, which a streaming transport hands over one by one."
                 (fn []
                   (let [path (.. (os.tmpname) ".fnl")]
                     (with-open [f (io.open path :w)]
-                      (f:write "{:auth {:demo (fn [req params atlas] {:headers {:authorization (.. \"Demo \" (atlas.hex (atlas.sha256 req.url)) \" \" params.key)}})}}"))
+                      (f:write "{:auth {:demo (fn [req params ezu] {:headers {:authorization (.. \"Demo \" (ezu.hex (ezu.sha256 req.url)) \" \" params.key)}})}}"))
                     (os.execute (.. "chmod 600 " path))
                     (let [r (with-config {:plugins [path]
                                           :profiles {:p {:base-url "https://api.test"
                                                          :auth {:name "demo"
                                                                 :params {:key "k1"}}}}}
-                              #(atlas-run ["http" "/pets/7" "--profile=p"]
-                                          {"GET https://api.test/pets/7" (respond 200
-                                                                                  {})}))
-                          digest (require :atlas.digest)]
+                              #(ezu-run ["http" "/pets/7" "--profile=p"]
+                                        {"GET https://api.test/pets/7" (respond 200
+                                                                                {})}))
+                          digest (require :ezu.digest)]
                       (os.remove path)
                       (assert.are.equal 0 r.code)
                       (assert.are.equal (.. "Demo "
@@ -1766,35 +1732,35 @@ does, which a streaming transport hands over one by one."
                                             " k1")
                                         (. r.requests 1 :headers :authorization))))))))
 
-(describe "atlas http"
+(describe "ezu http"
           (fn []
             (it "says how long each exchange took with --timing"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "GET"
-                                      "https://api.test/pets/7"
-                                      "--timing"]
-                                     {"GET https://api.test/pets/7" (doto (respond 200
-                                                                                   {:name "Rex"})
-                                                                      (tset :timings
-                                                                            {:namelookup 0.001
-                                                                             :connect 0.002
-                                                                             :appconnect 0.003
-                                                                             :pretransfer 0.003
-                                                                             :starttransfer 0.01
-                                                                             :total 0.011}))})]
+                  (let [r (ezu-run ["http"
+                                    "GET"
+                                    "https://api.test/pets/7"
+                                    "--timing"]
+                                   {"GET https://api.test/pets/7" (doto (respond 200
+                                                                                 {:name "Rex"})
+                                                                    (tset :timings
+                                                                          {:namelookup 0.001
+                                                                           :connect 0.002
+                                                                           :appconnect 0.003
+                                                                           :pretransfer 0.003
+                                                                           :starttransfer 0.01
+                                                                           :total 0.011}))})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "GET https://api.test/pets/7  200  dns 1ms · tcp 1ms · tls 1ms · server 7ms · download 1ms · total 11ms\n"
                                       r.err))))
             (it "sends a request with the profile's headers and auth"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "GET"
-                                      "https://api.test/pets/7"
-                                      "--profile=p"
-                                      "--no-color"]
-                                     {"GET https://api.test/pets/7" (respond 200
-                                                                             {:name "Rex"})})]
+                  (let [r (ezu-run ["http"
+                                    "GET"
+                                    "https://api.test/pets/7"
+                                    "--profile=p"
+                                    "--no-color"]
+                                   {"GET https://api.test/pets/7" (respond 200
+                                                                           {:name "Rex"})})]
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.out:find "\"name\": \"Rex\"" 1 true))
                     (assert.are.equal "Bearer t0k"
@@ -1802,54 +1768,52 @@ does, which a streaming transport hands over one by one."
                     (assert.are.equal "o1" (. r.requests 1 :headers :x-org)))))
             (it "defaults to GET and resolves paths against the profile's API"
                 (fn []
-                  (let [r (atlas-run ["http" "/pets/7" "--profile=p"]
-                                     {"GET https://api.test/pets/7" (respond 200
-                                                                             {})})]
+                  (let [r (ezu-run ["http" "/pets/7" "--profile=p"]
+                                   {"GET https://api.test/pets/7" (respond 200
+                                                                           {})})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "GET" (. r.requests 1 :method))
                     (assert.are.equal "https://api.test/pets/7"
                                       (. r.requests 1 :url)))))
             (it "resolves paths against --base-url"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "delete"
-                                      "pets/7"
-                                      "--base-url=https://h.test/v1/"]
-                                     {"DELETE https://h.test/v1/pets/7" (respond 204
-                                                                                 nil)})]
+                  (let [r (ezu-run ["http"
+                                    "delete"
+                                    "pets/7"
+                                    "--base-url=https://h.test/v1/"]
+                                   {"DELETE https://h.test/v1/pets/7" (respond 204
+                                                                               nil)})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "DELETE" (. r.requests 1 :method)))))
             (it "refuses to send a profile's credentials to another origin"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "GET"
-                                      "https://evil.test/pets"
-                                      "--profile=p"])]
+                  (let [r (ezu-run ["http"
+                                    "GET"
+                                    "https://evil.test/pets"
+                                    "--profile=p"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "https://api.test" 1 true))
                     (assert.are.equal 0 (length r.requests)))))
             (it "sends no credentials without a profile"
                 (fn []
-                  (let [r (atlas-run ["http" "https://other.test/x"]
-                                     {"GET https://other.test/x" (respond 200
-                                                                          {})})]
+                  (let [r (ezu-run ["http" "https://other.test/x"]
+                                   {"GET https://other.test/x" (respond 200 {})})]
                     (assert.are.equal 0 r.code)
                     (assert.is_nil (. r.requests 1 :headers :authorization)))))
             (it "needs a base URL for a path"
                 (fn []
-                  (let [r (atlas-run ["http" "GET" "/pets"])]
+                  (let [r (ezu-run ["http" "GET" "/pets"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "--profile or --base-url" 1
                                                   true)))))
             (it "sends a JSON body as given"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "POST"
-                                      "https://h.test/pets"
-                                      "-d"
-                                      "{\"size\": 1.50}"]
-                                     {"POST https://h.test/pets" (respond 201
-                                                                          {})})
+                  (let [r (ezu-run ["http"
+                                    "POST"
+                                    "https://h.test/pets"
+                                    "-d"
+                                    "{\"size\": 1.50}"]
+                                   {"POST https://h.test/pets" (respond 201 {})})
                         req (. r.requests 1)]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "{\"size\": 1.50}" req.body)
@@ -1857,15 +1821,14 @@ does, which a streaming transport hands over one by one."
                                       (. req.headers :content-type)))))
             (it "builds a JSON body from fields"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "POST"
-                                      "https://h.test/pets"
-                                      "-d"
-                                      "name: Rex"
-                                      "--b.size=2"
-                                      "--b.tag.color=red"]
-                                     {"POST https://h.test/pets" (respond 201
-                                                                          {})})
+                  (let [r (ezu-run ["http"
+                                    "POST"
+                                    "https://h.test/pets"
+                                    "-d"
+                                    "name: Rex"
+                                    "--b.size=2"
+                                    "--b.tag.color=red"]
+                                   {"POST https://h.test/pets" (respond 201 {})})
                         req (. r.requests 1)]
                     (assert.are.equal 0 r.code)
                     (assert.are.same {:name "Rex" :size 2 :tag {:color "red"}}
@@ -1874,14 +1837,13 @@ does, which a streaming transport hands over one by one."
                                       (. req.headers :content-type)))))
             (it "sends other bodies as-is, with the given content type"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "PUT"
-                                      "https://h.test/note"
-                                      "-d"
-                                      "hello"
-                                      "--h.Content-Type=text/plain"]
-                                     {"PUT https://h.test/note" (respond 204
-                                                                         nil)})
+                  (let [r (ezu-run ["http"
+                                    "PUT"
+                                    "https://h.test/note"
+                                    "-d"
+                                    "hello"
+                                    "--h.Content-Type=text/plain"]
+                                   {"PUT https://h.test/note" (respond 204 nil)})
                         req (. r.requests 1)]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "hello" req.body)
@@ -1889,19 +1851,19 @@ does, which a streaming transport hands over one by one."
                                       (. req.headers :content-type)))))
             (it "adds query parameters to the URL's own"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "https://h.test/pets?limit=1"
-                                      "--q.status=sold"]
-                                     {"GET https://h.test/pets?limit=1&status=sold" (respond 200
-                                                                                             [])})]
+                  (let [r (ezu-run ["http"
+                                    "https://h.test/pets?limit=1"
+                                    "--q.status=sold"]
+                                   {"GET https://h.test/pets?limit=1&status=sold" (respond 200
+                                                                                           [])})]
                     (assert.are.equal 0 r.code))))
             (it "prints the request with redacted credentials for --dry-run"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "GET"
-                                      "/pets"
-                                      "--profile=p"
-                                      "--dry-run"])]
+                  (let [r (ezu-run ["http"
+                                    "GET"
+                                    "/pets"
+                                    "--profile=p"
+                                    "--dry-run"])]
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.out:find "GET https://api.test/pets" 1
                                                   true))
@@ -1910,53 +1872,52 @@ does, which a streaming transport hands over one by one."
             (it "maps HTTP errors to exit codes"
                 (fn []
                   (assert.are.equal 4
-                                    (. (atlas-run ["http"
-                                                   "https://h.test/none"])
+                                    (. (ezu-run ["http" "https://h.test/none"])
                                        :code))))
             (it "refuses options that need a spec, and extra arguments"
                 (fn []
-                  (let [r (atlas-run ["http" "GET" "https://h.test/" "--list"])]
+                  (let [r (ezu-run ["http" "GET" "https://h.test/" "--list"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "doesn't apply to http" 1
                                                   true)))
-                  (let [r (atlas-run ["http" "GET" "https://h.test/" "extra"])]
+                  (let [r (ezu-run ["http" "GET" "https://h.test/" "extra"])]
                     (assert.are.equal 1 r.code)
-                    (assert.is_truthy (r.err:find "Usage: atlas http" 1 true)))
-                  (let [r (atlas-run ["http"])]
+                    (assert.is_truthy (r.err:find "Usage: ezu http" 1 true)))
+                  (let [r (ezu-run ["http"])]
                     (assert.are.equal 1 r.code)
-                    (assert.is_truthy (r.err:find "Usage: atlas http" 1 true)))))
+                    (assert.is_truthy (r.err:find "Usage: ezu http" 1 true)))))
             (it "checks --select before sending"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "POST"
-                                      "https://h.test/x"
-                                      "--select=.a[?b=1]"])]
+                  (let [r (ezu-run ["http"
+                                    "POST"
+                                    "https://h.test/x"
+                                    "--select=.a[?b=1]"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "invalid filter" 1 true))
                     (assert.are.equal 0 (length r.requests)))))
             (it "prints usage for --help without sending"
                 (fn []
-                  (let [r (atlas-run ["http" "GET" "https://h.test/" "--help"])]
+                  (let [r (ezu-run ["http" "GET" "https://h.test/" "--help"])]
                     (assert.are.equal 0 r.code)
                     (assert.is_truthy (r.out:find "Options (http):" 1 true))
                     (assert.are.equal 0 (length r.requests)))))
             (it "needs a URL after a method, and takes only valid methods"
                 (fn []
-                  (let [r (atlas-run ["http" "DELETE" "--profile=p"])]
+                  (let [r (ezu-run ["http" "DELETE" "--profile=p"])]
                     (assert.are.equal 1 r.code)
-                    (assert.is_truthy (r.err:find "Usage: atlas http" 1 true))
+                    (assert.is_truthy (r.err:find "Usage: ezu http" 1 true))
                     (assert.are.equal 0 (length r.requests)))
-                  (let [r (atlas-run ["http"
-                                      "/a"
-                                      "/b"
-                                      "--base-url=https://h.test"])]
+                  (let [r (ezu-run ["http"
+                                    "/a"
+                                    "/b"
+                                    "--base-url=https://h.test"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "invalid HTTP method: /a" 1
                                                   true))
                     (assert.are.equal 0 (length r.requests)))))
             (it "fails on a profile it doesn't know"
                 (fn []
-                  (let [r (atlas-run ["http" "/x" "--profile=nope"])]
+                  (let [r (ezu-run ["http" "/x" "--profile=nope"])]
                     (assert.are.equal 1 r.code)
                     (assert.is_truthy (r.err:find "Profile not found: nope" 1
                                                   true)))))))
@@ -1966,9 +1927,9 @@ does, which a streaming transport hands over one by one."
         "io.modelcontextprotocol/clientCapabilities" {}})
 
 (fn mcp-run [args messages ?routes]
-  "Run atlas mcp in-process, reading messages (tables) as its input; returns
+  "Run ezu mcp in-process, reading messages (tables) as its input; returns
 {:code :responses :out :err :requests}."
-  (let [json (require :atlas.json)
+  (let [json (require :ezu.json)
         (transport requests) (routes-transport (or ?routes {}))
         lines (icollect [_ m (ipairs messages)]
                 (json.encode m))
@@ -2014,7 +1975,7 @@ does, which a streaming transport hands over one by one."
                    :method "tools/list"
                    :params {:_meta mcp-meta}})
 
-(describe "atlas mcp"
+(describe "ezu mcp"
           (fn []
             (it "offers the read-only operations as tools"
                 (fn []
@@ -2115,7 +2076,7 @@ does, which a streaming transport hands over one by one."
                     (assert.are.equal 0 (length r.requests)))))
             (it "warns when it offers more tools than clients handle well"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         spec (.. (os.tmpname) ".json")
                         paths (collect [_ i (ipairs (fcollect [i 1 101] i))]
                                 (.. "/r" i)
@@ -2166,7 +2127,7 @@ does, which a streaming transport hands over one by one."
                     (assert.are.equal 2 (length r.requests))
                     ;; a failing workflow is a tool error
                     (assert.is_true (. r.responses 3 :result :isError)))))
-            (it "checks body and parameter values, and hides atlas's internals"
+            (it "checks body and parameter values, and hides ezu's internals"
                 (fn []
                   (let [r (mcp-run ["mcp" "p" "--allow-writes" "--retry=0"]
                                    [(call 2 "add-pet" {:body "Rex"})
@@ -2199,7 +2160,7 @@ does, which a streaming transport hands over one by one."
                                            :text))))))
             (it "refuses two workflows that make the same tool name"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         file (.. (os.tmpname) ".json")]
                     (with-open [f (io.open file :w)]
                       (f:write (json.encode {:arazzo "1.0.0"
@@ -2218,15 +2179,15 @@ does, which a streaming transport hands over one by one."
                 (fn []
                   (let [r (mcp-run ["mcp"] [])]
                     (assert.are.equal 1 r.code)
-                    (assert.is_truthy (r.err:find "Usage: atlas mcp" 1 true)))
+                    (assert.is_truthy (r.err:find "Usage: ezu mcp" 1 true)))
                   (let [r (mcp-run ["mcp" "p" "extra"] [])]
                     (assert.are.equal 1 r.code)
-                    (assert.is_truthy (r.err:find "Usage: atlas mcp" 1 true)))
+                    (assert.is_truthy (r.err:find "Usage: ezu mcp" 1 true)))
                   (let [r (mcp-run ["mcp" "p" "--dry-run"] [])]
                     (assert.are.equal 1 r.code))))))
 
 (fn fixture-spec []
-  (let [json (require :atlas.json)]
+  (let [json (require :ezu.json)]
     (with-open [f (io.open "test/fixtures/cli-api.json")]
       (json.decode (f:read :*a)))))
 
@@ -2238,41 +2199,40 @@ does, which a streaming transport hands over one by one."
             (it "follows the base URL's Link rel=service-desc"
                 (fn []
                   (with-config (discovering "https://d1.test/v1")
-                    #(let [r (atlas-run ["op" "d" "list-pets"]
-                                        {"GET https://d1.test/v1" (respond 200
-                                                                           {}
-                                                                           {:link "</specs/api.json>; rel=\"service-desc\""})
-                                         "GET https://d1.test/specs/api.json" (respond 200
-                                                                                       (fixture-spec))
-                                         "GET https://d1.test/v1/pets" (respond 200
-                                                                                [])})]
+                    #(let [r (ezu-run ["op" "d" "list-pets"]
+                                      {"GET https://d1.test/v1" (respond 200 {}
+                                                                         {:link "</specs/api.json>; rel=\"service-desc\""})
+                                       "GET https://d1.test/specs/api.json" (respond 200
+                                                                                     (fixture-spec))
+                                       "GET https://d1.test/v1/pets" (respond 200
+                                                                              [])})]
                        (assert.are.equal 0 r.code)
                        (assert.are.equal "https://d1.test/v1/pets"
                                          (. r.requests (length r.requests) :url))))))
             (it "tries openapi.json and openapi.yaml under the base URL"
                 (fn []
                   (with-config (discovering "https://d2.test/v1/")
-                    #(let [r (atlas-run ["op" "d" "--list"]
-                                        {"GET https://d2.test/v1/openapi.yaml" (respond 200
-                                                                                        (fixture-spec))})]
+                    #(let [r (ezu-run ["op" "d" "--list"]
+                                      {"GET https://d2.test/v1/openapi.yaml" (respond 200
+                                                                                      (fixture-spec))})]
                        (assert.are.equal 0 r.code)
                        (assert.is_truthy (r.out:find "list-pets" 1 true))))))
             (it "takes the base URL's own body when it is the spec"
                 (fn []
                   (with-config (discovering "https://d3.test")
-                    #(let [r (atlas-run ["op" "d" "--list"]
-                                        {"GET https://d3.test" (respond 200
-                                                                        (fixture-spec))})]
+                    #(let [r (ezu-run ["op" "d" "--list"]
+                                      {"GET https://d3.test" (respond 200
+                                                                      (fixture-spec))})]
                        (assert.are.equal 0 r.code)
                        (assert.is_truthy (r.out:find "list-pets" 1 true))))))
             (it "follows links to the base URL's origin only"
                 (fn []
                   (with-config (discovering "https://d4.test")
-                    #(let [r (atlas-run ["op" "d" "--list"]
-                                        {"GET https://d4.test" (respond 200 {}
-                                                                        {:link "<https://evil.test/spec.json>; rel=\"service-desc\""})
-                                         "GET https://evil.test/spec.json" (respond 200
-                                                                                    (fixture-spec))})]
+                    #(let [r (ezu-run ["op" "d" "--list"]
+                                      {"GET https://d4.test" (respond 200 {}
+                                                                      {:link "<https://evil.test/spec.json>; rel=\"service-desc\""})
+                                       "GET https://evil.test/spec.json" (respond 200
+                                                                                  (fixture-spec))})]
                        (assert.are.equal 1 r.code)
                        (each [_ req (ipairs r.requests)]
                          (assert.is_nil (req.url:find "evil.test" 1 true)))))))
@@ -2281,34 +2241,34 @@ does, which a streaming transport hands over one by one."
                   (with-config (discovering "https://d5.test"
                                             {:name "bearer"
                                              :params {:token "t0k"}})
-                    #(let [r (atlas-run ["op" "d" "--list"]
-                                        {"GET https://d5.test" (fn [req]
-                                                                 (if (= (?. req
-                                                                            :headers
-                                                                            :authorization)
-                                                                        "Bearer t0k")
-                                                                     (respond 200
-                                                                              {}
-                                                                              {:link "</openapi>; rel=\"service-desc\""})
-                                                                     (respond 401
-                                                                              {})))
-                                         "GET https://d5.test/openapi" (respond 200
-                                                                                (fixture-spec))})]
+                    #(let [r (ezu-run ["op" "d" "--list"]
+                                      {"GET https://d5.test" (fn [req]
+                                                               (if (= (?. req
+                                                                          :headers
+                                                                          :authorization)
+                                                                      "Bearer t0k")
+                                                                   (respond 200
+                                                                            {}
+                                                                            {:link "</openapi>; rel=\"service-desc\""})
+                                                                   (respond 401
+                                                                            {})))
+                                       "GET https://d5.test/openapi" (respond 200
+                                                                              (fixture-spec))})]
                        (assert.are.equal 0 r.code)))))
             (it "remembers where it found the spec"
                 (fn []
                   (with-config (discovering "https://d6.test")
                     #(let [routes {"GET https://d6.test/openapi.json" (respond 200
                                                                                (fixture-spec))}
-                           first (atlas-run ["op" "d" "--list"] routes)
-                           again (atlas-run ["op" "d" "--list"] routes)]
+                           first (ezu-run ["op" "d" "--list"] routes)
+                           again (ezu-run ["op" "d" "--list"] routes)]
                        (assert.are.equal 0 first.code)
                        (assert.are.equal 0 again.code)
                        (assert.are.equal 0 (length again.requests))))))
             (it "says where it looked when it finds nothing"
                 (fn []
                   (with-config (discovering "https://d7.test/api")
-                    #(let [r (atlas-run ["op" "d" "--list"])]
+                    #(let [r (ezu-run ["op" "d" "--list"])]
                        (assert.are.equal 1 r.code)
                        (assert.is_truthy (r.err:find "no OpenAPI description found for https://d7.test/api"
                                                      1 true))
@@ -2318,76 +2278,73 @@ does, which a streaming transport hands over one by one."
           (fn []
             (it "prints server-sent events as they come"
                 (fn []
-                  (let [r (atlas-run ["http" "https://h.test/events"]
-                                     {"GET https://h.test/events" (respond-text 200
-                                                                                "text/event-stream"
-                                                                                ["data: {\"n\":1}\n"
-                                                                                 "\nevent: x\r\ndata: {\"n\":2}\r\n\r\n"
-                                                                                 ": keep-alive\n\n"
-                                                                                 "data: plain\ndata: text\n\n"
-                                                                                 "data: \"s\"\n\n"])})]
+                  (let [r (ezu-run ["http" "https://h.test/events"]
+                                   {"GET https://h.test/events" (respond-text 200
+                                                                              "text/event-stream"
+                                                                              ["data: {\"n\":1}\n"
+                                                                               "\nevent: x\r\ndata: {\"n\":2}\r\n\r\n"
+                                                                               ": keep-alive\n\n"
+                                                                               "data: plain\ndata: text\n\n"
+                                                                               "data: \"s\"\n\n"])})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "{\"n\":1}\n{\"n\":2}\nplain\ntext\n\"s\""
                                       r.out)
                     (assert.are.equal "" r.err))))
             (it "selects in each record"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "https://h.test/events"
-                                      "--select=.n"]
-                                     {"GET https://h.test/events" (respond-text 200
-                                                                                "text/event-stream"
-                                                                                ["data: {\"n\":1}\n\n"
-                                                                                 "data: {\"m\":2}\n\n"
-                                                                                 "data: {\"n\":3}\n\n"])})]
+                  (let [r (ezu-run ["http"
+                                    "https://h.test/events"
+                                    "--select=.n"]
+                                   {"GET https://h.test/events" (respond-text 200
+                                                                              "text/event-stream"
+                                                                              ["data: {\"n\":1}\n\n"
+                                                                               "data: {\"m\":2}\n\n"
+                                                                               "data: {\"n\":3}\n\n"])})]
                     (assert.are.equal "1\n3" r.out))))
             (it "prints JSON Lines records as they come"
                 (fn []
-                  (let [r (atlas-run ["http" "https://h.test/lines"]
-                                     {"GET https://h.test/lines" (respond-text 200
-                                                                               "application/x-ndjson"
-                                                                               ["{\"a\":1}\n{\"a\""
-                                                                                ":2}\n\n{\"a\":3}"])})]
+                  (let [r (ezu-run ["http" "https://h.test/lines"]
+                                   {"GET https://h.test/lines" (respond-text 200
+                                                                             "application/x-ndjson"
+                                                                             ["{\"a\":1}\n{\"a\""
+                                                                              ":2}\n\n{\"a\":3}"])})]
                     (assert.are.equal "{\"a\":1}\n{\"a\":2}\n{\"a\":3}" r.out))))
             (it "writes any body as it comes with --output=raw"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "https://h.test/file"
-                                      "--output=raw"]
-                                     {"GET https://h.test/file" (respond-text 200
-                                                                              "application/octet-stream"
-                                                                              ["ab"
-                                                                               "\0c"
-                                                                               "d"])})]
+                  (let [r (ezu-run ["http"
+                                    "https://h.test/file"
+                                    "--output=raw"]
+                                   {"GET https://h.test/file" (respond-text 200
+                                                                            "application/octet-stream"
+                                                                            ["ab"
+                                                                             "\0c"
+                                                                             "d"])})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "ab\0cd" r.out))))
             (it "still merges the pages of a JSON array with --output=raw"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "https://h.test/list"
-                                      "--output=raw"]
-                                     {"GET https://h.test/list" (respond 200
-                                                                         [1]
-                                                                         {:content-type "application/json"
-                                                                          :link "<https://h.test/list?page=2>; rel=\"next\""})
-                                      "GET https://h.test/list?page=2" (respond 200
-                                                                                [2])})]
+                  (let [r (ezu-run ["http"
+                                    "https://h.test/list"
+                                    "--output=raw"]
+                                   {"GET https://h.test/list" (respond 200 [1]
+                                                                       {:content-type "application/json"
+                                                                        :link "<https://h.test/list?page=2>; rel=\"next\""})
+                                    "GET https://h.test/list?page=2" (respond 200
+                                                                              [2])})]
                     (assert.are.equal 0 r.code)
                     (assert.are.equal "[1,2]" r.out))))
             (it "leaves error responses to the usual reporting"
                 (fn []
-                  (let [r (atlas-run ["http"
-                                      "https://h.test/events"
-                                      "--retry=0"]
-                                     {"GET https://h.test/events" (respond-text 503
-                                                                                "text/event-stream"
-                                                                                ["data: down\n\n"])})]
+                  (let [r (ezu-run ["http" "https://h.test/events" "--retry=0"]
+                                   {"GET https://h.test/events" (respond-text 503
+                                                                              "text/event-stream"
+                                                                              ["data: down\n\n"])})]
                     (assert.are.equal 5 r.code)
                     (assert.are.equal "" r.out)
                     (assert.is_truthy (r.err:find "HTTP 503" 1 true)))))
             (it "streams the responses of operations too"
                 (fn []
-                  (let [json (require :atlas.json)
+                  (let [json (require :ezu.json)
                         spec (.. (os.tmpname) ".json")]
                     (with-open [f (io.open spec :w)]
                       (f:write (json.encode {:openapi "3.1.0"
@@ -2396,10 +2353,10 @@ does, which a streaming transport hands over one by one."
                                              :paths {"/events" {:get {:operationId "events"
                                                                       :responses {:200 {:description "ok"
                                                                                         :content {:text/event-stream {}}}}}}}})))
-                    (let [r (atlas-run ["op" spec "events"]
-                                       {"GET https://h.test/events" (respond-text 200
-                                                                                  "text/event-stream"
-                                                                                  ["data: 1\n\n"])})]
+                    (let [r (ezu-run ["op" spec "events"]
+                                     {"GET https://h.test/events" (respond-text 200
+                                                                                "text/event-stream"
+                                                                                ["data: 1\n\n"])})]
                       (os.remove spec)
                       (assert.are.equal 0 r.code)
                       (assert.are.equal "1" r.out)))))))
@@ -2409,9 +2366,9 @@ does, which a streaming transport hands over one by one."
             (it "redacts the base URL and says what each place answered"
                 (fn []
                   (with-config (discovering "https://bob:hunter2@d8.test/q?api_key=topsecret")
-                    #(let [r (atlas-run ["op" "d" "--list"]
-                                        {"GET https://bob:hunter2@d8.test/q/openapi.json?api_key=topsecret" (respond 403
-                                                                                                                     {})})]
+                    #(let [r (ezu-run ["op" "d" "--list"]
+                                      {"GET https://bob:hunter2@d8.test/q/openapi.json?api_key=topsecret" (respond 403
+                                                                                                                   {})})]
                        (assert.are.equal 1 r.code)
                        (assert.is_nil (r.err:find "hunter2" 1 true))
                        (assert.is_nil (r.err:find "topsecret" 1 true))
@@ -2419,55 +2376,55 @@ does, which a streaming transport hands over one by one."
             (it "puts the file name before the base URL's query"
                 (fn []
                   (with-config (discovering "https://d9.test/v1?k=1")
-                    #(let [r (atlas-run ["op" "d" "--list"]
-                                        {"GET https://d9.test/v1/openapi.json?k=1" (respond 200
-                                                                                            (fixture-spec))})]
+                    #(let [r (ezu-run ["op" "d" "--list"]
+                                      {"GET https://d9.test/v1/openapi.json?k=1" (respond 200
+                                                                                          (fixture-spec))})]
                        (assert.are.equal 0 r.code)))))
             (it "doesn't cache what isn't a spec"
                 (fn []
                   (with-config (discovering "https://d10.test/api")
-                    #(let [first (atlas-run ["op" "d" "--list"]
-                                            {"GET https://d10.test/api/openapi.json" (respond 200
-                                                                                              {:error "nothing"})})
-                           again (atlas-run ["op" "d" "--list"]
-                                            {"GET https://d10.test/api/openapi.json" (respond 200
-                                                                                              (fixture-spec))})]
+                    #(let [first (ezu-run ["op" "d" "--list"]
+                                          {"GET https://d10.test/api/openapi.json" (respond 200
+                                                                                            {:error "nothing"})})
+                           again (ezu-run ["op" "d" "--list"]
+                                          {"GET https://d10.test/api/openapi.json" (respond 200
+                                                                                            (fixture-spec))})]
                        (assert.are.equal 1 first.code)
                        (assert.are.equal 0 again.code)))))
             (it "fetches the spec it found once"
                 (fn []
                   (with-config (discovering "https://d11.test")
-                    #(let [r (atlas-run ["op" "d" "--list" "--reload"]
-                                        {"GET https://d11.test/openapi.json" (respond 200
-                                                                                      (fixture-spec))})]
+                    #(let [r (ezu-run ["op" "d" "--list" "--reload"]
+                                      {"GET https://d11.test/openapi.json" (respond 200
+                                                                                    (fixture-spec))})]
                        (assert.are.equal 0 r.code)
                        ;; the base URL's Link header, then the spec
                        (assert.are.equal 2 (length r.requests))))))
             (it "looks again when the spec it remembered is gone"
                 (fn []
                   (with-config (discovering "https://d12.test")
-                    #(let [first (atlas-run ["op" "d" "--list"]
-                                            {"GET https://d12.test/openapi.json" (respond 200
-                                                                                          (fixture-spec))})
-                           cache (require :atlas.cache)
+                    #(let [first (ezu-run ["op" "d" "--list"]
+                                          {"GET https://d12.test/openapi.json" (respond 200
+                                                                                        (fixture-spec))})
+                           cache (require :ezu.cache)
                            _ (cache.put "https://d12.test/openapi.json" nil)
-                           again (atlas-run ["op" "d" "--list"]
-                                            {"GET https://d12.test/openapi.yaml" (respond 200
-                                                                                          (fixture-spec))})]
+                           again (ezu-run ["op" "d" "--list"]
+                                          {"GET https://d12.test/openapi.yaml" (respond 200
+                                                                                        (fixture-spec))})]
                        (assert.are.equal 0 first.code)
                        (assert.are.equal 0 again.code)))))
             (it "also tries the origin's root under a base path"
                 (fn []
                   (with-config (discovering "https://d13.test/v2/ops")
-                    #(let [r (atlas-run ["op" "d" "--list"]
-                                        {"GET https://d13.test/openapi.json" (respond 200
-                                                                                      (fixture-spec))})]
+                    #(let [r (ezu-run ["op" "d" "--list"]
+                                      {"GET https://d13.test/openapi.json" (respond 200
+                                                                                    (fixture-spec))})]
                        (assert.are.equal 0 r.code)))))))
 
 (fn closed-stdout-run [args routes]
-  "atlas-run with a stdout whose reader went away."
+  "ezu-run with a stdout whose reader went away."
   (set stdout-closed true)
-  (let [(ok r) (pcall atlas-run args routes)]
+  (let [(ok r) (pcall ezu-run args routes)]
     (set stdout-closed false)
     (assert ok r)
     r))
@@ -2486,28 +2443,28 @@ does, which a streaming transport hands over one by one."
                     (assert.are.equal "" r.err))))
             (it "keeps a CRLF split between pieces together"
                 (fn []
-                  (let [r (atlas-run ["http" "https://h.test/events"]
-                                     {"GET https://h.test/events" (respond-text 200
-                                                                                "text/event-stream"
-                                                                                ["data: {\"a\":\r"
-                                                                                 "\ndata: 1}\r"
-                                                                                 "\n\r\n"])})]
+                  (let [r (ezu-run ["http" "https://h.test/events"]
+                                   {"GET https://h.test/events" (respond-text 200
+                                                                              "text/event-stream"
+                                                                              ["data: {\"a\":\r"
+                                                                               "\ndata: 1}\r"
+                                                                               "\n\r\n"])})]
                     (assert.are.equal "{\"a\": 1}" r.out))))
             (it "reads events as the event stream format has them"
                 (fn []
-                  (let [r (atlas-run ["http" "https://h.test/events"]
-                                     {"GET https://h.test/events" (respond-text 200
-                                                                                "text/event-stream"
-                                                                                ["\239\187\191data: first\n\n"
-                                                                                 "data\ndata: x\n\n"
-                                                                                 "data: unfinished"])})]
+                  (let [r (ezu-run ["http" "https://h.test/events"]
+                                   {"GET https://h.test/events" (respond-text 200
+                                                                              "text/event-stream"
+                                                                              ["\239\187\191data: first\n\n"
+                                                                               "data\ndata: x\n\n"
+                                                                               "data: unfinished"])})]
                     (assert.are.equal "first\n\nx" r.out))))
             (it "prints records as they came, without a selection"
                 (fn []
-                  (let [r (atlas-run ["http" "https://h.test/lines"]
-                                     {"GET https://h.test/lines" (respond-text 200
-                                                                               "application/x-ndjson"
-                                                                               ["{\"b\":1,\"a\":2.50,\"big\":12345678901234567890}\n"])})]
+                  (let [r (ezu-run ["http" "https://h.test/lines"]
+                                   {"GET https://h.test/lines" (respond-text 200
+                                                                             "application/x-ndjson"
+                                                                             ["{\"b\":1,\"a\":2.50,\"big\":12345678901234567890}\n"])})]
                     (assert.are.equal "{\"b\":1,\"a\":2.50,\"big\":12345678901234567890}"
                                       r.out))))
             (it "leaves formats that need the whole body to it"
@@ -2516,16 +2473,16 @@ does, which a streaming transport hands over one by one."
                                                                          "application/x-ndjson"
                                                                          ["{\"a\":1}\n{\"a\":2}\n"])}]
                     (assert.are.equal "200"
-                                      (. (atlas-run ["http"
-                                                     "https://h.test/lines"
-                                                     "--output=status"]
-                                                    routes)
+                                      (. (ezu-run ["http"
+                                                   "https://h.test/lines"
+                                                   "--output=status"]
+                                                  routes)
                                          :out))
                     (assert.are.equal "a\n1\n2"
-                                      (. (atlas-run ["http"
-                                                     "https://h.test/lines"
-                                                     "--output=csv"]
-                                                    routes)
+                                      (. (ezu-run ["http"
+                                                   "https://h.test/lines"
+                                                   "--output=csv"]
+                                                  routes)
                                          :out)))))
             (it "streams raw output only for bodies it needn't read"
                 (fn []
@@ -2534,25 +2491,24 @@ does, which a streaming transport hands over one by one."
                                  :raw "[1]"
                                  :body [1]
                                  :pieces ["[1]"]}
-                        r (atlas-run ["http" "https://h.test/u" "--output=raw"]
-                                     {"GET https://h.test/u" untyped
-                                      "GET https://h.test/u?p=2" (respond 200
-                                                                          [2])})]
+                        r (ezu-run ["http" "https://h.test/u" "--output=raw"]
+                                   {"GET https://h.test/u" untyped
+                                    "GET https://h.test/u?p=2" (respond 200 [2])})]
                     (assert.are.equal "[1,2]" r.out))
-                  (let [r (atlas-run ["http"
-                                      "https://h.test/y"
-                                      "--output=raw"
-                                      "--select=.a"]
-                                     {"GET https://h.test/y" (respond-text 200
-                                                                           "text/plain"
-                                                                           ["plain"])})]
+                  (let [r (ezu-run ["http"
+                                    "https://h.test/y"
+                                    "--output=raw"
+                                    "--select=.a"]
+                                   {"GET https://h.test/y" (respond-text 200
+                                                                         "text/plain"
+                                                                         ["plain"])})]
                     (assert.are.equal 0 r.code))))
             (it "shows the status and headers before the stream with -v"
                 (fn []
-                  (let [r (atlas-run ["http" "https://h.test/events" "-v"]
-                                     {"GET https://h.test/events" (respond-text 200
-                                                                                "text/event-stream"
-                                                                                ["data: 1\n\n"])})]
+                  (let [r (ezu-run ["http" "https://h.test/events" "-v"]
+                                   {"GET https://h.test/events" (respond-text 200
+                                                                              "text/event-stream"
+                                                                              ["data: 1\n\n"])})]
                     (assert.are.equal "1" r.out)
                     (let [(_ n) (r.err:gsub "HTTP 200" "")]
                       (assert.are.equal 1 n)))))))

@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for content negotiation header selection.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local negotiate (require :atlas.negotiate))
+(local negotiate (require :ezu.negotiate))
 
 (describe "pick-content-type"
           (fn []

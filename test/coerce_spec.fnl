@@ -1,6 +1,6 @@
 ;; ABOUTME: Specs for schema-guided conversion of command-line values.
 ;; ABOUTME: Run with `make test` (busted, Fennel loader).
-(local coerce (require :atlas.coerce))
+(local coerce (require :ezu.coerce))
 
 (describe "coerce.from-string with schema"
           (fn []

@@ -1,0 +1,146 @@
+;; ABOUTME: Renders human-readable help for an operation; the library form is
+;; ABOUTME: each op's REPL docstring, and the CLI reuses render for its --help.
+(local json (require :ezu.json))
+(local util (require :ezu.util))
+(local negotiate (require :ezu.negotiate))
+
+(fn params-of-kind [op-spec kind]
+  (icollect [_ p (ipairs (or op-spec.parameters []))]
+    (when (= p.in kind) p)))
+
+(fn template-path-params [path op-spec]
+  "Path params in URL template order, with declared details where present."
+  (let [declared (collect [_ p (ipairs (params-of-kind op-spec :path))]
+                   p.name
+                   p)]
+    (icollect [_ name (ipairs (util.extract-path-params path))]
+      (or (. declared name) {:name name :in "path"}))))
+
+(fn type-name [schema]
+  "A schema's type for help: \"string\", \"string | null\" (OpenAPI 3.1 type
+arrays), or \"any\"."
+  (let [t (when (= (type schema) :table) schema.type)]
+    (if (= (type t) :table) (table.concat t " | ") (or t :any))))
+
+(fn param-type [p]
+  (type-name p.schema))
+
+(fn param-extras [p required?]
+  (let [parts [] ;; OpenAPI 3.1 schemas may be booleans
+        schema (if (= (type p.schema) :table) p.schema {})]
+    (when required? (table.insert parts "[required]"))
+    (when schema.enum
+      (table.insert parts (.. "["
+                              (table.concat (icollect [_ v (ipairs schema.enum)]
+                                              (tostring v))
+                                            "|")
+                              "]")))
+    (when (not= nil schema.default)
+      (table.insert parts (.. "(default: "
+                              (if (= (type schema.default) :table)
+                                  (json.encode schema.default)
+                                  (tostring schema.default))
+                              ")")))
+    (when p.description
+      (table.insert parts (.. "— " p.description)))
+    (if (> (length parts) 0) (.. " " (table.concat parts " ")) "")))
+
+(fn sorted-keys [t]
+  (doto (icollect [k (pairs t)] (tostring k))
+    (table.sort)))
+
+(fn body-schema [request-body]
+  (let [content request-body.content
+        media-type (negotiate.pick-media-type content)
+        schema (when media-type (?. content media-type :schema))]
+    (when (and (= (type schema) :table) schema.properties)
+      (let [required-set {}]
+        (each [_ r (ipairs (util.required-names schema))]
+          (tset required-set r true))
+        {:properties schema.properties :required required-set}))))
+
+(fn render [path method op-spec style ?name]
+  "Help text for an operation named ?name (by default, after its operationId);
+style supplies the usage line, the query params heading and an optional body
+hint, which differ between CLI and library."
+  (let [lines []
+        add #(table.insert lines $)
+        path-params (template-path-params path op-spec)
+        query-params (params-of-kind op-spec :query)
+        param-line #(string.format "  %-16s %s%s" $1.name (param-type $1)
+                                   (param-extras $1 $2))]
+    (add (string.format "%s %s" (method:upper) path))
+    (let [s (when (and op-spec.summary (not= op-spec.summary ""))
+              op-spec.summary)
+          d (when (and op-spec.description (not= op-spec.description "")
+                       (not= op-spec.description op-spec.summary))
+              op-spec.description)]
+      (when s (add (.. "\n" s)))
+      (when d (add d)))
+    (add (.. "\nUsage: "
+             (style.usage (or ?name (util.operation-name method path op-spec))
+                          op-spec path-params query-params)))
+    (when (> (length path-params) 0)
+      (add "\nPath params:")
+      (each [_ p (ipairs path-params)]
+        (add (param-line p true))))
+    (when (> (length query-params) 0)
+      (add (.. "\n" style.query-heading))
+      (each [_ p (ipairs query-params)]
+        (add (param-line p p.required))))
+    (when op-spec.requestBody
+      (let [rb op-spec.requestBody
+            bschema (body-schema rb)]
+        (add (string.format "\nBody: %s%s" (if rb.required :required :optional)
+                            (if rb.description (.. " — " rb.description) "")))
+        (when style.body-hint (add style.body-hint))
+        (when bschema
+          (each [_ name (ipairs (sorted-keys bschema.properties))]
+            (local prop (. bschema.properties name))
+            (add (string.format "  %-16s %s%s%s" name (type-name prop)
+                                (if (. bschema.required name) " [required]" "")
+                                (if (and (= (type prop) :table)
+                                         prop.description)
+                                    (.. " — " prop.description)
+                                    "")))))))
+    (add "\nResponses:")
+    (let [responses (or op-spec.responses {})]
+      (each [_ code (ipairs (sorted-keys responses))]
+        (when (negotiate.response-code? code)
+          (add (string.format "  %-6s %s" code
+                              (or (. responses code :description) ""))))))
+    (table.concat lines "\n")))
+
+(fn invoke-usage [name op-spec path-params query-params]
+  (let [parts []]
+    (when (> (length path-params) 0)
+      (table.insert parts (.. ":path {"
+                              (table.concat (icollect [_ p (ipairs path-params)]
+                                              (.. ":" p.name " …"))
+                                            " ")
+                              "}")))
+    (when op-spec.requestBody (table.insert parts ":body …"))
+    (when (> (length query-params) 0) (table.insert parts ":query {…}"))
+    (if (> (length parts) 0)
+        (string.format "(%s.invoke {%s})" name (table.concat parts " "))
+        (string.format "(%s.invoke)" name))))
+
+(fn positional-usage [name op-spec path-params query-params]
+  (let [sig (icollect [_ p (ipairs path-params)] p.name)]
+    (when op-spec.requestBody (table.insert sig :body))
+    (when (> (length query-params) 0) (table.insert sig :?opts))
+    (if (> (length sig) 0)
+        (string.format "(%s %s)" name (table.concat sig " "))
+        (string.format "(%s)" name))))
+
+(local library-style
+       {:usage (fn [name op-spec path-params query-params]
+                 (.. (invoke-usage name op-spec path-params query-params)
+                     "\n       "
+                     (positional-usage name op-spec path-params query-params)))
+        :query-heading "Query params (via {:query {...}}):"})
+
+(fn build [path method op-spec ?name]
+  (render path method op-spec library-style ?name))
+
+{: build : render : param-extras : type-name}
