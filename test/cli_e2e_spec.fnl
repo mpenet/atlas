@@ -847,7 +847,8 @@ does, which a streaming transport hands over one by one."
                          {:x "$steps.nope.outputs.y"})
                     (with-open [f (io.open file :w)]
                       (f:write (json.encode flow)))
-                    (let [r (atlas-run ["az" file "--check"])]
+                    (let [r (atlas-run ["az" file "--check"])
+                          one (atlas-run ["az" file "fetchPet" "--check"])]
                       (os.remove file)
                       (assert.are.equal 1 r.code)
                       (assert.are.equal 0 (length r.requests))
@@ -856,7 +857,12 @@ does, which a streaming transport hands over one by one."
                                         r.out)
                       (assert.is_truthy (r.out:find "unknown step 'nope'" 1
                                                     true))
-                      (assert.is_truthy (r.out:find "2 errors" 1 true) r.out)))))
+                      (assert.is_truthy (r.out:find "2 errors" 1 true) r.out)
+                      ;; a workflow's own problems, its steps' included
+                      (assert.are.equal 1 one.code)
+                      (assert.is_truthy (one.out:find "step get: operation not found"
+                                                      1 true)
+                                        one.out)))))
             (it "fails with exit 1 when a step fails"
                 (fn []
                   (let [r (atlas-run ["az" "flows" "fetchPet" "-i" "id=7"])]

@@ -106,7 +106,7 @@ $ atlas az flows.yaml --check
 2 errors, 1 warning
 ```
 
-It finds steps calling operations or workflows that don't exist; required parameters left out and parameters the operation doesn't declare (a warning); a body missing or not expected; references to steps, outputs, inputs, workflows, sources and components that don't exist; runtime expressions atlas doesn't know; conditions, regular expressions and JSONPath queries that can't be evaluated (unless they embed `{$expressions}`, only known when running); actions going to unknown steps or workflows. With a workflow id, it reports that workflow's problems only. atlas exits 1 when it finds an error, 0 otherwise.
+It finds steps calling operations or workflows that don't exist; required parameters left out and parameters the operation doesn't declare (a warning); a body missing or not expected; references to steps, outputs, inputs, workflows, sources and components that don't exist; runtime expressions atlas doesn't know; conditions, regular expressions and JSONPath queries that can't be evaluated (unless they embed `{$expressions}`, only known when running); actions going to unknown steps or workflows. Parameters the profile adds to every request (its headers, query and authentication) count as given; header names match whatever their case, and `Accept`, `Content-Type` and `Authorization` header parameters are left out, as OpenAPI says. Workflows of other Arazzo documents (`$sourceDescriptions.NAME.ID`) are reported, since atlas doesn't run them. With a workflow id, it reports that workflow's problems only, its steps' included. atlas exits 1 when it finds an error, 0 otherwise.
 
 ## Named workflow documents
 

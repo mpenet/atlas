@@ -200,6 +200,86 @@
                                                     clients)
                                        "step call: unknown workflow 'nope'"
                                        :error))))
+            (it "matches header parameters whatever their case, and leaves out the ones OpenAPI ignores"
+                (fn []
+                  (let [ops {:api {:get-pet (op "get-pet"
+                                                {:path-params ["id"]
+                                                 :parameters [{:name "id"
+                                                               :in "path"
+                                                               :required true}
+                                                              {:name "X-Trace"
+                                                               :in "header"
+                                                               :required true}
+                                                              {:name "Authorization"
+                                                               :in "header"
+                                                               :required true}
+                                                              {:name "Accept"
+                                                               :in "header"
+                                                               :required true}]})}}]
+                    (assert.are.same []
+                                     (messages (check.check (doc [(step {:parameters [{:name "id"
+                                                                                       :in "path"
+                                                                                       :value 1}
+                                                                                      {:name "x-trace"
+                                                                                       :in "header"
+                                                                                       :value "t"}]})])
+                                                            ops))))))
+            (it "counts the parameters the profile supplies"
+                (fn []
+                  (assert.are.same []
+                                   (messages (check.check (doc [(step {:parameters [{:name "id"
+                                                                                     :in "path"
+                                                                                     :value 1}]})])
+                                                          clients
+                                                          {:header {:x-trace true}
+                                                           :query {}})))))
+            (it "reports malformed documents instead of failing"
+                (fn []
+                  (each [_ [steps text] (ipairs [[[{:operationId "get-pet"}]
+                                                  "needs a stepId"]
+                                                 ["x" "steps must be a list"]
+                                                 [["hello"]
+                                                  "steps must be a list"]
+                                                 [[{:stepId "s" :workflowId 3}]
+                                                  "workflowId must be a string"]
+                                                 [[{:stepId "s"
+                                                    :operationPath 12}]
+                                                  "operationPath must be a string"]])]
+                    (let [(ok problems) (pcall check.check (doc steps) clients)]
+                      (assert.is_true ok (tostring problems))
+                      (assert.is_true (has problems text :error) text)))
+                  (let [(ok problems) (pcall check.check
+                                             (doc [get-pet] {:dependsOn [3]})
+                                             clients)]
+                    (assert.is_true ok (tostring problems))
+                    (assert.is_true (has problems
+                                         "dependsOn must list workflow ids"
+                                         :error)))))
+            (it "doesn't take text in quotes for expressions"
+                (fn []
+                  (assert.are.same []
+                                   (messages (check.check (doc [(step {:successCriteria [{:condition "$response.body#/note == 'costs $5'"}]})])
+                                                          clients)))))
+            (it "says that workflows of other documents aren't supported"
+                (fn []
+                  (let [problems (check.check (doc [{:stepId "call"
+                                                     :workflowId "$sourceDescriptions.other.ow"}]
+                                                   {:outputs {:x "$steps.call.outputs.res"}})
+                                              clients)]
+                    (assert.is_true (has problems
+                                         "workflows of other Arazzo documents are not supported"
+                                         :error))
+                    (assert.are.equal 1 (length (messages problems))))))
+            (it "reports a workflow's own actions once"
+                (fn []
+                  (let [problems (check.check (doc [get-pet
+                                                    (step {:stepId "again"})]
+                                                   {:failureActions [{:name "bad"
+                                                                      :type "goto"
+                                                                      :stepId "nope"}]})
+                                              clients)]
+                    (assert.are.same ["wf › failureActions bad: goto to unknown step 'nope'"]
+                                     (messages problems)))))
             (it "finds references to components that don't exist"
                 (fn []
                   (assert.is_true (has (check.check (doc [(step {:parameters [{:reference "$components.parameters.trace"}]})])

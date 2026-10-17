@@ -474,6 +474,12 @@ why, as Arazzo 1.1 requires; an unsupported type raises."
                 (.. "condition '" (tostring criterion.condition)
                     "' can't be evaluated: " (tostring result))))))
 
+(fn condition-expressions [condition]
+  "The runtime expressions of a simple condition, as written; raises when it
+can't be read."
+  (icollect [_ token (ipairs (tokenize condition))]
+    (when (= token.kind :expr) token.text)))
+
 (fn failing-criterion [ctx criteria]
   "The first of criteria that doesn't pass, or nil. Problems evaluating them
 go to ctx.warn."
@@ -532,6 +538,7 @@ value, or why it can't be evaluated."
  : eval-criterion
  : failing-criterion
  : explain-criterion
+ : condition-expressions
  : brief
  : cut
  : eval-criteria

@@ -304,13 +304,21 @@ built on first use."
 (fn check-document [{: doc : file &as context} p env]
   "Print what is wrong in the document, or in workflow p.operation, found
 without running it; exit 1 when something is."
-  (let [clients (let [(ok c) (pcall arazzo.build-clients doc
-                                    (run-options context p env) file)]
+  (let [opts (run-options context p env)
+        clients (let [(ok c) (pcall arazzo.build-clients doc opts file)]
                   (if ok c (die (tostring c))))
-        problems (icollect [_ problem (ipairs (arazzo-check.check doc clients))]
+        ;; what the profile adds to every request
+        supplied {:header (doto (collect [k (pairs (or opts.headers {}))]
+                                  (k:lower)
+                                  true)
+                            (#(each [_ n (ipairs (or opts.auth-header-names []))]
+                                (tset $ (n:lower) true))))
+                  :query (or opts.implied-query {})}
+        prefix (.. (or p.operation "") " ›")
+        problems (icollect [_ problem (ipairs (arazzo-check.check doc clients
+                                                                  supplied))]
                    (when (or (not p.operation) (= problem.where p.operation)
-                             (= (problem.where:sub 1 (+ (length p.operation) 3))
-                                (.. p.operation " ›")))
+                             (= (problem.where:sub 1 (length prefix)) prefix))
                      problem))
         count-of #(accumulate [n 0 _ problem (ipairs problems)]
                     (if (= problem.level $) (+ n 1) n))
