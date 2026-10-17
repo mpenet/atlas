@@ -10,7 +10,18 @@ ezu is one static binary of about 2 MB for macOS and Linux, with no runtime depe
 brew install mpenet/tap/ezu
 ```
 
-On macOS or Linux. The full name is needed: Homebrew's own `ezu` is another tool. The formula installs the release binary below, plus bash, zsh and fish completion; `brew upgrade` follows new releases.
+On macOS or Linux, from ezu's own tap. The formula installs the release binary below, plus bash, zsh and fish completion; `brew upgrade` follows new releases.
+
+## Debian, Ubuntu, Fedora, RHEL
+
+Each release has packages of the Linux binaries, with bash, zsh and fish completion, from the [releases page](https://github.com/mpenet/ezu/releases):
+
+```sh
+sudo apt install ./ezu_1.0.0~beta8_amd64.deb        # Debian, Ubuntu (arm64 too)
+sudo dnf install ./ezu-1.0.0~beta8-1.x86_64.rpm     # Fedora, RHEL (aarch64 too)
+```
+
+They come from no package repository, so updates are installed the same way; a pre-release like `1.0.0-beta8` is versioned `1.0.0~beta8`, which sorts before `1.0.0`.
 
 ## Standalone binary
 
@@ -27,7 +38,7 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 gh attestation verify ezu-macos-arm64 --repo mpenet/ezu
 ```
 
-The binary embeds Lua, luasocket, libcurl, mbedTLS and libyaml. The macOS binaries run on macOS 12 or later; the Linux binaries are fully static (built against musl), so they run on any distribution, old or new. HTTPS needs the system's CA certificates (the `ca-certificates` package on minimal Linux images); see [TLS and proxies](tls.md).
+The binary embeds Lua, luasocket, libcurl, mbedTLS and libyaml (`ezu --licenses` lists them all with their licenses). The macOS binaries run on macOS 12 or later; the Linux binaries are fully static (built against musl), so they run on any distribution, old or new. HTTPS needs the system's CA certificates (the `ca-certificates` package on minimal Linux images); see [TLS and proxies](tls.md).
 
 ## From source
 

@@ -110,12 +110,25 @@ jobs:
       - name: Third-party licenses
         run: cp THIRD-PARTY.md dist/
 
+      # .deb and .rpm of the Linux binaries; this runner is x86_64, so its
+      # binary writes the completions of both
+      - name: Debian and RPM packages
+        run: |
+          sudo apt-get install -y -qq rpm
+          chmod +x dist/ezu-linux-*
+          for arch in x86_64 arm64; do
+            COMPLETER=dist/ezu-linux-x86_64 tools/package.sh \
+              "dist/ezu-linux-$arch" "${GITHUB_REF_NAME#v}" "$arch" dist
+          done
+
       - name: Checksums
-        run: cd dist && sha256sum ezu-* THIRD-PARTY.md > SHA256SUMS && cat SHA256SUMS
+        run: cd dist && sha256sum ezu-* ezu_*.deb THIRD-PARTY.md > SHA256SUMS && cat SHA256SUMS
 
       - uses: actions/attest-build-provenance@v4
         with:
-          subject-path: 'dist/ezu-*'
+          subject-path: |
+            dist/ezu-*
+            dist/ezu_*.deb
 
       - name: Release notes from the changelog
         run: |
