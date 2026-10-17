@@ -112,6 +112,10 @@ jobs:
       - name: Checksums
         run: cd dist && sha256sum atlas-* > SHA256SUMS && cat SHA256SUMS
 
+      # the licenses of the software the binaries contain
+      - name: Third-party licenses
+        run: cp THIRD-PARTY.md dist/
+
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: 'dist/atlas-*'

@@ -883,6 +883,12 @@ p.arazzo, run with the context's profile, else the profile atlas mcp names."
       (= (. args 1) "--version")
       (print (.. "atlas " atlas.version " ("
                  ((. (require :atlas.curl) :version)) ")"))
+      (= (. args 1) "--licenses")
+      ;; the binary carries them; elsewhere they come with each package
+      (let [(ok text) (pcall require :atlas.third-party)]
+        (if (and ok (= (type text) :string))
+            (print (pick-values 1 (text:gsub "%s+$" "")))
+            (die "The licenses of the software in the atlas binaries are in THIRD-PARTY.md, with atlas's source and its releases.")))
       (let [p (parse-args args)]
         (when p.select
           (check-select p.select))

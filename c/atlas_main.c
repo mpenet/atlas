@@ -14,26 +14,47 @@ extern const size_t atlas_program_size;
 extern const unsigned char fennel_source[];
 extern const size_t fennel_source_size;
 extern const size_t fennel_source_length;
+extern const unsigned char third_party[];
+extern const size_t third_party_size;
+extern const size_t third_party_length;
 
 int luaopen_socket_core(lua_State *L);
 int luaopen_atlas_curl(lua_State *L);
 int luaopen_yaml(lua_State *L);
 
+/* Push the text of a file c/embed.c deflated; 0 when it can't be inflated. */
+static int push_inflated(lua_State *L, const unsigned char *data, size_t size,
+                         size_t length) {
+  uLongf n = length;
+  char *text = malloc(length > 0 ? length : 1);
+  if (text == NULL || uncompress((Bytef *)text, &n, data, size) != Z_OK) {
+    free(text);
+    return 0;
+  }
+  lua_pushlstring(L, text, n);
+  free(text);
+  return 1;
+}
+
 /* require "fennel": the Fennel compiler, kept deflated and inflated only
  * when something needs it (an auth plugin written in Fennel). */
 static int load_fennel(lua_State *L) {
-  uLongf length = fennel_source_length;
-  char *text = malloc(length);
-  int status;
-  if (text == NULL ||
-      uncompress((Bytef *)text, &length, fennel_source, fennel_source_size) != Z_OK) {
-    free(text);
+  size_t length;
+  const char *text;
+  if (!push_inflated(L, fennel_source, fennel_source_size, fennel_source_length))
     return luaL_error(L, "the Fennel compiler in atlas is damaged");
-  }
-  status = luaL_loadbufferx(L, text, length, "=fennel", "t");
-  free(text);
-  if (status != LUA_OK) return lua_error(L);
+  text = lua_tolstring(L, -1, &length);
+  if (luaL_loadbufferx(L, text, length, "=fennel", "t") != LUA_OK)
+    return lua_error(L);
   lua_call(L, 0, 1);
+  return 1;
+}
+
+/* require "atlas.third-party": the licenses of the software in the binary
+ * (THIRD-PARTY.md), for atlas --licenses. */
+static int load_third_party(lua_State *L) {
+  if (!push_inflated(L, third_party, third_party_size, third_party_length))
+    return luaL_error(L, "the licenses in atlas are damaged");
   return 1;
 }
 
@@ -43,6 +64,7 @@ static const luaL_Reg native_modules[] = {
   {"atlas.curl", luaopen_atlas_curl},
   {"yaml", luaopen_yaml},
   {"fennel", load_fennel},
+  {"atlas.third-party", load_third_party},
   {NULL, NULL}
 };
 

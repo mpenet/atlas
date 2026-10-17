@@ -15,6 +15,7 @@ atlas profile import-restish [file] [--dry-run]
 atlas auth <profile> [--logout]
 atlas completion <fish|bash|zsh>
 atlas --version
+atlas --licenses
 ```
 
 | Command | Description |
@@ -29,6 +30,7 @@ atlas --version
 | `auth` | Authenticates a profile now: for static credentials and external tools, prints the headers that would be sent (and a query API key, or the signing command); for OAuth, runs the flow again. `--logout` deletes the cached token. |
 | `completion` | Prints the completion script for a shell; see [Shell completion](install.md#shell-completion). |
 | `--version` | Prints atlas's version and the libcurl and TLS library builds it uses. |
+| `--licenses` | Prints the licenses of the software the binary contains (also in [THIRD-PARTY.md](../THIRD-PARTY.md)). |
 
 ## Operation names
 

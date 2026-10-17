@@ -880,6 +880,21 @@ does, which a streaming transport hands over one by one."
                     (assert.is_truthy (r.out:find (.. "atlas " version
                                                       " (libcurl/")
                                                   1 true)))))
+            (it "prints the licenses of the software in the binary"
+                (fn []
+                  (tset package.preload :atlas.third-party
+                        #"# Third-party software\n\n## Lua 5.4\n")
+                  (let [r (atlas-run ["--licenses"])]
+                    (tset package.preload :atlas.third-party nil)
+                    (tset package.loaded :atlas.third-party nil)
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "# Third-party software\n\n## Lua 5.4"
+                                      r.out))))
+            (it "says where the licenses are when it isn't the binary"
+                (fn []
+                  (let [r (atlas-run ["--licenses"])]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "THIRD-PARTY.md" 1 true)))))
             (it "lists profiles sorted"
                 (fn []
                   (let [r (atlas-run ["profile" "list"])]

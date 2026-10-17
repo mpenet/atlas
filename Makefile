@@ -259,9 +259,13 @@ $(NATIVE_BUILD)/fennel_source.c: $(FENNEL_LUA) $(NATIVE_BUILD)/embed
 	@test -n "$(FENNEL_LUA)" || { echo "fennel.lua not found: install fennel with luarocks, or set FENNEL_LUA"; exit 1; }
 	$(NATIVE_BUILD)/embed --deflated fennel_source $(FENNEL_LUA) $@
 
-binary: $(NATIVE_BUILD)/atlas_program.c $(NATIVE_BUILD)/fennel_source.c c/atlas_main.c native-libs
+# The licenses of what the binary contains, for atlas --licenses.
+$(NATIVE_BUILD)/third_party.c: THIRD-PARTY.md $(NATIVE_BUILD)/embed
+	$(NATIVE_BUILD)/embed --deflated third_party THIRD-PARTY.md $@
+
+binary: $(NATIVE_BUILD)/atlas_program.c $(NATIVE_BUILD)/fennel_source.c $(NATIVE_BUILD)/third_party.c c/atlas_main.c native-libs
 	@mkdir -p bin
-	$(CC) $(NATIVE_CFLAGS) -Wall -I$(LUA_INC) c/atlas_main.c $(NATIVE_BUILD)/atlas_program.c $(NATIVE_BUILD)/fennel_source.c \
+	$(CC) $(NATIVE_CFLAGS) -Wall -I$(LUA_INC) c/atlas_main.c $(NATIVE_BUILD)/atlas_program.c $(NATIVE_BUILD)/fennel_source.c $(NATIVE_BUILD)/third_party.c \
 	  $(NATIVE_BUILD)/libsocket_core.a $(NATIVE_BUILD)/libatlas_curl.a $(NATIVE_BUILD)/liblyaml_ext.a \
 	  $(CURL_PREFIX)/lib/libcurl.a $(TLS_LDFLAGS) $(ZLIB_LDFLAGS) $(LIBYAML_LDFLAGS) \
 	  $(LUA_LIB) -lm $(SYSTEM_LDFLAGS) $(STATIC_LDFLAGS) $(DEAD_STRIP) -o bin/atlas-bin
@@ -301,6 +305,8 @@ fmt-check:
 # every module is bundled.
 check-binary:
 	env -i PATH=/usr/bin:/bin LUA_PATH=";" LUA_CPATH=";" ./bin/atlas-bin op test/fixtures/petstore.yaml --list
+	@# and carries the licenses of what it contains
+	@./bin/atlas-bin --licenses | grep -q "## Mbed TLS" || (echo "atlas --licenses doesn't list the bundled software" && false)
 	@# and links nothing but system libraries
 ifeq ($(UNAME_S),Darwin)
 	@! otool -L bin/atlas-bin | tail -n +2 | grep -vE '^\s+(/usr/lib/|/System/Library/)' || (echo "non-system libraries linked above" && false)
@@ -318,7 +324,7 @@ endif
 
 # Every relative link of the documentation names an existing page and heading.
 check-docs:
-	lua tools/check-doc-links.lua README.md CHANGELOG.md doc/*.md doc/library/*.md
+	lua tools/check-doc-links.lua README.md CHANGELOG.md THIRD-PARTY.md doc/*.md doc/library/*.md
 
 # Regenerates the tables made from Unicode's data files:
 # fnl/atlas/cli/width.fnl (display width of text in a terminal) and
