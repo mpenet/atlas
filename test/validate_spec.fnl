@@ -236,3 +236,18 @@
                                             :allOf [{:properties {:id {:readOnly true}
                                                                   :name {}}}]}
                                            {:name "x"}))))))
+
+(describe "responses"
+          (fn []
+            (let [schema {:type "object"
+                          :required ["id" "password"]
+                          :properties {:id {:type "integer" :readOnly true}
+                                       :password {:type "string"
+                                                  :writeOnly true}}}]
+              (it "require read-only properties and not write-only ones"
+                  (fn []
+                    (assert.are.same ["response.id: required"]
+                                     (validate.check schema {} "response"
+                                                     :response))
+                    (assert.are.same ["value.password: required"]
+                                     (validate.check schema {})))))))

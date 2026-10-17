@@ -164,6 +164,62 @@ query, query API key), present but not given."
                            (values true body))]
         (if ok (validate.check op.body-schema value :body) []))))
 
+(fn declared-response [responses status]
+  "(key response) of what responses declares for status: the status itself,
+its range (4XX), or default."
+  (let [code (tostring status)
+        range (.. (code:sub 1 1) "XX")]
+    (accumulate [found nil _ key (ipairs [code range (range:lower) :default])
+                 &until found]
+      (when (. responses key)
+        [key (. responses key)]))))
+
+(fn media-type [content-type]
+  (when content-type
+    (: (: content-type :match "^[^;]*") :lower)))
+
+(fn declared-media-type [content content-type]
+  "The key of content matching content-type: itself, type/*, or */*."
+  (let [mt (media-type content-type)]
+    (when mt
+      (accumulate [found nil _ key (ipairs [mt
+                                            (.. (mt:match "^[^/]*") "/*")
+                                            "*/*"])
+                   &until found]
+        (accumulate [hit nil declared (pairs content) &until hit]
+          (when (= (media-type declared) key) declared))))))
+
+(fn check-response [op resp]
+  "How resp differs from what op's spec declares: an undeclared status or
+content type, or a body its schema doesn't allow (checked as a response:
+read-only properties may be required, write-only ones aren't)."
+  (let [name (or op.operation-id op.name "the operation")
+        responses (or (?. op :spec :responses) {})
+        found (declared-response responses resp.status)]
+    (if (not found)
+        [(string.format "status %s is not among the responses %s declares"
+                        (tostring resp.status) name)]
+        (let [[key declared] found
+              content (?. declared :content)
+              content-type (util.header (or resp.headers {}) "content-type")]
+          (if (or (not= (type content) :table) (= nil (next content))
+                  (= nil resp.body))
+              []
+              (let [mt (declared-media-type content content-type)]
+                (if (not mt)
+                    [(string.format "content type %s is not one %s declares for %s (%s)"
+                                    (tostring (media-type content-type)) name
+                                    key
+                                    (table.concat (doto (icollect [k (pairs content)]
+                                                          k)
+                                                    (table.sort))
+                                                  ", "))]
+                    ;; only decoded bodies (JSON, YAML) are checked
+                    (let [schema (?. content mt :schema)]
+                      (if (and schema (not= (type resp.body) :string))
+                          (validate.check schema resp.body :response :response)
+                          [])))))))))
+
 {: read-file
  : read-body
  : decode-structured
@@ -173,4 +229,5 @@ query, query API key), present but not given."
  : file-part
  : op-request
  : check-params
- : check-body}
+ : check-body
+ : check-response}

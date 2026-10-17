@@ -63,6 +63,19 @@ Before sending, ezu compares the request with the operation's description:
 
 All problems are reported together and nothing is sent. `--no-validate` sends anyway, for specs stricter or looser than the API they describe.
 
+## Checking responses
+
+`--check-response` checks the response against the spec: its status must be one the operation declares (itself, its range like `4XX`, or `default`), its content type one declared for that status, and its body must match the schema, as a response: read-only properties may be required, write-only ones aren't. The response is printed as usual; the differences follow on stderr, and ezu exits 1 (or the status's own code, 4 or 5):
+
+```console
+$ ezu op exo get-instance 9b1e… --check-response
+…
+! response.state: "migrating" is not one of starting, running, stopped
+! response.public-ip: expected string, got null
+```
+
+It tells API users where an API strays from its spec, and API authors where their spec or their API needs fixing.
+
 ## Retries
 
 Responses with status 408, 429, 500, 502, 503 or 504, and network errors, are retried up to `--retry` times (default 2), for GET, HEAD and OPTIONS requests only unless `--retry-unsafe` is given. ezu waits as long as the response's `Retry-After` header asks, at most `--retry-max-wait` seconds, and otherwise 1, 2, 4… seconds. An authentication failure is never retried.

@@ -51,24 +51,33 @@ adds null to a declared type."
 
 (var check-value nil)
 
-(fn read-only-names [schema]
-  "Names of the read-only properties of schema and of its allOf members."
+(fn marked-names [schema flag]
+  "Names of the properties of schema and of its allOf members marked flag
+(readOnly or writeOnly)."
   (let [names {}
         parts [schema]]
     (each [_ member (ipairs (or (?. schema :allOf) []))]
       (table.insert parts member))
     (each [_ part (ipairs parts)]
       (each [name s (pairs (or (?. part :properties) {}))]
-        (when (and (= (type s) :table) (= s.readOnly true))
+        (when (and (= (type s) :table) (= (. s flag) true))
           (tset names name true))))
     names))
 
+(fn read-only-names [schema]
+  "Names of the read-only properties of schema and of its allOf members."
+  (marked-names schema :readOnly))
+
+;; what check is checking, :request or :response: a required read-only
+;; property is only required in responses, a write-only one in requests
+(var direction :request)
+
 (fn check-object [schema v path errors]
-  ;; a required readOnly property is required in responses only, and
-  ;; requests are what is checked
-  (let [read-only (read-only-names schema)]
+  (let [other-way (marked-names schema
+                                (if (= direction :response) :writeOnly
+                                    :readOnly))]
     (each [_ name (ipairs (util.required-names schema))]
-      (when (and (= nil (. v name)) (not (. read-only name)))
+      (when (and (= nil (. v name)) (not (. other-way name)))
         (table.insert errors (.. path "." name ": required")))))
   (let [names (icollect [k (pairs v)] k)]
     (table.sort names #(< (tostring $1) (tostring $2)))
@@ -173,10 +182,17 @@ adds null to a declared type."
                                 (check-object schema v path errors)))
                      _ (check-scalar schema v path errors))))))))
 
-(fn check [schema value ?path]
-  "Errors (a list of \"path: problem\" strings) for value against schema."
-  (let [errors []]
-    (check-value (or schema {}) value (or ?path "value") errors)
+(fn check [schema value ?path ?direction]
+  "Errors (a list of \"path: problem\" strings) for value against schema, as
+a request (default) or, with ?direction :response, as a response."
+  (let [errors []
+        outer direction]
+    (set direction (or ?direction :request))
+    (let [(ok err) (pcall check-value (or schema {}) value (or ?path "value")
+                          errors)]
+      (set direction outer)
+      (when (not ok)
+        (error err 0)))
     errors))
 
 {: check : null : read-only-names}

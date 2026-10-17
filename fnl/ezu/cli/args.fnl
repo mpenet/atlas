@@ -58,6 +58,10 @@
          :scope :any
          :also [:mcp :auth]
          :help "Timeout in seconds"}
+        {:names ["--check-response"]
+         :key :check-response
+         :scope :op
+         :help "Report how the response differs from the spec, and fail"}
         {:names ["--until"]
          :key :until
          :value :string

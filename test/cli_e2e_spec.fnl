@@ -1709,6 +1709,81 @@ does, which a streaming transport hands over one by one."
                                                   true))
                     (assert.are.equal 0 (length r.requests)))))))
 
+(local checked-api
+       {:openapi "3.0.3"
+        :info {:title "t" :version "1"}
+        :servers [{:url "https://api.test"}]
+        :paths {"/pets/{id}" {:get {:operationId "getPet"
+                                    :parameters [{:name "id"
+                                                  :in "path"
+                                                  :required true
+                                                  :schema {:type "string"}}]
+                                    :responses {:200 {:description "ok"
+                                                      :content {"application/json" {:schema {:type "object"
+                                                                                             :required ["id"
+                                                                                                        "name"
+                                                                                                        "secret"]
+                                                                                             :properties {:id {:type "integer"}
+                                                                                                          :name {:type "string"}
+                                                                                                          :secret {:type "string"
+                                                                                                                   :writeOnly true}}}}}}
+                                                :4XX {:description "error"
+                                                      :content {"application/json" {:schema {:type "object"
+                                                                                             :required ["message"]}}}}}}}}})
+
+(fn check-run [args resp]
+  "ezu op on a spec with response schemas, answering resp, with --check-response."
+  (let [json (require :ezu.json)
+        file (.. (os.tmpname) ".json")]
+    (with-open [f (io.open file :w)]
+      (f:write (json.encode checked-api)))
+    (let [r (with-config {:profiles {:c {:schema file}}}
+              #(ezu-run (doto ["op" "c" "get-pet" "7" "--check-response"]
+                          (#(each [_ a (ipairs args)]
+                              (table.insert $ a))))
+                        {"GET https://api.test/pets/7" resp}))]
+      (os.remove file)
+      r)))
+
+(describe "--check-response"
+          (fn []
+            (it "says nothing of a response that matches the spec"
+                (fn []
+                  (let [r (check-run [] (respond 200 {:id 7 :name "Rex"}))]
+                    (assert.are.equal 0 r.code)
+                    (assert.are.equal "" r.err))))
+            (it "lists how a response differs from the spec, prints it, and fails"
+                (fn []
+                  (let [r (check-run ["--output=yaml"] (respond 200 {:id "7"}))]
+                    (assert.are.equal 1 r.code)
+                    (assert.are.equal "id: \"7\"" r.out)
+                    (assert.is_truthy (r.err:find "response.id: expected integer, got string"
+                                                  1 true)
+                                      r.err)
+                    (assert.is_truthy (r.err:find "response.name: required" 1
+                                                  true)))))
+            (it "checks errors against their range, and keeps their exit code"
+                (fn []
+                  (let [r (check-run [] (respond 404 {:error "nope"}))]
+                    (assert.are.equal 4 r.code)
+                    (assert.is_truthy (r.err:find "response.message: required"
+                                                  1 true)
+                                      r.err))))
+            (it "says when a status or a content type isn't in the spec"
+                (fn []
+                  (let [r (check-run [] (respond 204 nil {}))]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "status 204 is not among the responses getPet declares"
+                                                  1 true)
+                                      r.err))
+                  (let [r (check-run []
+                                     (respond 200 {:id 7 :name "Rex"}
+                                              {:content-type "text/plain"}))]
+                    (assert.are.equal 1 r.code)
+                    (assert.is_truthy (r.err:find "content type text/plain is not one getPet declares for 200 (application/json)"
+                                                  1 true)
+                                      r.err))))))
+
 (describe "auth plugins"
           (fn []
             (it "sign each request of a profile whose auth a plugin provides"

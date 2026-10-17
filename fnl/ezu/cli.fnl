@@ -17,7 +17,8 @@
         : build-body
         : op-request
         : check-params
-        : check-body} (require :ezu.cli.request))
+        : check-body
+        : check-response} (require :ezu.cli.request))
 
 (local {: parse-args} (require :ezu.cli.args))
 (local plugins (require :ezu.cli.plugins))
@@ -553,16 +554,23 @@ for."
     (clear)
     result))
 
-(fn exchange [send p display request]
+(fn exchange [send p display request ?check]
   "Send request with (send), again while p.until doesn't hold, and print the
-response. request: {:method :url :headers :query :body}, what conditions see."
+response. request: {:method :url :headers :query :body}, what conditions see.
+?check: a function listing how a response differs from the spec; ezu fails
+when it does."
   (check-until p request)
   (let [{: output : no-color : verbose} display
         t0 (socket.gettime)
-        resp (if p.until (poll send p display request) (attempt send))]
-    (print-resp resp output no-color verbose p.select (- (socket.gettime) t0)
-                ;; a condition that holds is success, whatever the status
-                (or p.ignore-status (not= nil p.until)))))
+        resp (if p.until (poll send p display request) (attempt send))
+        problems (if ?check (?check resp) [])
+        code (print-resp resp output no-color verbose p.select
+                         (- (socket.gettime) t0)
+                         ;; a condition that holds is success, whatever the status
+                         (or p.ignore-status (not= nil p.until)))]
+    (each [_ problem (ipairs problems)]
+      (io.stderr:write (.. "! " (util.printable problem) "\n")))
+    (if (and (next problems) (= code 0)) 1 code)))
 
 (fn send-op [op p opts profile config]
   (check-arguments op p)
@@ -573,7 +581,9 @@ response. request: {:method :url :headers :query :body}, what conditions see."
                :url (op.url-for request)
                :headers request.headers
                :query request.query
-               :body request.body})))
+               :body request.body}
+              (when p.check-response
+                #(check-response op $)))))
 
 (fn discovered-api-schema [profile-name profile p opts env verbose]
   "(location schema) of the spec discovery finds for the profile's base URL;
